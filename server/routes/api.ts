@@ -2,7 +2,14 @@ import { Router, Request, Response } from 'express';
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
 import { checkDuplicate, createLead, updateLead, reassignLead, convertLeadToStudent } from '../services/leadService.ts';
 import { getDashboardKPIs, getCampaignROIReport } from '../services/analyticsService.ts';
-import { verifyMetaWebhook, handleMetaLeadWebhook, sendWhatsAppMessage } from '../services/integrationService.ts';
+import { 
+  verifyMetaWebhook, 
+  handleMetaLeadWebhook, 
+  sendWhatsAppMessage, 
+  handleGoogleSheetsLeadWebhook, 
+  exportLeadToGoogleSheet, 
+  getGoogleAppsScriptTemplate 
+} from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
 export const apiRouter = Router();
@@ -935,6 +942,67 @@ apiRouter.post('/integrations/whatsapp/send', (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Google Sheets Integration Endpoints
+apiRouter.post('/integrations/google-sheets/webhook', (req: Request, res: Response) => {
+  try {
+    const result = handleGoogleSheetsLeadWebhook(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Google Sheets webhook processing failed' });
+  }
+});
+
+apiRouter.post('/integrations/google-sheets/test-inbound', (req: Request, res: Response) => {
+  try {
+    const sampleRow = req.body.simulatedRow || {
+      student_name: req.body.student_name || 'Rohan Maharjan',
+      phone: req.body.phone || '+977 9811' + Math.floor(100000 + Math.random() * 900000),
+      email: req.body.email || `rohan.sheets.${Date.now()}@gmail.com`,
+      city: req.body.city || 'Kathmandu',
+      preferred_course: req.body.preferred_course || 'B.Tech Computer Science & Engineering',
+      preferred_university: req.body.preferred_university || 'SRM Institute of Science and Technology',
+      academic_qualification: req.body.academic_qualification || '+2 Science',
+      campaign: req.body.campaign || 'Kathmandu Education Fair 2026 - Sheet Response',
+      row_number: req.body.row_number || 42
+    };
+
+    const result = handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/integrations/google-sheets/test-export', (req: Request, res: Response) => {
+  try {
+    let leadId = req.body.leadId;
+    if (!leadId) {
+      const firstLead = db.prepare('SELECT id FROM leads WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT 1').get() as any;
+      if (!firstLead) {
+        return res.status(404).json({ error: 'No leads available to export' });
+      }
+      leadId = firstLead.id;
+    }
+
+    const result = exportLeadToGoogleSheet(leadId, req.body.performedBy || 'Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/integrations/google-sheets/apps-script-code', (req: Request, res: Response) => {
+  const protocol = req.protocol;
+  const host = req.get('host') || 'localhost:5001';
+  const baseUrl = `${protocol}://${host}`;
+  const script = getGoogleAppsScriptTemplate(baseUrl);
+  res.json({
+    script,
+    webhookUrl: `${baseUrl}/api/integrations/google-sheets/webhook`,
+    instructions: 'Copy and paste into Google Sheet > Extensions > Apps Script, then add an onFormSubmit or onEdit trigger.'
+  });
 });
 
 // ==========================================

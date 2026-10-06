@@ -200,6 +200,18 @@ export function seedDatabase() {
       JSON.stringify({ fromEmail: 'admissions@educationsansar.com' }),
       null
     );
+    insertIntegration.run(
+      'int-sheets', 'Google Sheets Sync', 0, 'NOT CONNECTED',
+      JSON.stringify({
+        spreadsheetUrl: '',
+        spreadsheetId: '',
+        sheetName: 'Leads 2026',
+        syncDirection: 'TWO_WAY',
+        autoExportNewLeads: false,
+        autoImportOnWebhook: true
+      }),
+      null
+    );
 
     // 9. System Settings
     const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value, description) VALUES (?, ?, ?)');

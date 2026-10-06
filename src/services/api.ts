@@ -219,6 +219,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  testGoogleSheetsInbound: (row: any) =>
+    fetchJson<any>('/integrations/google-sheets/test-inbound', {
+      method: 'POST',
+      body: JSON.stringify(row),
+    }),
+  testGoogleSheetsExport: (leadId?: string, performedBy?: string) =>
+    fetchJson<any>('/integrations/google-sheets/test-export', {
+      method: 'POST',
+      body: JSON.stringify({ leadId, performedBy }),
+    }),
+  getGoogleSheetsScript: () =>
+    fetchJson<{ script: string; webhookUrl: string; instructions: string }>(
+      '/integrations/google-sheets/apps-script-code'
+    ),
 
   // Settings & Audit
   getSettings: () => fetchJson<Record<string, string>>('/settings'),
