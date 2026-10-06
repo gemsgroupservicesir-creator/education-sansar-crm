@@ -284,6 +284,8 @@ export interface Document {
   updated_at: string;
 }
 
+export type DocumentItem = Document;
+
 export interface Campaign {
   id: string;
   name: string;

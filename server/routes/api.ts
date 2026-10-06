@@ -8,7 +8,10 @@ import {
   sendWhatsAppMessage, 
   handleGoogleSheetsLeadWebhook, 
   exportLeadToGoogleSheet, 
-  getGoogleAppsScriptTemplate 
+  getGoogleAppsScriptTemplate,
+  fetchLiveGoogleSheetData,
+  syncLiveGoogleSheetLeads,
+  parseGoogleSheetUrl
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -1003,6 +1006,114 @@ apiRouter.get('/integrations/google-sheets/apps-script-code', (req: Request, res
     webhookUrl: `${baseUrl}/api/integrations/google-sheets/webhook`,
     instructions: 'Copy and paste into Google Sheet > Extensions > Apps Script, then add an onFormSubmit or onEdit trigger.'
   });
+});
+
+// Live Google Sheet Link Connection & Preview
+apiRouter.post('/integrations/google-sheets/connect-link', async (req: Request, res: Response) => {
+  try {
+    const { sheetUrl, sheetName, performedBy } = req.body;
+    if (!sheetUrl) {
+      return res.status(400).json({ error: 'Please provide a Google Sheet link or Spreadsheet ID.' });
+    }
+
+    const liveData = await fetchLiveGoogleSheetData(sheetUrl, sheetName);
+
+    // Save configuration in integrations table
+    const config = {
+      spreadsheetUrl: liveData.cleanUrl,
+      spreadsheetId: liveData.spreadsheetId,
+      gid: liveData.gid,
+      sheetName: sheetName || 'Leads',
+      syncDirection: 'TWO_WAY',
+      autoExport: false,
+      headers: liveData.headers,
+      lastSyncedRows: liveData.totalRows
+    };
+
+    db.prepare(`
+      UPDATE integrations
+      SET is_enabled = 1,
+          status = 'CONNECTED',
+          config = ?,
+          last_sync_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+    `).run(JSON.stringify(config));
+
+    logAudit({
+      userName: performedBy || 'Admin',
+      action: 'GOOGLE_SHEETS_CONNECTED',
+      entity: 'integration',
+      entityId: liveData.spreadsheetId,
+      newValue: { sheetUrl: liveData.cleanUrl, rows: liveData.totalRows }
+    });
+
+    res.json({
+      message: 'Google Sheet connected successfully!',
+      ...liveData
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to connect to Google Sheet.' });
+  }
+});
+
+// Sync / Pull Leads from Live Connected Google Sheet
+apiRouter.post('/integrations/google-sheets/sync-live', async (req: Request, res: Response) => {
+  try {
+    let sheetUrl = req.body.sheetUrl;
+    if (!sheetUrl) {
+      const row = db.prepare("SELECT config FROM integrations WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'").get() as any;
+      if (row?.config) {
+        try {
+          const cfg = JSON.parse(row.config);
+          sheetUrl = cfg.spreadsheetUrl || cfg.spreadsheetId;
+        } catch (e) {}
+      }
+    }
+
+    if (!sheetUrl) {
+      return res.status(400).json({ error: 'No Google Sheet link configured. Please enter and connect a sheet link first.' });
+    }
+
+    const syncReport = await syncLiveGoogleSheetLeads(sheetUrl, req.body.performedBy || 'Admin');
+    res.json(syncReport);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to sync leads from Google Sheet.' });
+  }
+});
+
+// Disconnect Live Google Sheet
+apiRouter.post('/integrations/google-sheets/disconnect', (req: Request, res: Response) => {
+  try {
+    const config = {
+      spreadsheetUrl: '',
+      spreadsheetId: '',
+      gid: '0',
+      sheetName: 'Leads 2026',
+      syncDirection: 'TWO_WAY',
+      autoExport: false
+    };
+
+    db.prepare(`
+      UPDATE integrations
+      SET is_enabled = 0,
+          status = 'NOT CONNECTED',
+          config = ?,
+          updated_at = datetime('now')
+      WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+    `).run(JSON.stringify(config));
+
+    logAudit({
+      userName: req.body.performedBy || 'Admin',
+      action: 'GOOGLE_SHEETS_DISCONNECTED',
+      entity: 'integration',
+      entityId: 'int-sheets'
+    });
+
+    res.json({ success: true, message: 'Google Sheet disconnected successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==========================================

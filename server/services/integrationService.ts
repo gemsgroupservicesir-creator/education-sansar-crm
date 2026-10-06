@@ -418,3 +418,232 @@ function sendRowToCRM(sheet, rowNumber) {
 `;
 }
 
+// ==========================================
+// Live Google Sheet URL Parser & Fetcher
+// ==========================================
+export function parseGoogleSheetUrl(urlOrId: string): { spreadsheetId: string; gid: string; cleanUrl: string } {
+  if (!urlOrId || typeof urlOrId !== 'string') {
+    throw new Error('Please provide a valid Google Sheet link or Spreadsheet ID.');
+  }
+
+  const trimmed = urlOrId.trim();
+
+  // Extract ID from full URL
+  const idMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const spreadsheetId = idMatch ? idMatch[1] : (trimmed.includes('/') ? '' : trimmed);
+
+  if (!spreadsheetId || spreadsheetId.length < 15) {
+    throw new Error('Invalid Google Sheet link. Could not extract a valid Google Spreadsheet ID.');
+  }
+
+  // Extract GID (tab ID)
+  const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
+  const gid = gidMatch ? gidMatch[1] : '0';
+
+  const cleanUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${gid}`;
+
+  return { spreadsheetId, gid, cleanUrl };
+}
+
+function parseCSVContent(csvText: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return { headers: [], rows: [] };
+
+  function parseLine(line: string): string[] {
+    const result: string[] = [];
+    let cur = '', inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (c === ',' && !inQuotes) {
+        result.push(cur.trim());
+        cur = '';
+      } else {
+        cur += c;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+
+  const rawHeaders = parseLine(lines[0]);
+  const headers = rawHeaders.map(h => h.replace(/^["']|["']$/g, '').trim());
+
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseLine(lines[i]);
+    // Skip empty lines
+    if (values.every(v => v.length === 0)) continue;
+
+    const rowObj: Record<string, string> = { row_number: String(i + 1) };
+    headers.forEach((h, idx) => {
+      rowObj[h] = values[idx] ? values[idx].replace(/^["']|["']$/g, '').trim() : '';
+    });
+    rows.push(rowObj);
+  }
+
+  return { headers, rows };
+}
+
+export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?: string) {
+  // Demo / Sample Google Sheet fallback for offline or quick testing
+  if (sheetUrlOrId.toLowerCase().includes('sample') || sheetUrlOrId.toLowerCase().includes('demo') || sheetUrlOrId === 'default') {
+    const demoCSV = `"Student Name","Phone","Email","City","Preferred Course","Preferred University","Academic Qualification","Source"
+"Pooja Pokhrel","+977 9841887766","pooja.pokhrel.ktm@gmail.com","Kathmandu","B.Tech Computer Science & Engineering","SRM Institute of Science and Technology","+2 Science (84%)","Kathmandu Education Fair"
+"Bikash Yadav","+977 9807112233","bikash.yadav.brg@gmail.com","Birgunj","B.Tech Artificial Intelligence","VIT Vellore","+2 Science (81%)","Birgunj Branch Inquiries"
+"Prabhat Jha","+977 9804556677","prabhat.jha.jnp@gmail.com","Janakpur","B.Sc Nursing","Sharda University","+2 Biology (79%)","Janakpur Office Walk-in"
+"Anushka Sharma","+91 9811334455","anushka.sharma.del@gmail.com","Delhi","MBA Business Analytics","Chandigarh University","B.Com Graduate (76%)","Google Sheets Lead Form"
+"Kiran Gurung","+977 9802445566","kiran.gurung.btl@gmail.com","Butwal","B.Tech CSE","SRM Institute of Science and Technology","+2 Science (83%)","Butwal School Seminar"`;
+    const { headers, rows } = parseCSVContent(demoCSV);
+    return {
+      success: true,
+      spreadsheetId: 'demo-google-sheet-sansar-2026',
+      gid: '0',
+      cleanUrl: 'https://docs.google.com/spreadsheets/d/demo-google-sheet-sansar-2026/edit#gid=0',
+      headers,
+      totalRows: rows.length,
+      previewRows: rows.slice(0, 8),
+      allRows: rows,
+      isDemoSheet: true
+    };
+  }
+
+  const { spreadsheetId, gid, cleanUrl } = parseGoogleSheetUrl(sheetUrlOrId);
+
+  // Attempt Google Visualization CSV endpoint (works for any sheet with link sharing)
+  const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}${sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''}`;
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+
+  let csvContent = '';
+  let usedUrl = gvizUrl;
+
+  try {
+    const res = await fetch(gvizUrl, {
+      headers: {
+        'User-Agent': 'EducationSansarCRM/1.0',
+        'Accept': 'text/csv,text/plain,application/json'
+      }
+    });
+
+    if (res.ok) {
+      csvContent = await res.text();
+    } else {
+      // Fallback to export endpoint
+      usedUrl = exportUrl;
+      const fallbackRes = await fetch(exportUrl, {
+        headers: { 'User-Agent': 'EducationSansarCRM/1.0' }
+      });
+      if (!fallbackRes.ok) {
+        throw new Error(`Google returned status ${fallbackRes.status}`);
+      }
+      csvContent = await fallbackRes.text();
+    }
+  } catch (err: any) {
+    throw new Error(`Failed to fetch Google Sheet: Unable to reach Google Sheets (${err.message}). Check your internet connection or verify the link is accessible. You can also use "Try Sample Sheet Link" to test offline.`);
+  }
+
+  // Check if Google returned an HTML login page (private sheet)
+  if (csvContent.includes('<!DOCTYPE html>') || csvContent.includes('<html') || csvContent.includes('accounts.google.com')) {
+    throw new Error(
+      'Google Sheet is currently PRIVATE. To connect: in your Google Sheet, click Share > General access > change "Restricted" to "Anyone with the link can view", then try again.'
+    );
+  }
+
+  const { headers, rows } = parseCSVContent(csvContent);
+
+  if (headers.length === 0) {
+    throw new Error('Google Sheet appears to be empty or has no header row.');
+  }
+
+  return {
+    success: true,
+    spreadsheetId,
+    gid,
+    cleanUrl,
+    headers,
+    totalRows: rows.length,
+    previewRows: rows.slice(0, 8),
+    allRows: rows
+  };
+}
+
+export async function syncLiveGoogleSheetLeads(sheetUrlOrId: string, performedBy: string = 'User') {
+  const liveData = await fetchLiveGoogleSheetData(sheetUrlOrId);
+  const rows = liveData.allRows;
+
+  let importedCount = 0;
+  let duplicateCount = 0;
+  let errorCount = 0;
+  const importedLeads: any[] = [];
+  const duplicateLeads: any[] = [];
+
+  for (const row of rows) {
+    try {
+      const res = handleGoogleSheetsLeadWebhook({
+        row,
+        row_number: row.row_number || importedCount + duplicateCount + 2
+      });
+
+      if (res.isDuplicate) {
+        duplicateCount++;
+        duplicateLeads.push(res.lead);
+      } else {
+        importedCount++;
+        importedLeads.push(res.lead);
+      }
+    } catch (e) {
+      errorCount++;
+    }
+  }
+
+  // Update integration status to CONNECTED in database
+  const config = {
+    spreadsheetUrl: liveData.cleanUrl,
+    spreadsheetId: liveData.spreadsheetId,
+    gid: liveData.gid,
+    sheetName: 'Live Google Sheet',
+    syncDirection: 'TWO_WAY',
+    autoExport: false,
+    headers: liveData.headers,
+    lastSyncedRows: rows.length
+  };
+
+  db.prepare(`
+    UPDATE integrations
+    SET is_enabled = 1,
+        status = 'CONNECTED',
+        config = ?,
+        last_sync_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+  `).run(JSON.stringify(config));
+
+  logAudit({
+    userName: performedBy,
+    action: 'GOOGLE_SHEETS_LIVE_SYNC',
+    entity: 'integration',
+    entityId: liveData.spreadsheetId,
+    newValue: { totalRows: rows.length, importedCount, duplicateCount, errorCount }
+  });
+
+  return {
+    success: true,
+    spreadsheetId: liveData.spreadsheetId,
+    cleanUrl: liveData.cleanUrl,
+    totalRows: rows.length,
+    importedCount,
+    duplicateCount,
+    errorCount,
+    importedLeads,
+    duplicateLeads,
+    syncedAt: new Date().toISOString()
+  };
+}
+
+

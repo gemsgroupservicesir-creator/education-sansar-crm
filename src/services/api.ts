@@ -233,6 +233,21 @@ export const api = {
     fetchJson<{ script: string; webhookUrl: string; instructions: string }>(
       '/integrations/google-sheets/apps-script-code'
     ),
+  connectGoogleSheetLink: (sheetUrl: string, sheetName?: string, performedBy?: string) =>
+    fetchJson<any>('/integrations/google-sheets/connect-link', {
+      method: 'POST',
+      body: JSON.stringify({ sheetUrl, sheetName, performedBy }),
+    }),
+  syncLiveGoogleSheet: (sheetUrl?: string, performedBy?: string) =>
+    fetchJson<any>('/integrations/google-sheets/sync-live', {
+      method: 'POST',
+      body: JSON.stringify({ sheetUrl, performedBy }),
+    }),
+  disconnectGoogleSheet: (performedBy?: string) =>
+    fetchJson<any>('/integrations/google-sheets/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
 
   // Settings & Audit
   getSettings: () => fetchJson<Record<string, string>>('/settings'),

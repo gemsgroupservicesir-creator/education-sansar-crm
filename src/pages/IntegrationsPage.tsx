@@ -3,14 +3,15 @@ import {
   Share2, MessageSquare, AlertTriangle, CheckCircle2, Copy, 
   Send, RefreshCw, Key, ShieldCheck, Terminal, ExternalLink, 
   Play, Settings as SettingsIcon, Check, Info, Bell,
-  FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare
+  FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare,
+  Link, Sparkles, Unlink, Eye, Table
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
 
 export const IntegrationsPage: React.FC = () => {
   const { addToast } = useNotifications();
-  const [activeTab, setActiveTab] = useState<'meta' | 'whatsapp' | 'sheets' | 'templates' | 'logs'>('meta');
+  const [activeTab, setActiveTab] = useState<'meta' | 'whatsapp' | 'sheets' | 'templates' | 'logs'>('sheets');
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -39,16 +40,15 @@ export const IntegrationsPage: React.FC = () => {
   const [sendingWa, setSendingWa] = useState(false);
   const [waResult, setWaResult] = useState<any>(null);
 
-  // Google Sheets State
-  const [sheetConfig, setSheetConfig] = useState({
-    spreadsheetUrl: '',
-    spreadsheetId: '',
-    sheetName: 'Leads 2026',
-    syncDirection: 'TWO_WAY',
-    autoExport: false,
-  });
-  const [savingSheetConfig, setSavingSheetConfig] = useState(false);
+  // Live Google Sheet Link State
+  const [liveSheetUrl, setLiveSheetUrl] = useState('');
+  const [liveSheetName, setLiveSheetName] = useState('Leads');
+  const [isConnectingLive, setIsConnectingLive] = useState(false);
+  const [isSyncingLive, setIsSyncingLive] = useState(false);
+  const [livePreviewData, setLivePreviewData] = useState<any>(null);
+  const [liveSyncReport, setLiveSyncReport] = useState<any>(null);
 
+  // Google Sheets Simulator State
   const [sheetSimData, setSheetSimData] = useState({
     student_name: 'Rohan Maharjan',
     phone: '+977 9811234567',
@@ -67,7 +67,6 @@ export const IntegrationsPage: React.FC = () => {
   const [sheetExportResult, setSheetExportResult] = useState<any>(null);
 
   const [appsScriptCode, setAppsScriptCode] = useState<string>('');
-  const [fetchingScript, setFetchingScript] = useState(false);
 
   const loadData = async () => {
     try {
@@ -81,12 +80,17 @@ export const IntegrationsPage: React.FC = () => {
       setLogs(logsRes);
       setTemplates(templatesRes);
 
-      // Load sheet config if present
+      // Pre-fill live sheet state if configured
       const sheetsInt = integrationsRes.find((i) => i.name === 'Google Sheets Sync' || i.id === 'int-sheets');
       if (sheetsInt && sheetsInt.config) {
         try {
           const parsed = typeof sheetsInt.config === 'string' ? JSON.parse(sheetsInt.config) : sheetsInt.config;
-          setSheetConfig((prev) => ({ ...prev, ...parsed }));
+          if (parsed.spreadsheetUrl) {
+            setLiveSheetUrl(parsed.spreadsheetUrl);
+          }
+          if (parsed.sheetName) {
+            setLiveSheetName(parsed.sheetName);
+          }
         } catch (e) {}
       }
     } catch (err) {
@@ -154,23 +158,63 @@ export const IntegrationsPage: React.FC = () => {
     }
   };
 
-  // Google Sheets Handlers
-  const handleSaveSheetConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Google Sheets Live Link Handlers
+  const handleConnectLiveSheet = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!liveSheetUrl.trim()) {
+      addToast('Please enter a Google Sheet link or spreadsheet ID', 'warning');
+      return;
+    }
     try {
-      setSavingSheetConfig(true);
-      await api.updateIntegration('int-sheets', {
-        config: sheetConfig,
-        status: sheetConfig.spreadsheetUrl ? 'CONNECTED' : 'NOT_CONNECTED',
-        is_enabled: sheetConfig.spreadsheetUrl ? 1 : 0,
-      });
-      addToast('Google Sheets configuration saved successfully', 'success');
+      setIsConnectingLive(true);
+      setLivePreviewData(null);
+      setLiveSyncReport(null);
+      const res = await api.connectGoogleSheetLink(liveSheetUrl.trim(), liveSheetName);
+      setLivePreviewData(res);
+      addToast(`Connected! Found ${res.totalRows} student rows in Google Sheet`, 'success');
       loadData();
     } catch (err: any) {
-      addToast(err.message || 'Failed to save configuration', 'error');
+      addToast(err.message || 'Failed to connect Google Sheet', 'error');
     } finally {
-      setSavingSheetConfig(false);
+      setIsConnectingLive(false);
     }
+  };
+
+  const handleSyncLiveSheet = async () => {
+    try {
+      setIsSyncingLive(true);
+      setLiveSyncReport(null);
+      const res = await api.syncLiveGoogleSheet(liveSheetUrl.trim() || undefined);
+      setLiveSyncReport(res);
+      addToast(
+        `Sync Complete: ${res.importedCount} new leads captured, ${res.duplicateCount} duplicates avoided`,
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to sync leads from Google Sheet', 'error');
+    } finally {
+      setIsSyncingLive(false);
+    }
+  };
+
+  const handleDisconnectLiveSheet = async () => {
+    try {
+      await api.disconnectGoogleSheet();
+      setLivePreviewData(null);
+      setLiveSyncReport(null);
+      setLiveSheetUrl('');
+      addToast('Google Sheet disconnected', 'info');
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to disconnect Google Sheet', 'error');
+    }
+  };
+
+  const handleUseSampleSheet = () => {
+    setLiveSheetUrl('https://docs.google.com/spreadsheets/d/demo-google-sheet-sansar-2026/edit?usp=sharing');
+    setLiveSheetName('Leads 2026');
+    addToast('Sample Google Sheet link loaded. Click "Connect & Preview Live Sheet"', 'info');
   };
 
   const handleSimulateSheetInbound = async (e: React.FormEvent) => {
@@ -211,14 +255,11 @@ export const IntegrationsPage: React.FC = () => {
 
   const handleFetchAppsScript = async () => {
     try {
-      setFetchingScript(true);
       const res = await api.getGoogleSheetsScript();
       setAppsScriptCode(res.script);
       addToast('Apps Script code generated', 'info');
     } catch (err: any) {
       addToast(err.message || 'Failed to fetch Apps Script template', 'error');
-    } finally {
-      setFetchingScript(false);
     }
   };
 
@@ -240,6 +281,16 @@ export const IntegrationsPage: React.FC = () => {
     config: '{}',
   };
 
+  const sheetConfigObj = (() => {
+    try {
+      return typeof sheetIntegration.config === 'string' ? JSON.parse(sheetIntegration.config) : (sheetIntegration.config || {});
+    } catch (e) {
+      return {};
+    }
+  })();
+
+  const isSheetConnected = sheetIntegration.status === 'CONNECTED';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -252,7 +303,7 @@ export const IntegrationsPage: React.FC = () => {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">External Integrations & Webhooks</h1>
               <p className="text-sm text-gray-500">
-                Connect Meta Lead Ads, WhatsApp Cloud API, and Google Sheets Sync
+                Connect Meta Lead Ads, WhatsApp Cloud API, and Live Google Sheets Sync
               </p>
             </div>
           </div>
@@ -271,15 +322,32 @@ export const IntegrationsPage: React.FC = () => {
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
         <div className="text-sm text-amber-800">
-          <p className="font-semibold mb-0.5">Integrations Safety & Production State</p>
+          <p className="font-semibold mb-0.5">Integrations Safety & Live Sync Architecture</p>
           <p className="text-amber-700 leading-relaxed">
-            By default, all outbound and inbound external channels are set to <span className="font-bold underline">NOT CONNECTED</span> until official credentials or spreadsheet connections are provided. You can freely use the <strong>In-System Simulator panels</strong> below to test live lead ingestion, duplicate checks, Google Sheet row pushes, and template rendering without needing live external accounts.
+            Connect live Google Sheets by pasting your shared sheet link below. The CRM reads shared spreadsheets via Google's live endpoints and pulls student inquiries directly into your admission pipeline with 4-point duplicate detection and automatic counselor assignment.
           </p>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200 bg-white rounded-t-xl px-4 pt-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('sheets')}
+          className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'sheets'
+              ? 'border-emerald-600 text-emerald-600 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+          Google Sheets (Live Link)
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            isSheetConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+          }`}>
+            {isSheetConnected ? 'CONNECTED' : 'NOT CONNECTED'}
+          </span>
+        </button>
+
         <button
           onClick={() => setActiveTab('meta')}
           className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
@@ -311,23 +379,6 @@ export const IntegrationsPage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('sheets')}
-          className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
-            activeTab === 'sheets'
-              ? 'border-emerald-600 text-emerald-600 font-semibold'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-          Google Sheets Sync
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-            sheetIntegration.status === 'CONNECTED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-          }`}>
-            {sheetIntegration.status}
-          </span>
-        </button>
-
-        <button
           onClick={() => setActiveTab('templates')}
           className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
             activeTab === 'templates'
@@ -352,7 +403,482 @@ export const IntegrationsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Tab 1: Meta Lead Ads */}
+      {/* Tab: Google Sheets Live Sync */}
+      {activeTab === 'sheets' && (
+        <div className="space-y-6">
+          {/* Active Connection Banner (if connected) */}
+          {isSheetConnected && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 mt-0.5">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <h3 className="text-base font-bold text-emerald-900">Live Google Sheet Connected</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200 text-emerald-800">
+                      ACTIVE
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-700 mt-1 font-mono break-all">
+                    {sheetConfigObj.spreadsheetUrl || 'Connected Google Sheet'}
+                  </p>
+                  <div className="flex items-center gap-4 text-xs text-emerald-800 mt-2">
+                    <span>Sheet ID: <strong>{sheetConfigObj.spreadsheetId || '—'}</strong></span>
+                    <span>Last Synced: <strong>{sheetIntegration.last_sync_at ? new Date(sheetIntegration.last_sync_at).toLocaleString() : 'Just now'}</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {sheetConfigObj.spreadsheetUrl && (
+                  <a
+                    href={sheetConfigObj.spreadsheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold border border-emerald-300 flex items-center gap-1.5 transition shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Open in Google Drive
+                  </a>
+                )}
+                <button
+                  onClick={handleSyncLiveSheet}
+                  disabled={isSyncingLive}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingLive ? 'animate-spin' : ''}`} />
+                  {isSyncingLive ? 'Syncing...' : 'Re-Sync Leads Now'}
+                </button>
+                <button
+                  onClick={handleDisconnectLiveSheet}
+                  className="px-3 py-2 bg-white hover:bg-rose-50 text-rose-700 rounded-lg text-xs font-semibold border border-rose-200 flex items-center gap-1.5 transition shadow-xs"
+                  title="Disconnect Sheet"
+                >
+                  <Unlink className="w-3.5 h-3.5" /> Disconnect
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Section 1: Connect Live Google Sheet by Link */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <Link className="w-5 h-5 text-emerald-600" />
+                  Connect Live Google Sheet by Sharing Link
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Paste any Google Sheet share link to instantly preview and sync leads directly into Education Sansar CRM
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleUseSampleSheet}
+                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition self-start sm:self-auto"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                Try Sample Sheet Link
+              </button>
+            </div>
+
+            <form onSubmit={handleConnectLiveSheet} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                  Google Sheet Share Link (URL or Spreadsheet ID)
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing"
+                    value={liveSheetUrl}
+                    onChange={(e) => setLiveSheetUrl(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg pl-3 pr-28 py-2.5 text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  <div className="absolute right-2 top-2">
+                    <button
+                      type="submit"
+                      disabled={isConnectingLive}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      {isConnectingLive ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <Link className="w-3.5 h-3.5" />
+                          Connect &amp; Preview
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Sheet Tab Name (Optional, e.g. "Leads 2026" or "Sheet1")
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Leads"
+                    value={liveSheetName}
+                    onChange={(e) => setLiveSheetName(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+                  <p className="font-semibold text-slate-800 flex items-center gap-1 mb-1">
+                    <Info className="w-3.5 h-3.5 text-blue-600" /> Sharing Permissions Requirement:
+                  </p>
+                  <p className="text-[11px] leading-relaxed">
+                    In your Google Sheet, click <strong>Share</strong> &gt; General access &gt; change from <em>Restricted</em> to <strong>"Anyone with the link can view"</strong> so the CRM can read the live rows.
+                  </p>
+                </div>
+              </div>
+            </form>
+
+            {/* Live Sheet Preview Table (when preview data is loaded) */}
+            {livePreviewData && (
+              <div className="mt-6 border border-emerald-200 bg-emerald-50/30 rounded-xl p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <h4 className="text-sm font-bold text-gray-900">
+                        Live Sheet Verified ({livePreviewData.totalRows} Student Rows Found)
+                      </h4>
+                      {livePreviewData.isDemoSheet && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                          Demo Template
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Spreadsheet ID: <code className="font-mono text-emerald-800">{livePreviewData.spreadsheetId}</code>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleSyncLiveSheet}
+                    disabled={isSyncingLive}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50 shrink-0"
+                  >
+                    {isSyncingLive ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Pulling &amp; Assigning Leads...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Sync All Leads to CRM Now
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Detected Column Headers */}
+                <div>
+                  <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
+                    Detected Sheet Column Headers:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {livePreviewData.headers.map((h: string, idx: number) => (
+                      <span key={idx} className="px-2 py-0.5 bg-white border border-emerald-200 text-emerald-800 rounded text-xs font-medium">
+                        ✓ {h}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Preview Table */}
+                <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200 font-semibold text-gray-600 uppercase">
+                        <th className="py-2 px-3">#</th>
+                        {livePreviewData.headers.slice(0, 6).map((h: string, idx: number) => (
+                          <th key={idx} className="py-2 px-3">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {livePreviewData.previewRows.map((row: any, rIdx: number) => (
+                        <tr key={rIdx} className="hover:bg-gray-50">
+                          <td className="py-2 px-3 font-mono text-gray-400">{rIdx + 1}</td>
+                          {livePreviewData.headers.slice(0, 6).map((h: string, cIdx: number) => (
+                            <td key={cIdx} className="py-2 px-3 text-gray-700 font-medium">
+                              {row[h] || '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Live Sync Report Card */}
+            {liveSyncReport && (
+              <div className="mt-4 p-5 bg-gray-900 rounded-xl text-gray-100 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Live Google Sheet Sync Complete
+                  </h4>
+                  <span className="text-xs text-gray-400 font-mono">
+                    {new Date(liveSyncReport.syncedAt).toLocaleTimeString()}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  <div className="p-3 bg-gray-800 rounded-lg">
+                    <span className="text-[11px] text-gray-400 block">Total Rows In Sheet</span>
+                    <span className="text-xl font-bold text-white">{liveSyncReport.totalRows}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800 rounded-lg">
+                    <span className="text-[11px] text-emerald-400 block">New Leads Captured</span>
+                    <span className="text-xl font-bold text-emerald-400">+{liveSyncReport.importedCount}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800 rounded-lg">
+                    <span className="text-[11px] text-amber-400 block">Duplicates Prevented</span>
+                    <span className="text-xl font-bold text-amber-400">{liveSyncReport.duplicateCount}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800 rounded-lg">
+                    <span className="text-[11px] text-gray-400 block">Errors</span>
+                    <span className="text-xl font-bold text-gray-300">{liveSyncReport.errorCount || 0}</span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-gray-400">
+                  All newly captured leads have been automatically assigned to counselors based on Round Robin / City routing rules, with scheduled 24-hr follow-ups created.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 2: Two-Way Webhook & Simulators Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Apps Script Real-time Webhook Setup */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-blue-600" />
+                  Real-Time Apps Script Webhook (Instant Sync on Edit)
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Want leads to flow into CRM immediately whenever someone edits the sheet or submits a Google Form?
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
+                    Your Webhook Endpoint
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/api/integrations/google-sheets/webhook`}
+                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-800 select-all"
+                    />
+                    <button
+                      onClick={() => handleCopy(`${window.location.origin}/api/integrations/google-sheets/webhook`, 'sheet_webhook')}
+                      className="p-2 border border-gray-300 hover:bg-gray-100 rounded-lg text-gray-600 transition"
+                      title="Copy Webhook URL"
+                    >
+                      {copiedKey === 'sheet_webhook' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleFetchAppsScript}
+                    className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                  >
+                    <FileCode className="w-4 h-4 text-blue-600" />
+                    Generate Ready-to-Paste Apps Script Code
+                  </button>
+                </div>
+
+                {appsScriptCode && (
+                  <div className="p-3 bg-gray-900 rounded-xl text-gray-100 font-mono text-xs space-y-2 mt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-emerald-400 font-bold text-[11px]">Code.gs</span>
+                      <button
+                        onClick={() => handleCopy(appsScriptCode, 'apps_script')}
+                        className="px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded text-[11px] text-gray-300 flex items-center gap-1 transition"
+                      >
+                        {copiedKey === 'apps_script' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        Copy Script
+                      </button>
+                    </div>
+                    <pre className="max-h-48 overflow-y-auto text-[11px] text-gray-300 whitespace-pre-wrap p-2 bg-black/40 rounded border border-gray-800">
+                      {appsScriptCode}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Inbound Simulator */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                    <Play className="w-5 h-5 text-emerald-600" />
+                    Inbound Row Simulator (Sheet ➔ CRM)
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Test submitting a single row payload as if sent by Google Sheets
+                  </p>
+                </div>
+                <span className="text-xs font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200">
+                  Simulator
+                </span>
+              </div>
+
+              <form onSubmit={handleSimulateSheetInbound} className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Student Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={sheetSimData.student_name}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, student_name: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Phone Number</label>
+                    <input
+                      type="text"
+                      required
+                      value={sheetSimData.phone}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, phone: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">City</label>
+                    <select
+                      value={sheetSimData.city}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, city: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      <option value="Kathmandu">Kathmandu (Nepal)</option>
+                      <option value="Birgunj">Birgunj (Nepal)</option>
+                      <option value="Janakpur">Janakpur (Nepal)</option>
+                      <option value="Delhi">Delhi (India)</option>
+                      <option value="Noida">Noida (India)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Course</label>
+                    <input
+                      type="text"
+                      value={sheetSimData.preferred_course}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, preferred_course: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={simulatingSheet}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                >
+                  {simulatingSheet ? 'Testing Row...' : 'Simulate Single Row Webhook Inbound'}
+                </button>
+              </form>
+
+              {sheetInboundResult && (
+                <div className="p-3 rounded-lg bg-gray-900 text-gray-100 font-mono text-[11px] overflow-x-auto">
+                  <div className="text-emerald-400 font-bold mb-1">
+                    ✓ Result: {sheetInboundResult.message || 'Processed'}
+                  </div>
+                  <pre>{JSON.stringify(sheetInboundResult, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Outbound Sync Simulator (CRM ➔ Sheet) */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <ArrowUpDown className="w-4 h-4 text-emerald-600" />
+                  Outbound Lead Row Export Simulator (CRM ➔ Google Sheet)
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Test formatting and pushing the latest CRM lead to an external Google Sheet row
+                </p>
+              </div>
+
+              <button
+                onClick={handleSimulateSheetExport}
+                disabled={exportingSheet}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition disabled:opacity-50 shrink-0"
+              >
+                {exportingSheet ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Pushing Row...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    Simulate Export Latest Lead to Sheet
+                  </>
+                )}
+              </button>
+            </div>
+
+            {sheetExportResult && (
+              <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs space-y-3 overflow-x-auto">
+                <div className="flex items-center justify-between text-emerald-400 font-bold">
+                  <span>✓ Outbound Export Confirmed: Lead {sheetExportResult.leadId}</span>
+                  <span className="text-[11px] text-gray-400">{sheetExportResult.syncedAt}</span>
+                </div>
+                <div>
+                  <div className="text-[11px] text-gray-400 mb-1">Columns Appended to Google Sheet:</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sheetExportResult.columns.map((col: string, idx: number) => (
+                      <span key={idx} className="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px]">
+                        {col}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-gray-400 mb-1">Row Values:</div>
+                  <pre className="text-emerald-300 whitespace-pre-wrap">{JSON.stringify(sheetExportResult.row, null, 2)}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Meta Lead Ads */}
       {activeTab === 'meta' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Configuration Panel */}
@@ -563,7 +1089,7 @@ export const IntegrationsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: WhatsApp Cloud API */}
+      {/* Tab: WhatsApp Cloud API */}
       {activeTab === 'whatsapp' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* WhatsApp API Configuration */}
@@ -708,333 +1234,7 @@ export const IntegrationsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 3: Google Sheets Sync */}
-      {activeTab === 'sheets' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Sheet Configuration & Setup */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-              <div>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                    Google Sheets & Forms Webhook Setup
-                  </h3>
-                  <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
-                    sheetIntegration.status === 'CONNECTED' 
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
-                      : 'bg-amber-100 text-amber-800 border-amber-200'
-                  }`}>
-                    {sheetIntegration.status}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Connect branch Google Sheets, exhibition registration desks, or Google Forms to auto-capture leads in real time.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                    Inbound Webhook URL (For Google Apps Script)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={`${window.location.origin}/api/integrations/google-sheets/webhook`}
-                      className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-800 select-all"
-                    />
-                    <button
-                      onClick={() => handleCopy(`${window.location.origin}/api/integrations/google-sheets/webhook`, 'sheet_webhook')}
-                      className="p-2 border border-gray-300 hover:bg-gray-100 rounded-lg text-gray-600 transition"
-                      title="Copy Webhook URL"
-                    >
-                      {copiedKey === 'sheet_webhook' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <form onSubmit={handleSaveSheetConfig} className="space-y-4 pt-2 border-t border-gray-100">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Google Spreadsheet URL or Sheet ID
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdB.../edit"
-                      value={sheetConfig.spreadsheetUrl}
-                      onChange={(e) => setSheetConfig({ ...sheetConfig, spreadsheetUrl: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Sheet Tab Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Leads 2026"
-                        value={sheetConfig.sheetName}
-                        onChange={(e) => setSheetConfig({ ...sheetConfig, sheetName: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Sync Direction
-                      </label>
-                      <select
-                        value={sheetConfig.syncDirection}
-                        onChange={(e) => setSheetConfig({ ...sheetConfig, syncDirection: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      >
-                        <option value="TWO_WAY">Two-Way Real-time Sync</option>
-                        <option value="INBOUND">Inbound Only (Sheet ➔ CRM)</option>
-                        <option value="OUTBOUND">Outbound Only (CRM ➔ Sheet)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2">
-                    <button
-                      type="submit"
-                      disabled={savingSheetConfig}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
-                    >
-                      {savingSheetConfig ? 'Saving...' : 'Save Sheet Settings'}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleFetchAppsScript}
-                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
-                    >
-                      <FileCode className="w-3.5 h-3.5 text-blue-600" />
-                      View Apps Script
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Apps Script Box */}
-              {appsScriptCode && (
-                <div className="p-4 bg-gray-900 rounded-xl text-gray-100 font-mono text-xs space-y-2 mt-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                      <Code className="w-3.5 h-3.5" /> Ready-to-use Google Apps Script (Code.gs)
-                    </span>
-                    <button
-                      onClick={() => handleCopy(appsScriptCode, 'apps_script')}
-                      className="px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded text-[11px] text-gray-300 flex items-center gap-1 transition"
-                    >
-                      {copiedKey === 'apps_script' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      Copy Script
-                    </button>
-                  </div>
-                  <pre className="max-h-56 overflow-y-auto text-[11px] text-gray-300 whitespace-pre-wrap p-2 bg-black/40 rounded border border-gray-800">
-                    {appsScriptCode}
-                  </pre>
-                  <p className="text-[11px] text-gray-400 italic">
-                    Paste this in Extensions &gt; Apps Script in your Google Sheet and set an onFormSubmit or onEdit trigger.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Inbound Row Simulator (Sheet -> CRM) */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <Play className="w-5 h-5 text-emerald-600" />
-                    Inbound Sheet Row Simulator (Sheet ➔ CRM)
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Simulate a student entry submitted in Google Sheets or Google Forms
-                  </p>
-                </div>
-                <span className="text-xs font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200">
-                  Interactive Test
-                </span>
-              </div>
-
-              <form onSubmit={handleSimulateSheetInbound} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Student Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={sheetSimData.student_name}
-                    onChange={(e) => setSheetSimData({ ...sheetSimData, student_name: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Phone Number</label>
-                    <input
-                      type="text"
-                      required
-                      value={sheetSimData.phone}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, phone: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                    <input
-                      type="email"
-                      required
-                      value={sheetSimData.email}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, email: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">City</label>
-                    <select
-                      value={sheetSimData.city}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, city: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    >
-                      <option value="Kathmandu">Kathmandu (Nepal)</option>
-                      <option value="Birgunj">Birgunj (Nepal)</option>
-                      <option value="Janakpur">Janakpur (Nepal)</option>
-                      <option value="Biratnagar">Biratnagar (Nepal)</option>
-                      <option value="Butwal">Butwal (Nepal)</option>
-                      <option value="Delhi">Delhi (India)</option>
-                      <option value="Noida">Noida (India)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Preferred Course</label>
-                    <input
-                      type="text"
-                      value={sheetSimData.preferred_course}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, preferred_course: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Sheet Source / Campaign</label>
-                    <input
-                      type="text"
-                      value={sheetSimData.campaign}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, campaign: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Sheet Row #</label>
-                    <input
-                      type="number"
-                      value={sheetSimData.row_number}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, row_number: Number(e.target.value) })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={simulatingSheet}
-                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50"
-                >
-                  {simulatingSheet ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Capturing Sheet Row...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-4 h-4" />
-                      Simulate Inbound Row from Google Sheet
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {sheetInboundResult && (
-                <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-x-auto">
-                  <div className="text-emerald-400 font-bold mb-2">
-                    ✓ Google Sheets Webhook Response ({sheetInboundResult.success ? 'HTTP 200 OK' : 'FAILED'}):
-                  </div>
-                  <pre>{JSON.stringify(sheetInboundResult, null, 2)}</pre>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Outbound Sync Simulator (CRM ➔ Sheet) */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                  <ArrowUpDown className="w-4 h-4 text-emerald-600" />
-                  Outbound Lead Row Export Simulator (CRM ➔ Google Sheet)
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Test formatting and pushing the latest CRM lead to an external Google Sheet row
-                </p>
-              </div>
-
-              <button
-                onClick={handleSimulateSheetExport}
-                disabled={exportingSheet}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition disabled:opacity-50 shrink-0"
-              >
-                {exportingSheet ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Pushing Row...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    Simulate Export Latest Lead to Sheet
-                  </>
-                )}
-              </button>
-            </div>
-
-            {sheetExportResult && (
-              <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs space-y-3 overflow-x-auto">
-                <div className="flex items-center justify-between text-emerald-400 font-bold">
-                  <span>✓ Outbound Export Confirmed: Lead {sheetExportResult.leadId}</span>
-                  <span className="text-[11px] text-gray-400">{sheetExportResult.syncedAt}</span>
-                </div>
-                <div>
-                  <div className="text-[11px] text-gray-400 mb-1">Columns Appended to Google Sheet:</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {sheetExportResult.columns.map((col: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 bg-gray-800 text-gray-300 rounded text-[10px]">
-                        {col}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-gray-400 mb-1">Row Values:</div>
-                  <pre className="text-emerald-300 whitespace-pre-wrap">{JSON.stringify(sheetExportResult.row, null, 2)}</pre>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 4: Message Templates */}
+      {/* Tab: Message Templates */}
       {activeTab === 'templates' && (
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between">
@@ -1073,7 +1273,7 @@ export const IntegrationsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 5: Integration Activity Logs */}
+      {/* Tab: Integration Activity Logs */}
       {activeTab === 'logs' && (
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between">
