@@ -4,7 +4,8 @@ import {
   Send, RefreshCw, Key, ShieldCheck, Terminal, ExternalLink, 
   Play, Settings as SettingsIcon, Check, Info, Bell,
   FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare,
-  Link, Sparkles, Unlink, Eye, Table
+  Link, Sparkles, Unlink, Eye, Table, Plus, Trash2, Edit3, Pause,
+  Layers, MapPin, Tag, X, CheckCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -40,9 +41,28 @@ export const IntegrationsPage: React.FC = () => {
   const [sendingWa, setSendingWa] = useState(false);
   const [waResult, setWaResult] = useState<any>(null);
 
-  // Live Google Sheet Link State
-  const [liveSheetUrl, setLiveSheetUrl] = useState('');
-  const [liveSheetName, setLiveSheetName] = useState('Leads');
+  // Multi-Google Sheets State
+  const [connectedSheets, setConnectedSheets] = useState<any[]>([]);
+  const [sheetSummary, setSheetSummary] = useState<any>({
+    totalSheets: 0,
+    activeSheets: 0,
+    totalLeadsImported: 0,
+    lastSync: null,
+  });
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncingSheetId, setSyncingSheetId] = useState<string | null>(null);
+  const [previewingSheetId, setPreviewingSheetId] = useState<string | null>(null);
+  const [multiSyncReport, setMultiSyncReport] = useState<any>(null);
+  const [activePreviewSheet, setActivePreviewSheet] = useState<{ sheet: any; data: any } | null>(null);
+  const [showAddSheetModal, setShowAddSheetModal] = useState(false);
+
+  // Add / Connect Sheet Form State
+  const [newSheetName, setNewSheetName] = useState('');
+  const [newSheetUrl, setNewSheetUrl] = useState('');
+  const [newSheetTab, setNewSheetTab] = useState('Leads 2026');
+  const [newSheetCity, setNewSheetCity] = useState('Kathmandu');
+  const [newSheetCampaign, setNewSheetCampaign] = useState('');
+  const [newSheetSource, setNewSheetSource] = useState('Google Sheets');
   const [isConnectingLive, setIsConnectingLive] = useState(false);
   const [isSyncingLive, setIsSyncingLive] = useState(false);
   const [livePreviewData, setLivePreviewData] = useState<any>(null);
@@ -68,17 +88,49 @@ export const IntegrationsPage: React.FC = () => {
 
   const [appsScriptCode, setAppsScriptCode] = useState<string>('');
 
+  const PRESET_SHEETS = [
+    {
+      name: 'Kathmandu Education Fair 2026',
+      url: 'https://docs.google.com/spreadsheets/d/demo-sheet-kathmandu-fair-2026/edit?usp=sharing',
+      city: 'Kathmandu',
+      campaign: 'Kathmandu Fair 2026',
+      source: 'Education Fair',
+      tab: 'Leads 2026',
+    },
+    {
+      name: 'Birgunj & Janakpur Walk-in Desk',
+      url: 'https://docs.google.com/spreadsheets/d/demo-sheet-birgunj-walkins-2026/edit?usp=sharing',
+      city: 'Birgunj',
+      campaign: 'Branch Walk-in Desk',
+      source: 'Branch Walk-in',
+      tab: 'Inquiries',
+    },
+    {
+      name: 'Study in India 2026 Webinar',
+      url: 'https://docs.google.com/spreadsheets/d/demo-sheet-india-webinar-2026/edit?usp=sharing',
+      city: 'Delhi',
+      campaign: 'Study in India Webinar',
+      source: 'Webinar',
+      tab: 'Registrations',
+    },
+  ];
+
   const loadData = async () => {
     try {
       setLoading(true);
-      const [integrationsRes, logsRes, templatesRes] = await Promise.all([
+      const [integrationsRes, logsRes, templatesRes, sheetsListRes] = await Promise.all([
         api.getIntegrations(),
         api.getIntegrationLogs(),
         api.getMessageTemplates(),
+        api.getGoogleSheetsList(),
       ]);
       setIntegrations(integrationsRes);
       setLogs(logsRes);
       setTemplates(templatesRes);
+      if (sheetsListRes) {
+        setConnectedSheets(sheetsListRes.sheets || []);
+        setSheetSummary(sheetsListRes.summary || {});
+      }
 
       // Pre-fill live sheet state if configured
       const sheetsInt = integrationsRes.find((i) => i.name === 'Google Sheets Sync' || i.id === 'int-sheets');
@@ -109,6 +161,120 @@ export const IntegrationsPage: React.FC = () => {
     setCopiedKey(key);
     addToast('Copied to clipboard', 'info');
     setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleApplyPreset = (preset: typeof PRESET_SHEETS[0]) => {
+    setNewSheetName(preset.name);
+    setNewSheetUrl(preset.url);
+    setNewSheetCity(preset.city);
+    setNewSheetCampaign(preset.campaign);
+    setNewSheetSource(preset.source);
+    setNewSheetTab(preset.tab);
+    addToast(`Loaded template for "${preset.name}"`, 'info');
+  };
+
+  const handleAddSheetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSheetUrl.trim()) {
+      addToast('Please enter a Google Sheet URL or ID', 'warning');
+      return;
+    }
+    try {
+      setIsConnectingLive(true);
+      const res = await api.connectGoogleSheetLink(
+        newSheetUrl.trim(),
+        newSheetTab.trim() || undefined,
+        'Admin',
+        {
+          name: newSheetName.trim() || undefined,
+          campaignTag: newSheetCampaign.trim() || undefined,
+          targetCity: newSheetCity.trim() || undefined,
+          sourceLabel: newSheetSource.trim() || undefined,
+        }
+      );
+      addToast(`Connected "${res.name || newSheetName || 'Google Sheet'}" (${res.totalRows} student rows found)`, 'success');
+      setShowAddSheetModal(false);
+      setNewSheetName('');
+      setNewSheetUrl('');
+      setNewSheetCampaign('');
+      setActivePreviewSheet({ sheet: { id: res.connectionId, name: newSheetName || 'New Google Sheet' }, data: res });
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to connect Google Sheet', 'error');
+    } finally {
+      setIsConnectingLive(false);
+    }
+  };
+
+  const handleSyncAllSheets = async () => {
+    try {
+      setIsSyncingAll(true);
+      setMultiSyncReport(null);
+      const report = await api.syncAllGoogleSheets();
+      setMultiSyncReport(report);
+      addToast(
+        `Multi-Sheet Sync Complete: ${report.totalImported} new leads captured across ${report.totalSheets} sheets!`,
+        report.totalImported > 0 ? 'success' : 'info'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to sync all Google Sheets', 'error');
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
+
+  const handleSyncSingleSheet = async (id: string, name: string) => {
+    try {
+      setSyncingSheetId(id);
+      const res = await api.syncSingleGoogleSheet(id);
+      addToast(
+        `Synced "${name}": ${res.importedCount} new leads captured, ${res.duplicateCount} duplicates avoided`,
+        res.importedCount > 0 ? 'success' : 'info'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || `Failed to sync sheet "${name}"`, 'error');
+    } finally {
+      setSyncingSheetId(null);
+    }
+  };
+
+  const handlePreviewSheet = async (sheet: any) => {
+    try {
+      setPreviewingSheetId(sheet.id);
+      const data = await api.previewGoogleSheetById(sheet.id);
+      setActivePreviewSheet({ sheet, data });
+    } catch (err: any) {
+      addToast(err.message || 'Failed to preview sheet', 'error');
+    } finally {
+      setPreviewingSheetId(null);
+    }
+  };
+
+  const handleToggleSheetStatus = async (sheet: any) => {
+    try {
+      const newStatus = sheet.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+      await api.updateGoogleSheetConnection(sheet.id, { status: newStatus });
+      addToast(`Sheet "${sheet.name}" is now ${newStatus}`, 'info');
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to update sheet status', 'error');
+    }
+  };
+
+  const handleDeleteSheet = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to disconnect Google Sheet "${name}"?`)) return;
+    try {
+      await api.deleteGoogleSheetConnection(id);
+      if (activePreviewSheet?.sheet.id === id) {
+        setActivePreviewSheet(null);
+      }
+      addToast(`Disconnected Google Sheet "${name}"`, 'info');
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to disconnect sheet', 'error');
+    }
   };
 
   const handleSimulateMetaLead = async (e: React.FormEvent) => {
@@ -340,11 +506,9 @@ export const IntegrationsPage: React.FC = () => {
           }`}
         >
           <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-          Google Sheets (Live Link)
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-            isSheetConnected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-          }`}>
-            {isSheetConnected ? 'CONNECTED' : 'NOT CONNECTED'}
+          Google Sheets ({connectedSheets.length})
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+            {connectedSheets.filter((s) => s.status === 'ACTIVE').length} ACTIVE
           </span>
         </button>
 
@@ -406,265 +570,601 @@ export const IntegrationsPage: React.FC = () => {
       {/* Tab: Google Sheets Live Sync */}
       {activeTab === 'sheets' && (
         <div className="space-y-6">
-          {/* Active Connection Banner (if connected) */}
-          {isSheetConnected && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 mt-0.5">
-                  <FileSpreadsheet className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <h3 className="text-base font-bold text-emerald-900">Live Google Sheet Connected</h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200 text-emerald-800">
-                      ACTIVE
-                    </span>
-                  </div>
-                  <p className="text-xs text-emerald-700 mt-1 font-mono break-all">
-                    {sheetConfigObj.spreadsheetUrl || 'Connected Google Sheet'}
-                  </p>
-                  <div className="flex items-center gap-4 text-xs text-emerald-800 mt-2">
-                    <span>Sheet ID: <strong>{sheetConfigObj.spreadsheetId || '—'}</strong></span>
-                    <span>Last Synced: <strong>{sheetIntegration.last_sync_at ? new Date(sheetIntegration.last_sync_at).toLocaleString() : 'Just now'}</strong></span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {sheetConfigObj.spreadsheetUrl && (
-                  <a
-                    href={sheetConfigObj.spreadsheetUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold border border-emerald-300 flex items-center gap-1.5 transition shadow-xs"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" /> Open in Google Drive
-                  </a>
-                )}
-                <button
-                  onClick={handleSyncLiveSheet}
-                  disabled={isSyncingLive}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingLive ? 'animate-spin' : ''}`} />
-                  {isSyncingLive ? 'Syncing...' : 'Re-Sync Leads Now'}
-                </button>
-                <button
-                  onClick={handleDisconnectLiveSheet}
-                  className="px-3 py-2 bg-white hover:bg-rose-50 text-rose-700 rounded-lg text-xs font-semibold border border-rose-200 flex items-center gap-1.5 transition shadow-xs"
-                  title="Disconnect Sheet"
-                >
-                  <Unlink className="w-3.5 h-3.5" /> Disconnect
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Section 1: Connect Live Google Sheet by Link */}
+          {/* Top Multi-Sheet Management Header & Action Bar */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-gray-100 pb-5">
               <div>
-                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <Link className="w-5 h-5 text-emerald-600" />
-                  Connect Live Google Sheet by Sharing Link
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Paste any Google Sheet share link to instantly preview and sync leads directly into Education Sansar CRM
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleUseSampleSheet}
-                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition self-start sm:self-auto"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                Try Sample Sheet Link
-              </button>
-            </div>
-
-            <form onSubmit={handleConnectLiveSheet} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
-                  Google Sheet Share Link (URL or Spreadsheet ID)
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing"
-                    value={liveSheetUrl}
-                    onChange={(e) => setLiveSheetUrl(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg pl-3 pr-28 py-2.5 text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                  <div className="absolute right-2 top-2">
-                    <button
-                      type="submit"
-                      disabled={isConnectingLive}
-                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
-                    >
-                      {isConnectingLive ? (
-                        <>
-                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Fetching...
-                        </>
-                      ) : (
-                        <>
-                          <Link className="w-3.5 h-3.5" />
-                          Connect &amp; Preview
-                        </>
-                      )}
-                    </button>
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
+                    <Layers className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      Multiple Google Sheets Lead Hub
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                        {connectedSheets.length} Connected
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Connect and fetch student leads across fairs, digital campaigns, and branch walk-ins with automatic deduplication &amp; counselor assignment.
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Sheet Tab Name (Optional, e.g. "Leads 2026" or "Sheet1")
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Leads"
-                    value={liveSheetName}
-                    onChange={(e) => setLiveSheetName(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
+              <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={handleSyncAllSheets}
+                  disabled={isSyncingAll || connectedSheets.length === 0}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                  title="Pull leads from all active Google Sheets"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                  {isSyncingAll ? 'Fetching All Sheets...' : 'Sync All Active Sheets Now'}
+                </button>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
-                  <p className="font-semibold text-slate-800 flex items-center gap-1 mb-1">
-                    <Info className="w-3.5 h-3.5 text-blue-600" /> Sharing Permissions Requirement:
-                  </p>
-                  <p className="text-[11px] leading-relaxed">
-                    In your Google Sheet, click <strong>Share</strong> &gt; General access &gt; change from <em>Restricted</em> to <strong>"Anyone with the link can view"</strong> so the CRM can read the live rows.
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSheetModal(true)}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Connect New Google Sheet
+                </button>
               </div>
-            </form>
+            </div>
 
-            {/* Live Sheet Preview Table (when preview data is loaded) */}
-            {livePreviewData && (
-              <div className="mt-6 border border-emerald-200 bg-emerald-50/30 rounded-xl p-5 space-y-4">
+            {/* Quick Metrics KPI Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                  Connected Sheets
+                </span>
+                <span className="text-2xl font-bold text-slate-900 mt-1 block">
+                  {connectedSheets.length}
+                </span>
+                <span className="text-[11px] text-slate-500 mt-0.5 block">
+                  {connectedSheets.filter((s) => s.status === 'ACTIVE').length} Active for Sync
+                </span>
+              </div>
+
+              <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl">
+                <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider block">
+                  Total Leads Ingested
+                </span>
+                <span className="text-2xl font-bold text-emerald-800 mt-1 block">
+                  {connectedSheets.reduce((acc, s) => acc + (s.total_leads_imported || 0), 0)}
+                </span>
+                <span className="text-[11px] text-emerald-600 mt-0.5 block">
+                  Across all sheet sources
+                </span>
+              </div>
+
+              <div className="p-4 bg-blue-50/60 border border-blue-200/80 rounded-xl">
+                <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider block">
+                  Total Rows Tracked
+                </span>
+                <span className="text-2xl font-bold text-blue-800 mt-1 block">
+                  {connectedSheets.reduce((acc, s) => acc + (s.last_rows_count || 0), 0)}
+                </span>
+                <span className="text-[11px] text-blue-600 mt-0.5 block">
+                  Live spreadsheet rows
+                </span>
+              </div>
+
+              <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl">
+                <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider block">
+                  Last Bulk Sync
+                </span>
+                <span className="text-sm font-bold text-amber-900 mt-1.5 block font-mono">
+                  {sheetSummary.lastSync ? new Date(sheetSummary.lastSync).toLocaleTimeString() : 'Ready to Sync'}
+                </span>
+                <span className="text-[11px] text-amber-600 mt-0.5 block">
+                  Automated duplicate protection
+                </span>
+              </div>
+            </div>
+
+            {/* Multi-Sheet Bulk Sync Report Alert (when triggered) */}
+            {multiSyncReport && (
+              <div className="p-5 bg-gray-900 text-gray-100 rounded-xl space-y-4 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                    <CheckCircle className="w-5 h-5" />
+                    Multi-Sheet Bulk Sync Completed Successfully
+                  </div>
+                  <button
+                    onClick={() => setMultiSyncReport(null)}
+                    className="p-1 hover:bg-gray-800 text-gray-400 hover:text-white rounded transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  <div className="p-3 bg-gray-800/80 rounded-lg">
+                    <span className="text-[11px] text-gray-400 block">Sheets Processed</span>
+                    <span className="text-lg font-bold text-white">{multiSyncReport.totalSheets}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800/80 rounded-lg">
+                    <span className="text-[11px] text-emerald-400 block">New Leads Captured</span>
+                    <span className="text-lg font-bold text-emerald-400">+{multiSyncReport.totalImported}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800/80 rounded-lg">
+                    <span className="text-[11px] text-amber-400 block">Duplicates Prevented</span>
+                    <span className="text-lg font-bold text-amber-400">{multiSyncReport.totalDuplicates}</span>
+                  </div>
+                  <div className="p-3 bg-gray-800/80 rounded-lg">
+                    <span className="text-[11px] text-gray-400 block">Errors</span>
+                    <span className="text-lg font-bold text-gray-300">{multiSyncReport.totalErrors}</span>
+                  </div>
+                </div>
+
+                {/* Per-Sheet Breakdown Table */}
+                {multiSyncReport.sheetReports && multiSyncReport.sheetReports.length > 0 && (
+                  <div className="bg-gray-800/60 rounded-lg border border-gray-700 overflow-hidden text-xs">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-gray-800 text-gray-400 border-b border-gray-700 font-medium">
+                          <th className="py-2 px-3">Google Sheet</th>
+                          <th className="py-2 px-3">Status</th>
+                          <th className="py-2 px-3">Rows</th>
+                          <th className="py-2 px-3">Leads Captured</th>
+                          <th className="py-2 px-3">Duplicates Blocked</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-700/50">
+                        {multiSyncReport.sheetReports.map((sr: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-gray-700/30">
+                            <td className="py-2 px-3 font-semibold text-white">{sr.name}</td>
+                            <td className="py-2 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  sr.status === 'SUCCESS'
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                    : sr.status === 'WARN'
+                                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                    : 'bg-rose-950 text-rose-400 border border-rose-800'
+                                }`}
+                              >
+                                {sr.status}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-gray-300">{sr.totalRows}</td>
+                            <td className="py-2 px-3 font-bold text-emerald-400">+{sr.importedCount}</td>
+                            <td className="py-2 px-3 text-amber-400">{sr.duplicateCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* List of Connected Google Sheets */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Connected Google Spreadsheets ({connectedSheets.length})
+                </h4>
+                <span className="text-xs text-gray-500">
+                  Each sheet can target a specific fair, campaign, or branch
+                </span>
+              </div>
+
+              {connectedSheets.length === 0 ? (
+                <div className="p-8 text-center border-2 border-dashed border-gray-200 rounded-xl space-y-3">
+                  <FileSpreadsheet className="w-10 h-10 text-gray-400 mx-auto" />
+                  <h5 className="text-sm font-semibold text-gray-700">No Google Sheets connected yet</h5>
+                  <p className="text-xs text-gray-500 max-w-md mx-auto">
+                    Connect your Google Sheets from education fairs, walk-ins, or webinar signups to fetch and sync leads automatically.
+                  </p>
+                  <button
+                    onClick={() => setShowAddSheetModal(true)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition"
+                  >
+                    <Plus className="w-4 h-4" /> Connect Your First Sheet
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {connectedSheets.map((sheet: any) => {
+                    const isSyncingThis = syncingSheetId === sheet.id;
+                    const isPreviewingThis = previewingSheetId === sheet.id;
+                    const isActive = sheet.status === 'ACTIVE';
+
+                    return (
+                      <div
+                        key={sheet.id}
+                        className={`rounded-xl border transition shadow-xs flex flex-col justify-between ${
+                          isActive
+                            ? 'bg-white border-gray-200 hover:border-emerald-300'
+                            : 'bg-gray-50/70 border-gray-200 opacity-80'
+                        }`}
+                      >
+                        <div className="p-4 space-y-3">
+                          {/* Top: Name & Status */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h5 className="text-sm font-bold text-gray-900 flex items-center gap-1.5 line-clamp-1">
+                                {sheet.name}
+                              </h5>
+                              <p className="text-[11px] font-mono text-gray-400 truncate max-w-[220px]" title={sheet.sheet_url}>
+                                ID: {sheet.spreadsheet_id}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                                isActive
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {sheet.status}
+                            </span>
+                          </div>
+
+                          {/* Metadata Tags */}
+                          <div className="flex flex-wrap gap-1.5 text-[11px]">
+                            {sheet.target_city && (
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded flex items-center gap-1 font-medium">
+                                <MapPin className="w-3 h-3 text-slate-500" />
+                                {sheet.target_city}
+                              </span>
+                            )}
+                            {sheet.campaign_tag && (
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded flex items-center gap-1 font-medium">
+                                <Tag className="w-3 h-3 text-indigo-500" />
+                                {sheet.campaign_tag}
+                              </span>
+                            )}
+                            {sheet.is_demo === 1 && (
+                              <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded font-medium">
+                                Template
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Stats Row */}
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-xs">
+                            <div className="bg-gray-50 p-2 rounded-lg">
+                              <span className="text-[10px] text-gray-500 block">Leads Ingested</span>
+                              <span className="text-sm font-bold text-emerald-700">
+                                {sheet.total_leads_imported || 0}
+                              </span>
+                            </div>
+                            <div className="bg-gray-50 p-2 rounded-lg">
+                              <span className="text-[10px] text-gray-500 block">Rows Detected</span>
+                              <span className="text-sm font-bold text-gray-800">
+                                {sheet.last_rows_count || 0}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Last Sync Info */}
+                          <div className="text-[11px] text-gray-500 flex items-center justify-between pt-1">
+                            <span>Last Synced:</span>
+                            <span className="font-medium text-gray-700">
+                              {sheet.last_synced_at ? new Date(sheet.last_synced_at).toLocaleTimeString() : 'Never'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Card Action Buttons */}
+                        <div className="p-3 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between gap-1.5 rounded-b-xl">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewSheet(sheet)}
+                              disabled={isPreviewingThis}
+                              className="px-2.5 py-1.5 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-md text-xs font-medium flex items-center gap-1 transition"
+                              title="Preview live rows"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-gray-500" />
+                              {isPreviewingThis ? '...' : 'Preview'}
+                            </button>
+
+                            {sheet.sheet_url && (
+                              <a
+                                href={sheet.sheet_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-1.5 bg-white hover:bg-gray-100 text-gray-600 border border-gray-200 rounded-md text-xs transition"
+                                title="Open in Google Drive"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSheetStatus(sheet)}
+                              className="p-1.5 bg-white hover:bg-gray-100 text-gray-600 border border-gray-200 rounded-md text-xs transition"
+                              title={isActive ? 'Pause Sync' : 'Activate Sync'}
+                            >
+                              {isActive ? <Pause className="w-3.5 h-3.5 text-amber-600" /> : <Play className="w-3.5 h-3.5 text-emerald-600" />}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleSyncSingleSheet(sheet.id, sheet.name)}
+                              disabled={isSyncingThis || !isActive}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1 transition disabled:opacity-50"
+                              title="Sync this sheet now"
+                            >
+                              <Download className={`w-3.5 h-3.5 ${isSyncingThis ? 'animate-bounce' : ''}`} />
+                              {isSyncingThis ? 'Syncing' : 'Sync'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSheet(sheet.id, sheet.name)}
+                              className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-md text-xs transition"
+                              title="Disconnect Sheet"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Live Sheet Preview Drawer / Table (if selected) */}
+            {activePreviewSheet && (
+              <div className="mt-4 border border-emerald-200 bg-emerald-50/30 rounded-xl p-5 space-y-4 animate-in fade-in duration-200">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                       <h4 className="text-sm font-bold text-gray-900">
-                        Live Sheet Verified ({livePreviewData.totalRows} Student Rows Found)
+                        Live Preview: {activePreviewSheet.sheet.name} ({activePreviewSheet.data.totalRows} Student Rows Found)
                       </h4>
-                      {livePreviewData.isDemoSheet && (
+                      {activePreviewSheet.data.isDemoSheet && (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
                           Demo Template
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Spreadsheet ID: <code className="font-mono text-emerald-800">{livePreviewData.spreadsheetId}</code>
+                      Spreadsheet ID: <code className="font-mono text-emerald-800">{activePreviewSheet.data.spreadsheetId}</code>
                     </p>
                   </div>
 
-                  <button
-                    onClick={handleSyncLiveSheet}
-                    disabled={isSyncingLive}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50 shrink-0"
-                  >
-                    {isSyncingLive ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        Pulling &amp; Assigning Leads...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        Sync All Leads to CRM Now
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleSyncSingleSheet(activePreviewSheet.sheet.id, activePreviewSheet.sheet.name)}
+                      disabled={syncingSheetId === activePreviewSheet.sheet.id}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4" />
+                      Sync This Sheet Now
+                    </button>
+                    <button
+                      onClick={() => setActivePreviewSheet(null)}
+                      className="p-2 bg-white hover:bg-gray-100 text-gray-500 rounded-lg border border-gray-200 transition"
+                      title="Close Preview"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Detected Column Headers */}
+                {activePreviewSheet.data.headers && (
+                  <div>
+                    <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
+                      Verified Sheet Column Headers:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {activePreviewSheet.data.headers.map((h: string, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 bg-white border border-emerald-200 text-emerald-800 rounded text-xs font-medium">
+                          ✓ {h}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Live Preview Table */}
+                {activePreviewSheet.data.previewRows && (
+                  <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 font-semibold text-gray-600 uppercase">
+                          <th className="py-2 px-3">#</th>
+                          {activePreviewSheet.data.headers.slice(0, 6).map((h: string, idx: number) => (
+                            <th key={idx} className="py-2 px-3">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {activePreviewSheet.data.previewRows.map((row: any, rIdx: number) => (
+                          <tr key={rIdx} className="hover:bg-gray-50">
+                            <td className="py-2 px-3 font-mono text-gray-400">{rIdx + 1}</td>
+                            {activePreviewSheet.data.headers.slice(0, 6).map((h: string, cIdx: number) => (
+                              <td key={cIdx} className="py-2 px-3 text-gray-700 font-medium">
+                                {row[h] || '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Connect New Google Sheet Modal */}
+          {showAddSheetModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+              <div className="bg-white rounded-2xl shadow-xl border border-gray-200 max-w-xl w-full p-6 space-y-5 animate-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <Link className="w-5 h-5 text-emerald-600" />
+                      Connect New Google Sheet
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Add any shared Google Sheet to automatically ingest and assign student leads
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowAddSheetModal(false)}
+                    className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Quick Presets */}
                 <div>
-                  <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-                    Detected Sheet Column Headers:
+                  <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-2">
+                    Quick Sample Presets (Click to test):
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {livePreviewData.headers.map((h: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 bg-white border border-emerald-200 text-emerald-800 rounded text-xs font-medium">
-                        ✓ {h}
-                      </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {PRESET_SHEETS.map((preset, pIdx) => (
+                      <button
+                        key={pIdx}
+                        type="button"
+                        onClick={() => handleApplyPreset(preset)}
+                        className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition text-xs space-y-0.5"
+                      >
+                        <span className="font-bold text-slate-800 block truncate">{preset.name}</span>
+                        <span className="text-[10px] text-slate-500 block">City: {preset.city}</span>
+                      </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Live Preview Table */}
-                <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 font-semibold text-gray-600 uppercase">
-                        <th className="py-2 px-3">#</th>
-                        {livePreviewData.headers.slice(0, 6).map((h: string, idx: number) => (
-                          <th key={idx} className="py-2 px-3">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {livePreviewData.previewRows.map((row: any, rIdx: number) => (
-                        <tr key={rIdx} className="hover:bg-gray-50">
-                          <td className="py-2 px-3 font-mono text-gray-400">{rIdx + 1}</td>
-                          {livePreviewData.headers.slice(0, 6).map((h: string, cIdx: number) => (
-                            <td key={cIdx} className="py-2 px-3 text-gray-700 font-medium">
-                              {row[h] || '—'}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <form onSubmit={handleAddSheetSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                      Sheet Display Name / Campaign Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Kathmandu Education Fair 2026 or Birgunj Walk-in Desk"
+                      value={newSheetName}
+                      onChange={(e) => setNewSheetName(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                      Google Sheet Sharing Link (URL or ID) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing"
+                      value={newSheetUrl}
+                      onChange={(e) => setNewSheetUrl(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Target City / Branch
+                      </label>
+                      <select
+                        value={newSheetCity}
+                        onChange={(e) => setNewSheetCity(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      >
+                        <option value="Kathmandu">Kathmandu (Nepal)</option>
+                        <option value="Birgunj">Birgunj (Nepal)</option>
+                        <option value="Janakpur">Janakpur (Nepal)</option>
+                        <option value="Pokhara">Pokhara (Nepal)</option>
+                        <option value="Butwal">Butwal (Nepal)</option>
+                        <option value="Delhi">Delhi (India)</option>
+                        <option value="Noida">Noida (India)</option>
+                        <option value="Bangalore">Bangalore (India)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Campaign Tag
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Fair 2026"
+                        value={newSheetCampaign}
+                        onChange={(e) => setNewSheetCampaign(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Lead Source
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Google Sheets"
+                        value={newSheetSource}
+                        onChange={(e) => setNewSheetSource(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Permissions Callout */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600">
+                    <p className="font-semibold text-slate-800 flex items-center gap-1 mb-1">
+                      <Info className="w-3.5 h-3.5 text-blue-600" /> Sharing Permissions Requirement:
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      In your Google Sheet, click <strong>Share</strong> &gt; General access &gt; change from <em>Restricted</em> to <strong>"Anyone with the link can view"</strong> so the CRM can read the live rows.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddSheetModal(false)}
+                      className="px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isConnectingLive}
+                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+                    >
+                      {isConnectingLive ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Validating Sheet...
+                        </>
+                      ) : (
+                        <>
+                          <Link className="w-3.5 h-3.5" />
+                          Connect &amp; Validate Sheet
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
-
-            {/* Live Sync Report Card */}
-            {liveSyncReport && (
-              <div className="mt-4 p-5 bg-gray-900 rounded-xl text-gray-100 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" />
-                    Live Google Sheet Sync Complete
-                  </h4>
-                  <span className="text-xs text-gray-400 font-mono">
-                    {new Date(liveSyncReport.syncedAt).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                  <div className="p-3 bg-gray-800 rounded-lg">
-                    <span className="text-[11px] text-gray-400 block">Total Rows In Sheet</span>
-                    <span className="text-xl font-bold text-white">{liveSyncReport.totalRows}</span>
-                  </div>
-                  <div className="p-3 bg-gray-800 rounded-lg">
-                    <span className="text-[11px] text-emerald-400 block">New Leads Captured</span>
-                    <span className="text-xl font-bold text-emerald-400">+{liveSyncReport.importedCount}</span>
-                  </div>
-                  <div className="p-3 bg-gray-800 rounded-lg">
-                    <span className="text-[11px] text-amber-400 block">Duplicates Prevented</span>
-                    <span className="text-xl font-bold text-amber-400">{liveSyncReport.duplicateCount}</span>
-                  </div>
-                  <div className="p-3 bg-gray-800 rounded-lg">
-                    <span className="text-[11px] text-gray-400 block">Errors</span>
-                    <span className="text-xl font-bold text-gray-300">{liveSyncReport.errorCount || 0}</span>
-                  </div>
-                </div>
-
-                <div className="text-xs text-gray-400">
-                  All newly captured leads have been automatically assigned to counselors based on Round Robin / City routing rules, with scheduled 24-hr follow-ups created.
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Section 2: Two-Way Webhook & Simulators Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

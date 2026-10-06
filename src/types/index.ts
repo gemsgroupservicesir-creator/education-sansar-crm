@@ -300,6 +300,48 @@ export interface Campaign {
   is_demo: number;
 }
 
+export interface GoogleSheetConnection {
+  id: string;
+  name: string;
+  sheet_url: string;
+  spreadsheet_id: string;
+  gid: string;
+  sheet_name?: string;
+  campaign_tag?: string;
+  target_city?: string;
+  source_label?: string;
+  status: 'ACTIVE' | 'PAUSED' | 'ERROR';
+  total_leads_imported: number;
+  last_rows_count: number;
+  last_synced_at?: string;
+  last_sync_status?: 'SUCCESS' | 'WARN' | 'ERROR';
+  last_sync_error?: string;
+  is_demo: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MultiSheetSyncReport {
+  success: boolean;
+  totalSheets: number;
+  totalRows: number;
+  totalImported: number;
+  totalDuplicates: number;
+  totalErrors: number;
+  sheetReports: Array<{
+    id: string;
+    name: string;
+    status: 'SUCCESS' | 'WARN' | 'ERROR';
+    totalRows: number;
+    importedCount: number;
+    duplicateCount: number;
+    errorCount: number;
+    errorMessage?: string;
+    syncedAt?: string;
+  }>;
+  syncedAt: string;
+}
+
 export interface NotificationItem {
   id: string;
   user_id?: string;

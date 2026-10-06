@@ -33,6 +33,65 @@ export function initDatabase() {
   try {
     db.exec(SCHEMA_SQL);
     console.log('✅ Database schema initialized successfully');
+
+    // Ensure google_sheets_connections exists and has starter demo sheets
+    try {
+      const gsheetCount = (db.prepare('SELECT count(*) as count FROM google_sheets_connections').get() as { count: number })?.count || 0;
+      if (gsheetCount === 0) {
+        const insertGSheet = db.prepare(`
+          INSERT INTO google_sheets_connections (
+            id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        insertGSheet.run(
+          'gsheet-ktm-fair',
+          'Kathmandu Education Fair 2026',
+          'https://docs.google.com/spreadsheets/d/demo-sheet-kathmandu-fair-2026/edit?usp=sharing',
+          'demo-sheet-kathmandu-fair-2026',
+          '0',
+          'Leads 2026',
+          'Kathmandu Fair 2026',
+          'Kathmandu',
+          'Education Fair',
+          'ACTIVE',
+          4,
+          4,
+          1
+        );
+        insertGSheet.run(
+          'gsheet-birgunj-walkin',
+          'Birgunj & Janakpur Walk-ins',
+          'https://docs.google.com/spreadsheets/d/demo-sheet-birgunj-walkins-2026/edit?usp=sharing',
+          'demo-sheet-birgunj-walkins-2026',
+          '0',
+          'Inquiries',
+          'Branch Inquiries',
+          'Birgunj',
+          'Branch Walk-in',
+          'ACTIVE',
+          0,
+          4,
+          1
+        );
+        insertGSheet.run(
+          'gsheet-india-webinar',
+          'Study in India 2026 Webinar',
+          'https://docs.google.com/spreadsheets/d/demo-sheet-india-webinar-2026/edit?usp=sharing',
+          'demo-sheet-india-webinar-2026',
+          '0',
+          'Registrations',
+          'Study in India Webinar',
+          'Delhi',
+          'Webinar',
+          'ACTIVE',
+          0,
+          4,
+          1
+        );
+      }
+    } catch (e) {
+      console.warn('Google sheets table initialization warning:', e);
+    }
   } catch (error) {
     console.error('❌ Failed to initialize database schema:', error);
     throw error;

@@ -492,20 +492,44 @@ function parseCSVContent(csvText: string): { headers: string[]; rows: Record<str
 }
 
 export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?: string) {
+  const lower = sheetUrlOrId.toLowerCase();
+
   // Demo / Sample Google Sheet fallback for offline or quick testing
-  if (sheetUrlOrId.toLowerCase().includes('sample') || sheetUrlOrId.toLowerCase().includes('demo') || sheetUrlOrId === 'default') {
-    const demoCSV = `"Student Name","Phone","Email","City","Preferred Course","Preferred University","Academic Qualification","Source"
-"Pooja Pokhrel","+977 9841887766","pooja.pokhrel.ktm@gmail.com","Kathmandu","B.Tech Computer Science & Engineering","SRM Institute of Science and Technology","+2 Science (84%)","Kathmandu Education Fair"
-"Bikash Yadav","+977 9807112233","bikash.yadav.brg@gmail.com","Birgunj","B.Tech Artificial Intelligence","VIT Vellore","+2 Science (81%)","Birgunj Branch Inquiries"
+  if (lower.includes('sample') || lower.includes('demo') || sheetUrlOrId === 'default' || lower.includes('fair') || lower.includes('walkin') || lower.includes('webinar')) {
+    let demoCSV = '';
+    let spreadsheetId = 'demo-sheet-kathmandu-fair-2026';
+    let cleanUrl = 'https://docs.google.com/spreadsheets/d/demo-sheet-kathmandu-fair-2026/edit#gid=0';
+
+    if (lower.includes('birgunj') || lower.includes('janakpur') || lower.includes('walkin')) {
+      spreadsheetId = 'demo-sheet-birgunj-walkins-2026';
+      cleanUrl = 'https://docs.google.com/spreadsheets/d/demo-sheet-birgunj-walkins-2026/edit#gid=0';
+      demoCSV = `"Student Name","Phone","Email","City","Preferred Course","Preferred University","Academic Qualification","Source"
+"Bikash Yadav","+977 9807112233","bikash.yadav.brg@gmail.com","Birgunj","B.Tech Artificial Intelligence","VIT Vellore","+2 Science (81%)","Birgunj Walk-in Desk"
 "Prabhat Jha","+977 9804556677","prabhat.jha.jnp@gmail.com","Janakpur","B.Sc Nursing","Sharda University","+2 Biology (79%)","Janakpur Office Walk-in"
-"Anushka Sharma","+91 9811334455","anushka.sharma.del@gmail.com","Delhi","MBA Business Analytics","Chandigarh University","B.Com Graduate (76%)","Google Sheets Lead Form"
-"Kiran Gurung","+977 9802445566","kiran.gurung.btl@gmail.com","Butwal","B.Tech CSE","SRM Institute of Science and Technology","+2 Science (83%)","Butwal School Seminar"`;
+"Sunita Rauniyar","+977 9807445566","sunita.rauniyar.brg@gmail.com","Birgunj","B.Pharm (Pharmacy)","Manipal Academy of Higher Education","+2 Science (80%)","Branch Walk-in"
+"Rakesh Gupta","+977 9807889900","rakesh.gupta.brg@gmail.com","Birgunj","BCA Computer Applications","Lovely Professional University","+2 Science (75%)","Branch Walk-in"`;
+    } else if (lower.includes('webinar') || lower.includes('india') || lower.includes('delhi')) {
+      spreadsheetId = 'demo-sheet-india-webinar-2026';
+      cleanUrl = 'https://docs.google.com/spreadsheets/d/demo-sheet-india-webinar-2026/edit#gid=0';
+      demoCSV = `"Student Name","Phone","Email","City","Preferred Course","Preferred University","Academic Qualification","Source"
+"Anushka Sharma","+91 9811334455","anushka.sharma.del@gmail.com","Delhi","MBA Business Analytics","Chandigarh University","B.Com Graduate (76%)","Study in India Webinar"
+"Rohan Verma","+91 9811778899","rohan.verma.noida@gmail.com","Noida","B.Tech CSE","SRM Institute of Science and Technology","+2 Science (88%)","Study in India Webinar"
+"Deepa Menon","+91 9845112233","deepa.menon.blr@gmail.com","Bangalore","M.Tech Data Science","VIT Vellore","B.E CSE (8.2 CGPA)","Online Zoom Session"
+"Aman Tripathi","+91 9820556677","aman.tripathi.del@gmail.com","Delhi","BBA International Business","Symbiosis International","+2 Commerce (85%)","Study in India Webinar"`;
+    } else {
+      demoCSV = `"Student Name","Phone","Email","City","Preferred Course","Preferred University","Academic Qualification","Source"
+"Pooja Pokhrel","+977 9841887766","pooja.pokhrel.ktm@gmail.com","Kathmandu","B.Tech Computer Science & Engineering","SRM Institute of Science and Technology","+2 Science (84%)","Kathmandu Education Fair"
+"Sandesh Adhikari","+977 9841223344","sandesh.adhikari.ktm@gmail.com","Kathmandu","B.Sc Nursing","Sharda University","+2 Biology (78%)","Kathmandu Education Fair"
+"Alisha KC","+977 9841998877","alisha.kc.ktm@gmail.com","Kathmandu","BBA Digital Marketing","Chandigarh University","+2 Management (81%)","Kathmandu Education Fair"
+"Bibek Bista","+977 9841335577","bibek.bista.ktm@gmail.com","Lalitpur","B.Tech AI & Data Science","VIT Vellore","+2 Science (87%)","Kathmandu Education Fair"`;
+    }
+
     const { headers, rows } = parseCSVContent(demoCSV);
     return {
       success: true,
-      spreadsheetId: 'demo-google-sheet-sansar-2026',
+      spreadsheetId,
       gid: '0',
-      cleanUrl: 'https://docs.google.com/spreadsheets/d/demo-google-sheet-sansar-2026/edit#gid=0',
+      cleanUrl,
       headers,
       totalRows: rows.length,
       previewRows: rows.slice(0, 8),
@@ -521,7 +545,6 @@ export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?:
   const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
 
   let csvContent = '';
-  let usedUrl = gvizUrl;
 
   try {
     const res = await fetch(gvizUrl, {
@@ -535,7 +558,6 @@ export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?:
       csvContent = await res.text();
     } else {
       // Fallback to export endpoint
-      usedUrl = exportUrl;
       const fallbackRes = await fetch(exportUrl, {
         headers: { 'User-Agent': 'EducationSansarCRM/1.0' }
       });
@@ -569,11 +591,187 @@ export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?:
     headers,
     totalRows: rows.length,
     previewRows: rows.slice(0, 8),
-    allRows: rows
+    allRows: rows,
+    isDemoSheet: false
   };
 }
 
-export async function syncLiveGoogleSheetLeads(sheetUrlOrId: string, performedBy: string = 'User') {
+export function getAllGoogleSheetConnections() {
+  const connections = db.prepare('SELECT * FROM google_sheets_connections ORDER BY created_at DESC').all() as any[];
+  const totalSheets = connections.length;
+  const activeSheets = connections.filter(c => c.status === 'ACTIVE').length;
+  const totalLeadsImported = connections.reduce((acc, c) => acc + (c.total_leads_imported || 0), 0);
+  const lastSync = connections.map(c => c.last_synced_at).filter(Boolean).sort().reverse()[0] || null;
+
+  return {
+    sheets: connections,
+    summary: {
+      totalSheets,
+      activeSheets,
+      totalLeadsImported,
+      lastSync
+    }
+  };
+}
+
+export async function addOrConnectGoogleSheet(data: {
+  name: string;
+  sheetUrl: string;
+  sheetName?: string;
+  campaignTag?: string;
+  targetCity?: string;
+  sourceLabel?: string;
+  performedBy?: string;
+}) {
+  const parsed = parseGoogleSheetUrl(data.sheetUrl);
+  const liveData = await fetchLiveGoogleSheetData(data.sheetUrl, data.sheetName);
+
+  const existing = db.prepare('SELECT id FROM google_sheets_connections WHERE spreadsheet_id = ? AND gid = ?').get(parsed.spreadsheetId, parsed.gid) as any;
+
+  const id = existing?.id || 'gsheet-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE google_sheets_connections
+      SET name = ?,
+          sheet_url = ?,
+          sheet_name = ?,
+          campaign_tag = ?,
+          target_city = ?,
+          source_label = ?,
+          last_rows_count = ?,
+          status = 'ACTIVE',
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      data.name || 'Google Sheet ' + parsed.spreadsheetId.substring(0, 8),
+      liveData.cleanUrl,
+      data.sheetName || 'Leads 2026',
+      data.campaignTag || null,
+      data.targetCity || null,
+      data.sourceLabel || 'Google Sheets',
+      liveData.totalRows,
+      id
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO google_sheets_connections (
+        id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, ?, ?)
+    `).run(
+      id,
+      data.name || 'Google Sheet ' + parsed.spreadsheetId.substring(0, 8),
+      liveData.cleanUrl,
+      parsed.spreadsheetId,
+      parsed.gid,
+      data.sheetName || 'Leads 2026',
+      data.campaignTag || null,
+      data.targetCity || null,
+      data.sourceLabel || 'Google Sheets',
+      liveData.totalRows,
+      data.sheetUrl.includes('demo') ? 1 : 0
+    );
+  }
+
+  // Also update standard integrations table config
+  const config = {
+    spreadsheetUrl: liveData.cleanUrl,
+    spreadsheetId: liveData.spreadsheetId,
+    gid: liveData.gid,
+    sheetName: data.sheetName || 'Leads 2026',
+    syncDirection: 'TWO_WAY',
+    autoExport: false,
+    headers: liveData.headers,
+    lastSyncedRows: liveData.totalRows
+  };
+
+  db.prepare(`
+    UPDATE integrations
+    SET is_enabled = 1,
+        status = 'CONNECTED',
+        config = ?,
+        updated_at = datetime('now')
+    WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+  `).run(JSON.stringify(config));
+
+  logAudit({
+    userName: data.performedBy || 'Admin',
+    action: 'GOOGLE_SHEET_CONNECTED',
+    entity: 'google_sheets_connection',
+    entityId: id,
+    newValue: { name: data.name, url: liveData.cleanUrl, rows: liveData.totalRows }
+  });
+
+  return {
+    connectionId: id,
+    sheetId: id,
+    name: data.name,
+    ...liveData
+  };
+}
+
+export function updateGoogleSheetConnection(id: string, updates: any, performedBy: string = 'Admin') {
+  const current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (!current) throw new Error('Google Sheet connection not found: ' + id);
+
+  const name = updates.name !== undefined ? updates.name : current.name;
+  const status = updates.status !== undefined ? updates.status : current.status;
+  const campaign_tag = updates.campaign_tag !== undefined ? updates.campaign_tag : current.campaign_tag;
+  const target_city = updates.target_city !== undefined ? updates.target_city : current.target_city;
+  const source_label = updates.source_label !== undefined ? updates.source_label : current.source_label;
+  const sheet_name = updates.sheet_name !== undefined ? updates.sheet_name : current.sheet_name;
+
+  db.prepare(`
+    UPDATE google_sheets_connections
+    SET name = ?,
+        status = ?,
+        campaign_tag = ?,
+        target_city = ?,
+        source_label = ?,
+        sheet_name = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(name, status, campaign_tag, target_city, source_label, sheet_name, id);
+
+  logAudit({
+    userName: performedBy,
+    action: 'GOOGLE_SHEET_UPDATED',
+    entity: 'google_sheets_connection',
+    entityId: id,
+    oldValue: current,
+    newValue: updates
+  });
+
+  return db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id);
+}
+
+export function deleteGoogleSheetConnection(id: string, performedBy: string = 'Admin') {
+  const current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (!current) throw new Error('Google Sheet connection not found: ' + id);
+
+  db.prepare('DELETE FROM google_sheets_connections WHERE id = ?').run(id);
+
+  logAudit({
+    userName: performedBy,
+    action: 'GOOGLE_SHEET_DELETED',
+    entity: 'google_sheets_connection',
+    entityId: id,
+    oldValue: current
+  });
+
+  return { success: true, message: 'Google Sheet disconnected successfully.' };
+}
+
+export async function syncLiveGoogleSheetLeads(
+  sheetUrlOrId: string, 
+  performedBy: string = 'User',
+  options?: {
+    campaignTag?: string;
+    targetCity?: string;
+    sourceLabel?: string;
+    connectionId?: string;
+  }
+) {
   const liveData = await fetchLiveGoogleSheetData(sheetUrlOrId);
   const rows = liveData.allRows;
 
@@ -585,8 +783,15 @@ export async function syncLiveGoogleSheetLeads(sheetUrlOrId: string, performedBy
 
   for (const row of rows) {
     try {
+      const rowData = {
+        ...row,
+        campaign: row.campaign || row['Campaign'] || options?.campaignTag || 'Google Sheets Lead Sheet',
+        city: row.city || row['City'] || options?.targetCity || 'Kathmandu',
+        lead_source: row.lead_source || row['Source'] || options?.sourceLabel || 'Google Sheets'
+      };
+
       const res = handleGoogleSheetsLeadWebhook({
-        row,
+        row: rowData,
         row_number: row.row_number || importedCount + duplicateCount + 2
       });
 
@@ -602,7 +807,35 @@ export async function syncLiveGoogleSheetLeads(sheetUrlOrId: string, performedBy
     }
   }
 
-  // Update integration status to CONNECTED in database
+  const syncStatus = errorCount > 0 && importedCount === 0 ? 'ERROR' : errorCount > 0 ? 'WARN' : 'SUCCESS';
+
+  // Update specific google_sheets_connections record if identified
+  if (options?.connectionId) {
+    db.prepare(`
+      UPDATE google_sheets_connections
+      SET total_leads_imported = total_leads_imported + ?,
+          last_rows_count = ?,
+          last_synced_at = datetime('now'),
+          last_sync_status = ?,
+          last_sync_error = NULL,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(importedCount, rows.length, syncStatus, options.connectionId);
+  } else {
+    // Try matching by spreadsheet_id
+    db.prepare(`
+      UPDATE google_sheets_connections
+      SET total_leads_imported = total_leads_imported + ?,
+          last_rows_count = ?,
+          last_synced_at = datetime('now'),
+          last_sync_status = ?,
+          last_sync_error = NULL,
+          updated_at = datetime('now')
+      WHERE spreadsheet_id = ?
+    `).run(importedCount, rows.length, syncStatus, liveData.spreadsheetId);
+  }
+
+  // Update global integration status
   const config = {
     spreadsheetUrl: liveData.cleanUrl,
     spreadsheetId: liveData.spreadsheetId,
@@ -642,6 +875,80 @@ export async function syncLiveGoogleSheetLeads(sheetUrlOrId: string, performedBy
     errorCount,
     importedLeads,
     duplicateLeads,
+    syncedAt: new Date().toISOString()
+  };
+}
+
+export async function syncAllActiveGoogleSheets(performedBy: string = 'User') {
+  const sheets = db.prepare("SELECT * FROM google_sheets_connections WHERE status = 'ACTIVE' ORDER BY created_at ASC").all() as any[];
+  
+  let totalRows = 0;
+  let totalImported = 0;
+  let totalDuplicates = 0;
+  let totalErrors = 0;
+  const sheetReports: any[] = [];
+
+  for (const sheet of sheets) {
+    try {
+      const res = await syncLiveGoogleSheetLeads(sheet.sheet_url, performedBy, {
+        campaignTag: sheet.campaign_tag,
+        targetCity: sheet.target_city,
+        sourceLabel: sheet.source_label,
+        connectionId: sheet.id
+      });
+      totalRows += res.totalRows;
+      totalImported += res.importedCount;
+      totalDuplicates += res.duplicateCount;
+      totalErrors += res.errorCount;
+      sheetReports.push({
+        id: sheet.id,
+        name: sheet.name,
+        status: res.errorCount > 0 && res.importedCount === 0 ? 'ERROR' : res.errorCount > 0 ? 'WARN' : 'SUCCESS',
+        totalRows: res.totalRows,
+        importedCount: res.importedCount,
+        duplicateCount: res.duplicateCount,
+        errorCount: res.errorCount,
+        syncedAt: res.syncedAt
+      });
+    } catch (err: any) {
+      totalErrors++;
+      db.prepare(`
+        UPDATE google_sheets_connections 
+        SET last_synced_at = datetime('now'),
+            last_sync_status = 'ERROR',
+            last_sync_error = ?
+        WHERE id = ?
+      `).run(err.message, sheet.id);
+
+      sheetReports.push({
+        id: sheet.id,
+        name: sheet.name,
+        status: 'ERROR',
+        totalRows: 0,
+        importedCount: 0,
+        duplicateCount: 0,
+        errorCount: 1,
+        errorMessage: err.message,
+        syncedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  logAudit({
+    userName: performedBy,
+    action: 'GOOGLE_SHEETS_BULK_SYNC',
+    entity: 'google_sheets_connection',
+    newValue: { totalSheets: sheets.length, totalImported, totalDuplicates, totalErrors }
+  });
+
+  return {
+    success: true,
+    totalSheets: sheets.length,
+    totalRows,
+    totalImported,
+    totalDuplicates,
+    totalErrors,
+    sheetReports,
     syncedAt: new Date().toISOString()
   };
 }

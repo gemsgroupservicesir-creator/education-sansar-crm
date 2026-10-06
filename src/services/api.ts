@@ -233,10 +233,41 @@ export const api = {
     fetchJson<{ script: string; webhookUrl: string; instructions: string }>(
       '/integrations/google-sheets/apps-script-code'
     ),
-  connectGoogleSheetLink: (sheetUrl: string, sheetName?: string, performedBy?: string) =>
+  getGoogleSheetsList: () =>
+    fetchJson<{ sheets: any[]; summary: any }>('/integrations/google-sheets/list'),
+  connectGoogleSheetLink: (
+    sheetUrl: string,
+    sheetName?: string,
+    performedBy?: string,
+    extraOptions?: { name?: string; campaignTag?: string; targetCity?: string; sourceLabel?: string }
+  ) =>
     fetchJson<any>('/integrations/google-sheets/connect-link', {
       method: 'POST',
-      body: JSON.stringify({ sheetUrl, sheetName, performedBy }),
+      body: JSON.stringify({ sheetUrl, sheetName, performedBy, ...extraOptions }),
+    }),
+  syncSingleGoogleSheet: (id: string, performedBy?: string) =>
+    fetchJson<any>(`/integrations/google-sheets/${id}/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
+  previewGoogleSheetById: (id: string) =>
+    fetchJson<any>(`/integrations/google-sheets/${id}/preview`, {
+      method: 'POST',
+    }),
+  updateGoogleSheetConnection: (id: string, data: any, performedBy?: string) =>
+    fetchJson<any>(`/integrations/google-sheets/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, performedBy }),
+    }),
+  deleteGoogleSheetConnection: (id: string, performedBy?: string) =>
+    fetchJson<any>(`/integrations/google-sheets/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ performedBy }),
+    }),
+  syncAllGoogleSheets: (performedBy?: string) =>
+    fetchJson<any>('/integrations/google-sheets/sync-all', {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
     }),
   syncLiveGoogleSheet: (sheetUrl?: string, performedBy?: string) =>
     fetchJson<any>('/integrations/google-sheets/sync-live', {

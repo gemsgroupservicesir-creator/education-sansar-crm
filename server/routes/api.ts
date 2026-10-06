@@ -11,7 +11,12 @@ import {
   getGoogleAppsScriptTemplate,
   fetchLiveGoogleSheetData,
   syncLiveGoogleSheetLeads,
-  parseGoogleSheetUrl
+  parseGoogleSheetUrl,
+  getAllGoogleSheetConnections,
+  addOrConnectGoogleSheet,
+  updateGoogleSheetConnection,
+  deleteGoogleSheetConnection,
+  syncAllActiveGoogleSheets
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -1008,81 +1013,133 @@ apiRouter.get('/integrations/google-sheets/apps-script-code', (req: Request, res
   });
 });
 
-// Live Google Sheet Link Connection & Preview
+// ==========================================
+// GOOGLE SHEETS MULTI-SHEET MANAGEMENT & SYNC
+// ==========================================
+
+// List all connected Google Sheets & summary stats
+apiRouter.get('/integrations/google-sheets/list', (req: Request, res: Response) => {
+  try {
+    const data = getAllGoogleSheetConnections();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Connect or add a new Google Sheet by sharing link
 apiRouter.post('/integrations/google-sheets/connect-link', async (req: Request, res: Response) => {
   try {
-    const { sheetUrl, sheetName, performedBy } = req.body;
+    const { sheetUrl, name, sheetName, campaignTag, targetCity, sourceLabel, performedBy } = req.body;
     if (!sheetUrl) {
       return res.status(400).json({ error: 'Please provide a Google Sheet link or Spreadsheet ID.' });
     }
 
-    const liveData = await fetchLiveGoogleSheetData(sheetUrl, sheetName);
-
-    // Save configuration in integrations table
-    const config = {
-      spreadsheetUrl: liveData.cleanUrl,
-      spreadsheetId: liveData.spreadsheetId,
-      gid: liveData.gid,
-      sheetName: sheetName || 'Leads',
-      syncDirection: 'TWO_WAY',
-      autoExport: false,
-      headers: liveData.headers,
-      lastSyncedRows: liveData.totalRows
-    };
-
-    db.prepare(`
-      UPDATE integrations
-      SET is_enabled = 1,
-          status = 'CONNECTED',
-          config = ?,
-          last_sync_at = datetime('now'),
-          updated_at = datetime('now')
-      WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
-    `).run(JSON.stringify(config));
-
-    logAudit({
-      userName: performedBy || 'Admin',
-      action: 'GOOGLE_SHEETS_CONNECTED',
-      entity: 'integration',
-      entityId: liveData.spreadsheetId,
-      newValue: { sheetUrl: liveData.cleanUrl, rows: liveData.totalRows }
+    const result = await addOrConnectGoogleSheet({
+      name: name || 'Google Sheet Leads',
+      sheetUrl,
+      sheetName,
+      campaignTag,
+      targetCity,
+      sourceLabel,
+      performedBy: performedBy || 'Admin'
     });
 
     res.json({
       message: 'Google Sheet connected successfully!',
-      ...liveData
+      ...result
     });
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Failed to connect to Google Sheet.' });
   }
 });
 
-// Sync / Pull Leads from Live Connected Google Sheet
-apiRouter.post('/integrations/google-sheets/sync-live', async (req: Request, res: Response) => {
+// Sync / Ingest Leads from a specific Google Sheet by Connection ID
+apiRouter.post('/integrations/google-sheets/:id/sync', async (req: Request, res: Response) => {
   try {
-    let sheetUrl = req.body.sheetUrl;
-    if (!sheetUrl) {
-      const row = db.prepare("SELECT config FROM integrations WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'").get() as any;
-      if (row?.config) {
-        try {
-          const cfg = JSON.parse(row.config);
-          sheetUrl = cfg.spreadsheetUrl || cfg.spreadsheetId;
-        } catch (e) {}
-      }
+    const sheetId = req.params.id;
+    const sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+    if (!sheet) {
+      return res.status(404).json({ error: 'Google Sheet connection not found: ' + sheetId });
     }
 
-    if (!sheetUrl) {
-      return res.status(400).json({ error: 'No Google Sheet link configured. Please enter and connect a sheet link first.' });
-    }
+    const syncReport = await syncLiveGoogleSheetLeads(sheet.sheet_url, req.body.performedBy || 'Admin', {
+      campaignTag: sheet.campaign_tag,
+      targetCity: sheet.target_city,
+      sourceLabel: sheet.source_label,
+      connectionId: sheet.id
+    });
 
-    const syncReport = await syncLiveGoogleSheetLeads(sheetUrl, req.body.performedBy || 'Admin');
     res.json(syncReport);
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Failed to sync leads from Google Sheet.' });
   }
 });
 
-// Disconnect Live Google Sheet
+// Preview live rows from a specific Google Sheet by Connection ID
+apiRouter.post('/integrations/google-sheets/:id/preview', async (req: Request, res: Response) => {
+  try {
+    const sheetId = req.params.id;
+    const sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+    if (!sheet) {
+      return res.status(404).json({ error: 'Google Sheet connection not found: ' + sheetId });
+    }
+
+    const liveData = await fetchLiveGoogleSheetData(sheet.sheet_url, sheet.sheet_name);
+    res.json(liveData);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to preview Google Sheet.' });
+  }
+});
+
+// Update an existing Google Sheet connection
+apiRouter.put('/integrations/google-sheets/:id', (req: Request, res: Response) => {
+  try {
+    const updated = updateGoogleSheetConnection(req.params.id, req.body, req.body.performedBy || 'Admin');
+    res.json({ success: true, sheet: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Disconnect / Delete a specific Google Sheet connection
+apiRouter.delete('/integrations/google-sheets/:id', (req: Request, res: Response) => {
+  try {
+    const result = deleteGoogleSheetConnection(req.params.id, req.body.performedBy || 'Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Sync ALL Active Connected Google Sheets in one click
+apiRouter.post('/integrations/google-sheets/sync-all', async (req: Request, res: Response) => {
+  try {
+    const report = await syncAllActiveGoogleSheets(req.body.performedBy || 'Admin');
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to perform multi-sheet sync.' });
+  }
+});
+
+// Legacy / Direct live sync endpoint
+apiRouter.post('/integrations/google-sheets/sync-live', async (req: Request, res: Response) => {
+  try {
+    let sheetUrl = req.body.sheetUrl;
+    if (sheetUrl) {
+      const syncReport = await syncLiveGoogleSheetLeads(sheetUrl, req.body.performedBy || 'Admin');
+      return res.json(syncReport);
+    }
+
+    // If no sheet URL provided, sync all active sheets
+    const bulkReport = await syncAllActiveGoogleSheets(req.body.performedBy || 'Admin');
+    res.json(bulkReport);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to sync leads from Google Sheet.' });
+  }
+});
+
+// Disconnect standard Google Sheet integration
 apiRouter.post('/integrations/google-sheets/disconnect', (req: Request, res: Response) => {
   try {
     const config = {

@@ -357,6 +357,30 @@ CREATE TABLE IF NOT EXISTS integrations (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 21b. Multiple Google Sheets connections
+CREATE TABLE IF NOT EXISTS google_sheets_connections (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sheet_url TEXT NOT NULL,
+  spreadsheet_id TEXT NOT NULL,
+  gid TEXT NOT NULL DEFAULT '0',
+  sheet_name TEXT DEFAULT 'Leads 2026',
+  campaign_tag TEXT,
+  target_city TEXT,
+  source_label TEXT DEFAULT 'Google Sheets',
+  status TEXT NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'PAUSED'
+  total_leads_imported INTEGER NOT NULL DEFAULT 0,
+  last_rows_count INTEGER NOT NULL DEFAULT 0,
+  last_synced_at TEXT,
+  last_sync_status TEXT, -- 'SUCCESS', 'WARN', 'ERROR'
+  last_sync_error TEXT,
+  is_demo INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_gsheet_status ON google_sheets_connections(status);
+
 -- 22. Integration logs
 CREATE TABLE IF NOT EXISTS integration_logs (
   id TEXT PRIMARY KEY,
