@@ -14,12 +14,52 @@ Education Sansar CRM is an enterprise-grade, high-performance web CRM designed s
 ### Key Highlights
 - **100% Original UI & Implementation:** Custom blue corporate identity (`#1E3A8A`, `#2563EB`, `#0284C7`), responsive layouts, intuitive workflows, zero third-party proprietary dependencies.
 - **Relational Integrity with SQLite (WAL Mode):** Full ACID-compliant relational schema with 24 normalized tables, foreign key constraints, and performance indexes.
-- **Multi-Channel Lead Ingestion:** Inbound pipelines for Meta Lead Ads (Facebook & Instagram), website inquiries, phone walk-ins, and bulk CSV imports.
+- **Multi-Channel Lead Ingestion:** Inbound pipelines for Meta Lead Ads (Facebook & Instagram), website inquiries, phone walk-ins, live Google Sheets sharing links, and bulk CSV imports.
 - **Intelligent Duplicate Prevention (Section 8):** Multi-point matching on sanitized Phone, WhatsApp number, Email, and Meta Lead ID with interactive "View Lead", "Merge Lead", or "Create Anyway" choices.
 - **Automatic Counselor Assignment Engine:** Configurable Round Robin fair-share rotation, geographic city-matching (e.g. Birgunj desk vs. Delhi desk), course specialization, and manual routing.
 - **14-Stage Admission Pipeline Kanban:** Drag-and-drop or one-click stage progression tracking from *New Lead* to *Admission Confirmed*.
 - **Comprehensive Management Intelligence:** Real-time calculation of **CPL** (Cost Per Lead = Ad Spend / Leads) and **CPA** (Cost Per Admission = Ad Spend / Admissions), conversion rates, and counselor performance velocity.
 - **Safety First for Integrations:** Default `NOT CONNECTED` states for Meta and WhatsApp until live credentials are configured, backed by built-in interactive test simulators.
+
+---
+
+## 🚀 1-Click Cloud Platforms Deployment
+
+Deploy Education Sansar CRM to the cloud in under 60 seconds with free HTTPS, automated builds, and zero infrastructure hassle:
+
+### Option 1: 1-Click Deploy on Render
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+1. Push this repository to your GitHub account (`git push origin main`).
+2. Go to [Render Dashboard](https://dashboard.render.com/) > **New** > **Blueprint**.
+3. Select this repository. Render automatically reads [`render.yaml`](./render.yaml), installs dependencies, runs `npm run build`, and launches the service with automatic SSL!
+
+### Option 2: 1-Click Deploy on Railway
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new)
+
+1. Go to [Railway](https://railway.com/new) > **Deploy from GitHub repo**.
+2. Select this repository. Railway reads [`railway.json`](./railway.json) and [`Dockerfile`](./Dockerfile) to build and deploy your containerized CRM automatically.
+
+### Option 3: Deploy with Fly.io (Ultra Low Latency for Nepal & India)
+```bash
+# Launch app in Mumbai region (bom) for fast access from Kathmandu, Birgunj, and Delhi
+fly launch
+fly deploy
+```
+Pre-configured with [`fly.toml`](./fly.toml).
+
+### Option 4: Docker Container Deployment
+```bash
+docker build -t education-sansar-crm .
+docker run -p 5001:5001 -e PORT=5001 education-sansar-crm
+```
+
+### Option 5: Instant Live Public URL from Local Machine
+Want to share a live public link right now from this machine without cloud hosting?
+```bash
+npm run tunnel
+```
+Outputs an instant public HTTPS URL like `https://education-sansar-crm.loca.lt` accessible worldwide.
 
 ---
 

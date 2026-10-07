@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: education-sansar-crm
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        value: education_sansar_meta_verify_token_2026
+    healthCheckPath: /health
