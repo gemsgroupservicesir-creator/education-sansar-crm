@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-server
+.git
+.DS_Store
+*.log
+server/db/*.db-shm
+server/db/*.db-wal
+uploads/*
