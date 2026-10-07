@@ -69,7 +69,9 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Education Sansar CRM Server running on http://localhost:${PORT}`);
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`🚀 Education Sansar CRM Server is LIVE:`);
+  console.log(`   ➜ Local:   http://localhost:${PORT}`);
+  console.log(`   ➜ Network: http://192.168.1.29:${PORT}`);
   console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
 });
