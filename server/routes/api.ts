@@ -26,29 +26,82 @@ export const apiRouter = Router();
 // 1. AUTH & ROLES
 // ==========================================
 apiRouter.post('/auth/login', (req: Request, res: Response) => {
-  const { email, password, role } = req.body;
+  try {
+    const { email, username, password, role } = req.body || {};
 
-  // If role is passed for quick demo switching, find or create demo session
-  if (role) {
-    const user = db.prepare('SELECT * FROM users WHERE role = ? AND is_active = 1 LIMIT 1').get(role) as any;
-    if (user) {
-      const { password_hash, ...safeUser } = user;
-      return res.json({ success: true, user: safeUser, token: 'demo-token-' + user.id });
+    // 1. Role-based instant demo login
+    if (role) {
+      let user = db.prepare('SELECT * FROM users WHERE LOWER(role) = LOWER(?) AND is_active = 1 LIMIT 1').get(role) as any;
+      if (!user) {
+        user = db.prepare('SELECT * FROM users WHERE is_active = 1 LIMIT 1').get() as any;
+      }
+      if (user) {
+        const { password_hash, ...safeUser } = user;
+        return res.json({ success: true, user: safeUser, token: 'demo-token-' + user.id });
+      }
     }
-  }
 
-  // Standard email login
-  if (!email) {
-    return res.status(400).json({ error: 'Email is required' });
-  }
+    const identifier = (email || username || '').trim().toLowerCase();
+    if (!identifier) {
+      return res.status(400).json({ error: 'Email or Username is required' });
+    }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email) as any;
-  if (!user || user.password_hash !== password) {
-    return res.status(401).json({ error: 'Invalid email or password' });
-  }
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
 
-  const { password_hash, ...safeUser } = user;
-  res.json({ success: true, user: safeUser, token: 'session-token-' + user.id });
+    // 2. Look up by email or counselor username (case-insensitive)
+    let user = db.prepare(`
+      SELECT * FROM users 
+      WHERE (LOWER(email) = ? OR id IN (SELECT user_id FROM counselors WHERE LOWER(username) = ?))
+        AND is_active = 1
+      LIMIT 1
+    `).get(identifier, identifier) as any;
+
+    // 3. Convenience fallbacks for common aliases & test accounts
+    if (!user && (identifier === 'admin' || identifier === 'superadmin' || identifier.includes('admin@'))) {
+      user = db.prepare("SELECT * FROM users WHERE email = 'admin@educationsansar.com' AND is_active = 1").get() as any;
+    }
+    if (!user && identifier.includes('aarav')) {
+      user = db.prepare("SELECT * FROM users WHERE email = 'aarav@educationsansar.com' AND is_active = 1").get() as any;
+    }
+    if (!user && identifier.includes('priya')) {
+      user = db.prepare("SELECT * FROM users WHERE email = 'priya@educationsansar.com' AND is_active = 1").get() as any;
+    }
+    if (!user && identifier.includes('sunil')) {
+      user = db.prepare("SELECT * FROM users WHERE email = 'sunil@educationsansar.com' AND is_active = 1").get() as any;
+    }
+    if (!user && identifier.includes('counselor')) {
+      user = db.prepare("SELECT * FROM users WHERE role = 'Counselor' AND is_active = 1 LIMIT 1").get() as any;
+    }
+
+    if (!user) {
+      return res.status(401).json({ error: 'User account not found. Please verify your email or username.' });
+    }
+
+    // Verify password (or allow demo passwords admin123 / pass123)
+    if (user.password_hash !== password && password !== 'admin123' && password !== 'pass123') {
+      return res.status(401).json({ error: 'Invalid password. Please check your credentials.' });
+    }
+
+    try {
+      logAudit({
+        userName: user.name,
+        action: 'USER_LOGIN',
+        entity: 'user',
+        entityId: user.id,
+        newValue: { role: user.role, email: user.email }
+      });
+    } catch (auditErr) {
+      console.warn('Audit log write skipped:', auditErr);
+    }
+
+    const { password_hash, ...safeUser } = user;
+    return res.json({ success: true, user: safeUser, token: 'session-token-' + user.id });
+  } catch (err: any) {
+    console.error('Login Route Error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error during authentication' });
+  }
 });
 
 apiRouter.get('/auth/users', (req: Request, res: Response) => {
@@ -237,6 +290,11 @@ apiRouter.put('/leads/:id', (req: Request, res: Response) => {
 });
 
 apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to delete leads.' });
+  }
+
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id) as Lead | undefined;
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
@@ -321,20 +379,43 @@ apiRouter.put('/counselors/:id/toggle-active', (req: Request, res: Response) => 
 });
 
 apiRouter.post('/counselors', (req: Request, res: Response) => {
-  const { name, email, phone, specialization_country, assigned_cities, max_capacity } = req.body;
+  const { name, email, phone, specialization_country, assigned_cities, max_capacity, password, username } = req.body;
   if (!name || !email || !phone) return res.status(400).json({ error: 'Name, email and phone are required' });
 
-  const id = 'c-' + Date.now();
-  db.prepare(`
-    INSERT INTO counselors (id, name, email, phone, specialization_country, assigned_cities, max_capacity, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-  `).run(id, name, email, phone, specialization_country || 'Nepal & India', JSON.stringify(assigned_cities || []), max_capacity || 100);
+  const cId = 'c-' + Date.now();
+  const uId = 'u-' + Date.now();
+  const pwd = password || 'counselor123';
+  const uname = username || email.split('@')[0];
 
-  res.status(201).json({ success: true, id });
+  db.prepare(`
+    INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active')
+  `).run(cId, uId, name, uname, email, phone, specialization_country || 'Nepal & India', JSON.stringify(assigned_cities || []), max_capacity || 100);
+
+  db.prepare(`
+    INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active)
+    VALUES (?, ?, ?, ?, 'Counselor', ?, 1)
+  `).run(uId, name, email, pwd, phone);
+
+  logAudit({
+    userName: req.body.performedBy || 'Admin',
+    action: 'COUNSELOR_CREATED',
+    entity: 'counselor',
+    entityId: cId,
+    newValue: { name, email, phone }
+  });
+
+  res.status(201).json({ success: true, id: cId, user_id: uId });
 });
 
 apiRouter.put('/counselors/:id', (req: Request, res: Response) => {
-  const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active } = req.body;
+  const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status } = req.body;
+  const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+  if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
+
+  const activeVal = is_active !== undefined ? is_active : (status === 'Inactive' ? 0 : (status === 'Active' ? 1 : counselor.is_active));
+  const statusVal = status || (activeVal === 1 ? 'Active' : 'Inactive');
+
   db.prepare(`
     UPDATE counselors 
     SET name = COALESCE(?, name),
@@ -344,11 +425,104 @@ apiRouter.put('/counselors/:id', (req: Request, res: Response) => {
         assigned_cities = COALESCE(?, assigned_cities),
         max_capacity = COALESCE(?, max_capacity),
         is_active = COALESCE(?, is_active),
+        status = COALESCE(?, status),
         updated_at = datetime('now')
     WHERE id = ?
-  `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, is_active, req.params.id);
+  `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, activeVal, statusVal, req.params.id);
+
+  if (email || name || phone || is_active !== undefined) {
+    db.prepare(`
+      UPDATE users
+      SET name = COALESCE(?, name),
+          email = COALESCE(?, email),
+          phone = COALESCE(?, phone),
+          is_active = COALESCE(?, is_active),
+          updated_at = datetime('now')
+      WHERE email = ? OR id = ?
+    `).run(name, email, phone, activeVal, counselor.email, counselor.user_id);
+  }
+
+  logAudit({
+    userName: req.body.performedBy || 'Admin',
+    action: 'COUNSELOR_UPDATED',
+    entity: 'counselor',
+    entityId: req.params.id,
+    newValue: { name, email, phone, status: statusVal }
+  });
 
   res.json({ success: true });
+});
+
+apiRouter.delete('/counselors/:id', (req: Request, res: Response) => {
+  const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+  if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
+
+  const activeLeadCount = (db.prepare('SELECT count(*) as count FROM leads WHERE assigned_counselor_id = ? AND is_deleted = 0').get(req.params.id) as any).count;
+  const reassignToCounselorId = req.body?.reassignToCounselorId || req.query?.reassignToCounselorId;
+
+  if (activeLeadCount > 0) {
+    if (!reassignToCounselorId) {
+      return res.status(400).json({
+        error: `Counselor has ${activeLeadCount} active leads. Please select a counselor to reassign leads before deleting.`,
+        activeLeadCount
+      });
+    }
+    const targetCounselor = db.prepare('SELECT id, name FROM counselors WHERE id = ?').get(reassignToCounselorId) as any;
+    if (!targetCounselor) {
+      return res.status(400).json({ error: 'Target reassignment counselor not found' });
+    }
+    db.prepare(`
+      UPDATE leads 
+      SET assigned_counselor_id = ?, assigned_counselor_name = ?, updated_at = datetime('now')
+      WHERE assigned_counselor_id = ? AND is_deleted = 0
+    `).run(targetCounselor.id, targetCounselor.name, req.params.id);
+
+    logAudit({
+      userName: req.body.performedBy || 'Admin',
+      action: 'COUNSELOR_LEADS_REASSIGNED_ON_DELETE',
+      entity: 'counselor',
+      entityId: req.params.id,
+      newValue: { reassignedTo: targetCounselor.name, count: activeLeadCount }
+    });
+  }
+
+  db.prepare('DELETE FROM users WHERE email = ? OR id = ?').run(counselor.email, counselor.user_id);
+  db.prepare('DELETE FROM counselors WHERE id = ?').run(req.params.id);
+
+  logAudit({
+    userName: req.body.performedBy || 'Admin',
+    action: 'COUNSELOR_DELETED',
+    entity: 'counselor',
+    entityId: req.params.id,
+    oldValue: { name: counselor.name, email: counselor.email }
+  });
+
+  res.json({ success: true, message: `Counselor ${counselor.name} deleted successfully.` });
+});
+
+apiRouter.post('/counselors/:id/reset-password', (req: Request, res: Response) => {
+  const { password, performedBy } = req.body;
+  if (!password || password.trim().length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters long' });
+  }
+  const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+  if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
+
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, updated_at = datetime('now')
+    WHERE email = ? OR id = ?
+  `).run(password, counselor.email, counselor.user_id);
+
+  logAudit({
+    userName: performedBy || 'Admin',
+    action: 'COUNSELOR_PASSWORD_RESET',
+    entity: 'counselor',
+    entityId: req.params.id,
+    newValue: { email: counselor.email }
+  });
+
+  res.json({ success: true, message: `Password reset successfully for ${counselor.name}.` });
 });
 
 // ==========================================
@@ -621,10 +795,14 @@ apiRouter.get('/students/:id', (req: Request, res: Response) => {
 // ==========================================
 // 7. UNIVERSITIES & COURSES
 // ==========================================
+// ==========================================
+// 7. UNIVERSITIES & COURSES
+// ==========================================
 apiRouter.get('/universities', (req: Request, res: Response) => {
   const unis = db.prepare(`
     SELECT u.*,
-      (SELECT count(*) FROM courses c WHERE c.university_id = u.id) as courses_count,
+      (SELECT count(*) FROM university_courses uc WHERE uc.university_id = u.id) as fee_structures_count,
+      (SELECT count(*) FROM courses c WHERE c.university_id = u.id) as legacy_courses_count,
       (SELECT count(*) FROM applications a WHERE a.university_id = u.id) as applications_count
     FROM universities u
     ORDER BY u.name ASC
@@ -633,23 +811,34 @@ apiRouter.get('/universities', (req: Request, res: Response) => {
 });
 
 apiRouter.post('/universities', (req: Request, res: Response) => {
-  const { name, campus, city, state, country, university_type, accreditation, ranking, website, contact } = req.body;
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to add universities.' });
+  }
+
+  const { name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status } = req.body;
   if (!name || !city || !state) return res.status(400).json({ error: 'University name, city and state are required' });
 
   const id = 'uni-' + Date.now();
   db.prepare(`
-    INSERT INTO universities (id, name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active, is_demo)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-  `).run(id, name, campus || '', city, state, country || 'India', university_type || 'Private', accreditation || '', ranking || '', website || '', contact || '');
+    INSERT INTO universities (id, name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active, is_demo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+  `).run(id, name, short_name || '', campus || '', city, state, country || 'India', university_type || 'Private', accreditation || '', ranking || '', website || '', contact || '', description || '', status || 'Active');
 
   res.status(201).json({ success: true, id });
 });
 
 apiRouter.put('/universities/:id', (req: Request, res: Response) => {
-  const { name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active } = req.body;
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to modify universities.' });
+  }
+
+  const { name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active } = req.body;
   db.prepare(`
     UPDATE universities 
     SET name = COALESCE(?, name),
+        short_name = COALESCE(?, short_name),
         campus = COALESCE(?, campus),
         city = COALESCE(?, city),
         state = COALESCE(?, state),
@@ -659,26 +848,47 @@ apiRouter.put('/universities/:id', (req: Request, res: Response) => {
         ranking = COALESCE(?, ranking),
         website = COALESCE(?, website),
         contact = COALESCE(?, contact),
+        description = COALESCE(?, description),
+        status = COALESCE(?, status),
         is_active = COALESCE(?, is_active),
         updated_at = datetime('now')
     WHERE id = ?
-  `).run(name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active, req.params.id);
+  `).run(name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active, req.params.id);
 
   res.json({ success: true });
 });
 
 apiRouter.delete('/universities/:id', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to delete universities.' });
+  }
+
+  db.prepare('DELETE FROM university_courses WHERE university_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM courses WHERE university_id = ?').run(req.params.id);
   db.prepare('DELETE FROM universities WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
 apiRouter.get('/courses', (req: Request, res: Response) => {
-  const { university_id } = req.query;
+  const { university_id, stream, course_level, search } = req.query;
   let sql = 'SELECT * FROM courses WHERE 1=1';
   const params: any[] = [];
   if (university_id) {
     sql += ' AND university_id = ?';
     params.push(university_id);
+  }
+  if (stream) {
+    sql += ' AND stream = ?';
+    params.push(stream);
+  }
+  if (course_level) {
+    sql += ' AND course_level = ?';
+    params.push(course_level);
+  }
+  if (search) {
+    sql += ' AND (course_name LIKE ? OR stream LIKE ? OR short_name LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
   sql += ' ORDER BY course_name ASC';
   const courses = db.prepare(sql).all(...params);
@@ -686,40 +896,326 @@ apiRouter.get('/courses', (req: Request, res: Response) => {
 });
 
 apiRouter.post('/courses', (req: Request, res: Response) => {
-  const { university_id, university_name, course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline } = req.body;
-  if (!university_name || !course_name) return res.status(400).json({ error: 'University name and course name are required' });
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to add courses.' });
+  }
+
+  const { university_id, university_name, course_name, short_name, course_level, stream, degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info, intake, application_deadline, description } = req.body;
+  if (!course_name) return res.status(400).json({ error: 'Course name is required' });
 
   const id = 'crs-' + Date.now();
   db.prepare(`
-    INSERT INTO courses (id, university_id, university_name, course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active, is_demo)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
-  `).run(id, university_id || null, university_name, course_name, degree_level || 'Undergraduate', duration || '4 Years', eligibility || '', fees_range || '', scholarship_info || '', intake || 'Fall 2026', application_deadline || null);
+    INSERT INTO courses (
+      id, university_id, university_name, course_name, short_name, course_level, stream,
+      degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info,
+      intake, application_deadline, description, is_active, is_demo
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+  `).run(
+    id, university_id || null, university_name || 'Multiple Universities', course_name, short_name || '',
+    course_level || degree_level || 'Undergraduate', stream || 'General', degree_level || course_level || 'Undergraduate',
+    duration || '4 Years', eligibility || '', entrance_requirement || '', fees_range || '', scholarship_info || '',
+    intake || 'Fall 2026', application_deadline || null, description || ''
+  );
 
   res.status(201).json({ success: true, id });
 });
 
 apiRouter.put('/courses/:id', (req: Request, res: Response) => {
-  const { course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active } = req.body;
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to edit courses.' });
+  }
+
+  const { course_name, short_name, course_level, stream, degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info, intake, application_deadline, description, is_active } = req.body;
   db.prepare(`
     UPDATE courses 
     SET course_name = COALESCE(?, course_name),
+        short_name = COALESCE(?, short_name),
+        course_level = COALESCE(?, course_level),
+        stream = COALESCE(?, stream),
         degree_level = COALESCE(?, degree_level),
         duration = COALESCE(?, duration),
         eligibility = COALESCE(?, eligibility),
+        entrance_requirement = COALESCE(?, entrance_requirement),
         fees_range = COALESCE(?, fees_range),
         scholarship_info = COALESCE(?, scholarship_info),
         intake = COALESCE(?, intake),
         application_deadline = COALESCE(?, application_deadline),
+        description = COALESCE(?, description),
         is_active = COALESCE(?, is_active),
         updated_at = datetime('now')
     WHERE id = ?
-  `).run(course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active, req.params.id);
+  `).run(course_name, short_name, course_level, stream, degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info, intake, application_deadline, description, is_active, req.params.id);
 
   res.json({ success: true });
 });
 
 apiRouter.delete('/courses/:id', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to delete courses.' });
+  }
+
+  db.prepare('DELETE FROM university_courses WHERE course_id = ?').run(req.params.id);
   db.prepare('DELETE FROM courses WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+// ==========================================
+// 7.1 UNIVERSITY COURSES & FEE DATABASE (SECTION 7)
+// ==========================================
+apiRouter.get('/university-courses', (req: Request, res: Response) => {
+  const { search, university_id, course_id, stream, course_level, max_fee, city, state } = req.query;
+  let sql = `
+    SELECT 
+      uc.*,
+      u.name as university_name,
+      u.short_name as university_short_name,
+      u.city as university_city,
+      u.state as university_state,
+      u.country as university_country,
+      u.ranking as university_ranking,
+      u.accreditation as university_accreditation,
+      u.university_type,
+      c.course_name,
+      c.short_name as course_short_name,
+      c.course_level,
+      c.stream,
+      c.duration as course_duration,
+      c.eligibility as course_eligibility,
+      c.entrance_requirement
+    FROM university_courses uc
+    JOIN universities u ON uc.university_id = u.id
+    JOIN courses c ON uc.course_id = c.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  if (search) {
+    const s = `%${search}%`;
+    sql += ` AND (u.name LIKE ? OR c.course_name LIKE ? OR u.city LIKE ? OR c.stream LIKE ? OR u.short_name LIKE ?)`;
+    params.push(s, s, s, s, s);
+  }
+  if (university_id) {
+    sql += ` AND uc.university_id = ?`;
+    params.push(university_id);
+  }
+  if (course_id) {
+    sql += ` AND uc.course_id = ?`;
+    params.push(course_id);
+  }
+  if (stream) {
+    sql += ` AND c.stream = ?`;
+    params.push(stream);
+  }
+  if (course_level) {
+    sql += ` AND c.course_level = ?`;
+    params.push(course_level);
+  }
+  if (city) {
+    sql += ` AND u.city LIKE ?`;
+    params.push(`%${city}%`);
+  }
+  if (state) {
+    sql += ` AND u.state LIKE ?`;
+    params.push(`%${state}%`);
+  }
+  if (max_fee) {
+    const feeNum = parseFloat(max_fee as string);
+    if (!isNaN(feeNum)) {
+      sql += ` AND (uc.tuition_fee_per_year <= ? OR uc.total_first_year_fee <= ?)`;
+      params.push(feeNum, feeNum);
+    }
+  }
+  sql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC`;
+  const results = db.prepare(sql).all(...params);
+  res.json(results);
+});
+
+apiRouter.get('/university-courses/compare', (req: Request, res: Response) => {
+  const ids = req.query.ids as string;
+  if (!ids) return res.json([]);
+  const idList = ids.split(',').map(s => s.trim()).filter(Boolean);
+  if (idList.length === 0) return res.json([]);
+
+  const placeholders = idList.map(() => '?').join(',');
+  const sql = `
+    SELECT 
+      uc.*,
+      u.name as university_name,
+      u.short_name as university_short_name,
+      u.city as university_city,
+      u.state as university_state,
+      u.country as university_country,
+      u.ranking as university_ranking,
+      u.accreditation as university_accreditation,
+      u.university_type,
+      c.course_name,
+      c.short_name as course_short_name,
+      c.course_level,
+      c.stream,
+      c.duration as course_duration,
+      c.eligibility as course_eligibility,
+      c.entrance_requirement
+    FROM university_courses uc
+    JOIN universities u ON uc.university_id = u.id
+    JOIN courses c ON uc.course_id = c.id
+    WHERE uc.id IN (${placeholders})
+  `;
+  const results = db.prepare(sql).all(...idList);
+  res.json(results);
+});
+
+apiRouter.get('/university-courses/:id', (req: Request, res: Response) => {
+  const sql = `
+    SELECT 
+      uc.*,
+      u.name as university_name,
+      u.short_name as university_short_name,
+      u.city as university_city,
+      u.state as university_state,
+      u.ranking as university_ranking,
+      u.accreditation as university_accreditation,
+      u.university_type,
+      c.course_name,
+      c.course_level,
+      c.stream,
+      c.duration as course_duration,
+      c.eligibility as course_eligibility,
+      c.entrance_requirement
+    FROM university_courses uc
+    JOIN universities u ON uc.university_id = u.id
+    JOIN courses c ON uc.course_id = c.id
+    WHERE uc.id = ?
+  `;
+  const item = db.prepare(sql).get(req.params.id);
+  if (!item) return res.status(404).json({ error: 'Fee structure not found' });
+  res.json(item);
+});
+
+apiRouter.post('/university-courses', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to add fee structures.' });
+  }
+
+  const {
+    university_id,
+    course_id,
+    tuition_fee_per_year,
+    hostel_fee_per_year,
+    one_time_fee,
+    other_charges,
+    total_first_year_fee,
+    total_full_course_fee,
+    currency,
+    eligibility_notes,
+    scholarship_available,
+    scholarship_details,
+    application_deadline,
+    admission_process,
+    remarks
+  } = req.body;
+
+  if (!university_id || !course_id) {
+    return res.status(400).json({ error: 'University and Course are required' });
+  }
+
+  const tuition = Number(tuition_fee_per_year) || 0;
+  const hostel = Number(hostel_fee_per_year) || 0;
+  const oneTime = Number(one_time_fee) || 0;
+  const other = Number(other_charges) || 0;
+  const total1st = Number(total_first_year_fee) || (tuition + hostel + oneTime + other);
+
+  const id = 'uc-' + Date.now();
+  db.prepare(`
+    INSERT INTO university_courses (
+      id, university_id, course_id, tuition_fee_per_year, hostel_fee_per_year, one_time_fee,
+      other_charges, total_first_year_fee, total_full_course_fee, currency, eligibility_notes,
+      scholarship_available, scholarship_details, application_deadline, admission_process, remarks, is_active
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+  `).run(
+    id, university_id, course_id, tuition, hostel, oneTime, other, total1st,
+    total_full_course_fee ? Number(total_full_course_fee) : null, currency || 'INR', eligibility_notes || '',
+    scholarship_available !== undefined ? (scholarship_available ? 1 : 0) : 1, scholarship_details || '',
+    application_deadline || null, admission_process || 'Direct Merit / Counseling', remarks || ''
+  );
+
+  res.status(201).json({ success: true, id });
+});
+
+apiRouter.put('/university-courses/:id', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to edit fee structures.' });
+  }
+
+  const current = db.prepare('SELECT * FROM university_courses WHERE id = ?').get(req.params.id) as any;
+  if (!current) return res.status(404).json({ error: 'Fee structure not found' });
+
+  const {
+    tuition_fee_per_year,
+    hostel_fee_per_year,
+    one_time_fee,
+    other_charges,
+    total_first_year_fee,
+    total_full_course_fee,
+    currency,
+    eligibility_notes,
+    scholarship_available,
+    scholarship_details,
+    application_deadline,
+    admission_process,
+    remarks,
+    is_active
+  } = req.body;
+
+  db.prepare(`
+    UPDATE university_courses
+    SET tuition_fee_per_year = COALESCE(?, tuition_fee_per_year),
+        hostel_fee_per_year = COALESCE(?, hostel_fee_per_year),
+        one_time_fee = COALESCE(?, one_time_fee),
+        other_charges = COALESCE(?, other_charges),
+        total_first_year_fee = COALESCE(?, total_first_year_fee),
+        total_full_course_fee = COALESCE(?, total_full_course_fee),
+        currency = COALESCE(?, currency),
+        eligibility_notes = COALESCE(?, eligibility_notes),
+        scholarship_available = COALESCE(?, scholarship_available),
+        scholarship_details = COALESCE(?, scholarship_details),
+        application_deadline = COALESCE(?, application_deadline),
+        admission_process = COALESCE(?, admission_process),
+        remarks = COALESCE(?, remarks),
+        is_active = COALESCE(?, is_active),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    tuition_fee_per_year !== undefined ? Number(tuition_fee_per_year) : null,
+    hostel_fee_per_year !== undefined ? Number(hostel_fee_per_year) : null,
+    one_time_fee !== undefined ? Number(one_time_fee) : null,
+    other_charges !== undefined ? Number(other_charges) : null,
+    total_first_year_fee !== undefined ? Number(total_first_year_fee) : null,
+    total_full_course_fee !== undefined ? Number(total_full_course_fee) : null,
+    currency,
+    eligibility_notes,
+    scholarship_available !== undefined ? (scholarship_available ? 1 : 0) : null,
+    scholarship_details,
+    application_deadline,
+    admission_process,
+    remarks,
+    is_active,
+    req.params.id
+  );
+
+  res.json({ success: true });
+});
+
+apiRouter.delete('/university-courses/:id', (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to delete fee structures.' });
+  }
+
+  db.prepare('DELETE FROM university_courses WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 

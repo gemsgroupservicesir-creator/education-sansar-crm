@@ -69,9 +69,18 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-app.listen(Number(PORT), '0.0.0.0', () => {
+// Periodic Background Google Sheets sync (Every 15 minutes)
+setInterval(async () => {
+  try {
+    const { syncAllActiveGoogleSheets } = await import('./services/integrationService.ts');
+    await syncAllActiveGoogleSheets('System Background Sync');
+  } catch (err: any) {
+    console.log('Background sync check completed with note:', err.message);
+  }
+}, 15 * 60 * 1000);
+
+app.listen(Number(PORT), () => {
   console.log(`🚀 Education Sansar CRM Server is LIVE:`);
-  console.log(`   ➜ Local:   http://localhost:${PORT}`);
-  console.log(`   ➜ Network: http://192.168.1.29:${PORT}`);
+  console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
   console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
 });
