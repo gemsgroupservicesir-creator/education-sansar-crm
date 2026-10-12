@@ -1,5 +1,6 @@
 import { db, logAudit, logLeadActivity } from '../db/database.ts';
-import { createLead, checkDuplicate } from './leadService.ts';
+import { createLead, checkDuplicate, updateLead } from './leadService.ts';
+import { Lead } from '../types/index.ts';
 
 // Meta Lead Ads Webhook & Payload Processing
 export function verifyMetaWebhook(mode: string, token: string, challenge: string): string | null {
@@ -183,83 +184,190 @@ export function sendWhatsAppMessage(params: {
 export function handleGoogleSheetsLeadWebhook(payload: any) {
   const logId = 'LOG-GS-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
   try {
-    const raw = payload.simulatedRow || payload.row || payload;
+    const raw = payload.simulatedRow || payload.row || payload.lead || payload;
     
-    // Normalize fields from various possible column headers
-    const student_name = raw.student_name || raw['Student Name'] || raw['Full Name'] || raw['Name'] || raw.name || 'Sheet Inquirer';
-    const phone = raw.phone || raw['Phone'] || raw['Phone Number'] || raw['Mobile'] || raw['Contact Number'] || raw.mobile || '';
-    const whatsapp_number = raw.whatsapp_number || raw['WhatsApp'] || raw['WhatsApp Number'] || raw.whatsapp || phone;
-    const email = raw.email || raw['Email'] || raw['Email Address'] || '';
-    const city = raw.city || raw['City'] || raw['Location'] || raw['Branch'] || 'Kathmandu';
-    const country = raw.country || raw['Country'] || (['Delhi', 'Noida', 'Bangalore', 'Chennai', 'Mumbai', 'Pune'].includes(city) ? 'India' : 'Nepal');
-    const preferred_course = raw.preferred_course || raw['Course'] || raw['Preferred Course'] || raw['Course Interested'] || 'B.Tech Computer Science & Engineering';
-    const preferred_university = raw.preferred_university || raw['University'] || raw['Preferred University'] || 'SRM Institute of Science and Technology';
-    const academic_qualification = raw.academic_qualification || raw['Qualification'] || raw['12th Stream'] || '+2 Science';
-    const campaign = raw.campaign || raw['Campaign'] || raw['Source Sheet'] || 'Google Sheets Lead Sheet';
-    const lead_source = raw.lead_source || raw['Source'] || 'Google Sheets';
-    const remarks = raw.remarks || raw['Remarks'] || raw['Notes'] || (raw.row_number ? `Imported from Google Sheet row #${raw.row_number}` : 'Imported via Google Sheets webhook');
+    // Normalize fields from all expected Google Sheet columns:
+    // Lead ID, Date, Student Name, Phone, WhatsApp, Email, City, State/Country,
+    // Lead Source, Campaign, Course Interested, University Interested, Qualification,
+    // Percentage/Score, Passing Year, Budget, Assigned Counselor, Lead Status, Next Follow-up Date, Counselor Notes
+    const sheetLeadId = raw.lead_id || raw['Lead ID'] || raw['leadId'];
+    const student_name = (raw.student_name || raw['Student Name'] || raw['Full Name'] || raw['Name'] || raw.name || raw.fullName || '').trim();
+    const rawPhone = (raw.phone || raw['Phone'] || raw['Phone Number'] || raw['Mobile'] || raw['Contact Number'] || raw.mobile || '').toString().trim();
+    const rawWa = (raw.whatsapp_number || raw['WhatsApp'] || raw['WhatsApp Number'] || raw.whatsapp || rawPhone).toString().trim();
+    const email = (raw.email || raw['Email'] || raw['Email Address'] || '').toString().trim();
+    const city = (raw.city || raw['City'] || raw['Location'] || raw['Branch'] || 'Kathmandu').toString().trim();
+    const stateCountry = (raw['State/Country'] || raw['State'] || raw['Country'] || raw.country || '').toString().trim();
+    const country = stateCountry.toLowerCase().includes('india') ? 'India' : (['Delhi', 'Noida', 'Bangalore', 'Chennai', 'Mumbai', 'Pune'].includes(city) ? 'India' : 'Nepal');
+    const preferred_course = (raw.preferred_course || raw['Course Interested'] || raw['Course'] || raw['Preferred Course'] || raw.interestedCourse || 'B.Tech Computer Science & Engineering').toString().trim();
+    const preferred_university = (raw.preferred_university || raw['University Interested'] || raw['University'] || raw['Preferred University'] || raw.interestedUniversity || 'SRM Institute of Science and Technology').toString().trim();
+    const academic_qualification = (raw.academic_qualification || raw['Qualification'] || raw['12th Stream'] || '+2 Science').toString().trim();
+    const rawPercent = raw['Percentage/Score'] || raw['Percentage'] || raw['Score'] || raw.percentage_12th || raw.percentage_10th || raw.academicPercentage;
+    const percentage = rawPercent ? parseFloat(String(rawPercent).replace(/[^0-9.]/g, '')) : undefined;
+    const passing_year = (raw['Passing Year'] || raw.passing_year || raw.passingYear || '').toString().trim();
+    const budget = (raw['Budget'] || raw.budget || raw.budgetRange || '').toString().trim();
+    const assignedCounselorFromSheet = (raw['Assigned Counselor'] || raw.assigned_counselor_name || raw['Counselor'] || raw.assignedCounselor || '').toString().trim();
+    const lead_status = (raw['Lead Status'] || raw.lead_status || raw['Status'] || raw.leadStatus || 'New Lead').toString().trim();
+    const next_follow_up_date = (raw['Next Follow-up Date'] || raw.next_follow_up_date || raw['Follow-up Date'] || raw.nextFollowUpDate || '').toString().trim();
+    const sheetNotes = (raw['Counselor Notes'] || raw.counselor_notes || raw['Notes'] || raw['Remarks'] || raw.remarks || raw.leadNotes || '').toString().trim();
+    const parent_name = (raw["Father's/Mother's Name"] || raw['Parent Name'] || raw.parent_name || raw.fatherName || raw.parentName || '').toString().trim();
+    const school_college = (raw['School/College'] || raw.school_college || raw['College'] || raw['School'] || raw.schoolCollege || '').toString().trim();
+    const campaign = (raw.campaign || raw['Campaign'] || raw['Source Sheet'] || payload.sheetName || 'Google Sheets Lead Sheet').toString().trim();
+    const lead_source = (raw.lead_source || raw['Lead Source'] || raw['Source'] || 'Google Sheets').toString().trim();
+    const priority = (raw.priority || raw['Priority'] || '').toString().trim().toUpperCase();
 
-    if (!phone && !email) {
-      throw new Error('Google Sheet row missing both phone and email');
+    // If completely empty phone and student name, skip gracefully
+    if (!rawPhone && !email && !student_name) {
+      return {
+        success: false,
+        skipped: true,
+        message: 'Empty row skipped'
+      };
     }
 
-    const leadData = {
-      student_name,
-      phone,
-      whatsapp_number,
-      email,
-      city,
+    if (!rawPhone && !email) {
+      return {
+        success: false,
+        skipped: true,
+        message: 'Row missing contact details (Phone/Email required)'
+      };
+    }
+
+    const leadData: any = {
+      student_name: student_name || 'Sheet Inquirer',
+      phone: rawPhone,
+      whatsapp_number: rawWa || rawPhone,
+      email: email || '',
+      city: city || 'Kathmandu',
       country,
+      parent_name: parent_name || null,
+      school_college: school_college || null,
+      passing_year: passing_year || null,
+      academic_qualification: academic_qualification || null,
+      percentage_12th: percentage || null,
       preferred_course,
       preferred_university,
-      academic_qualification,
+      budget: budget || null,
       campaign,
       lead_source,
-      remarks,
-      is_demo: 1
+      priority: ['HIGH', 'MEDIUM', 'LOW'].includes(priority) ? priority : 'MEDIUM',
+      lead_status: lead_status || 'New Lead',
+      next_follow_up_date: next_follow_up_date || null,
+      remarks: sheetNotes || (raw.row_number ? `Imported from Google Sheet row #${raw.row_number}` : 'Imported via Google Sheets sync'),
+      is_demo: 0
     };
 
-    // 1. Duplicate check
+    // 1. Duplicate check - Phone Number is primary duplicate check
     const dupResult = checkDuplicate({
-      phone: leadData.phone,
-      whatsapp_number: leadData.whatsapp_number,
-      email: leadData.email
+      phone: rawPhone,
+      whatsapp_number: rawWa,
+      email: email
     });
 
     if (dupResult.hasDuplicate) {
       const existing = dupResult.duplicates[0];
-      const reasons = dupResult.matchReasons || ['Matching contact details found'];
-      db.prepare(`
-        INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
-        VALUES (?, 'Google Sheets', 'INBOUND', 'WARN', '/api/integrations/google-sheets/webhook', ?, ?, ?)
-      `).run(
-        logId,
-        JSON.stringify(payload),
-        JSON.stringify({ duplicateFound: true, existingLeadId: existing.lead_id, matchReasons: reasons }),
-        'Duplicate lead found in CRM database. Activity logged on existing record without duplication.'
-      );
+      const reasons = dupResult.matchReasons || ['Phone number matched existing lead'];
+
+      // IMPORTANT: If phone already exists, UPDATE the existing lead instead of creating another duplicate!
+      // Preserve existing CRM data, do not overwrite counselor unless unassigned, do not wipe historical notes
+      const updates: any = {};
+      if (student_name && (!existing.student_name || existing.student_name === 'Sheet Inquirer')) updates.student_name = student_name;
+      if (email && !existing.email) updates.email = email;
+      if (rawWa && !existing.whatsapp_number) updates.whatsapp_number = rawWa;
+      if (parent_name) updates.parent_name = parent_name;
+      if (school_college) updates.school_college = school_college;
+      if (passing_year) updates.passing_year = passing_year;
+      if (academic_qualification) updates.academic_qualification = academic_qualification;
+      if (percentage) updates.percentage_12th = percentage;
+      if (budget) updates.budget = budget;
+      if (priority && ['HIGH', 'MEDIUM', 'LOW'].includes(priority)) updates.priority = priority;
+      if (preferred_course && existing.preferred_course !== preferred_course) updates.preferred_course = preferred_course;
+      if (preferred_university && existing.preferred_university !== preferred_university) updates.preferred_university = preferred_university;
+      if (next_follow_up_date) updates.next_follow_up_date = next_follow_up_date;
+
+      // If existing lead has no counselor and sheet specified one, try matching
+      if (!existing.assigned_counselor_id && assignedCounselorFromSheet) {
+        const matchedCounselor = db.prepare('SELECT id, name FROM counselors WHERE is_active = 1 AND (name LIKE ? OR username LIKE ?) LIMIT 1').get(`%${assignedCounselorFromSheet}%`, `%${assignedCounselorFromSheet}%`) as any;
+        if (matchedCounselor) {
+          updates.assigned_counselor_id = matchedCounselor.id;
+          updates.assigned_counselor_name = matchedCounselor.name;
+        }
+      }
+
+      // Update existing record
+      if (Object.keys(updates).length > 0) {
+        updateLead(existing.id, updates, 'Google Sheets Sync');
+      }
+
+      // Append sheet notes to activity timeline without overwriting existing counselor notes
+      if (sheetNotes) {
+        logLeadActivity({
+          leadId: existing.id,
+          activityType: 'Note',
+          title: 'Google Sheet Sync Note',
+          description: `Sheet Note: "${sheetNotes}" (From ${campaign || 'Connected Sheet'})`,
+          performedBy: 'Google Sheets Sync'
+        });
+      }
 
       logLeadActivity({
         leadId: existing.id,
         activityType: 'Note',
-        title: 'Google Sheet Inbound Submission Match',
-        description: `New entry received from Google Sheet (${campaign}). Matched existing lead via ${reasons.join(', ')}.`,
-        performedBy: 'Google Sheets Webhook'
+        title: 'Google Sheet Inbound Sync Match',
+        description: `Lead updated from Google Sheet (${campaign}). Matched existing record via ${reasons.join(', ')}.`,
+        performedBy: 'Google Sheets Sync'
       });
+
+      db.prepare(`
+        INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+        VALUES (?, 'Google Sheets', 'INBOUND', 'SUCCESS', '/api/integrations/google-sheets/webhook', ?, ?)
+      `).run(
+        logId,
+        JSON.stringify(payload),
+        JSON.stringify({ updatedLeadId: existing.lead_id, matchReasons: reasons, fieldsUpdated: Object.keys(updates) })
+      );
+
+      const refreshed = db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id) as Lead;
 
       return {
         success: true,
         isDuplicate: true,
-        lead: existing,
+        updated: true,
+        lead: refreshed,
         reasons,
-        message: `Duplicate lead matched: ${existing.student_name} (${existing.lead_id})`
+        message: `Updated existing lead ${refreshed.student_name} (${refreshed.lead_id}) matched by phone number.`
       };
     }
 
-    // 2. Create Lead (auto assigns counselor, sets 24-hr follow-up, logs activity)
-    const newLead = createLead(leadData, 'Google Sheets Webhook');
+    // 2. New Lead: create lead (auto-assigns counselor, sets 24-hr follow-up, logs activity)
+    if (assignedCounselorFromSheet) {
+      const matchedC = db.prepare('SELECT id, name FROM counselors WHERE is_active = 1 AND (name LIKE ? OR username LIKE ?) LIMIT 1').get(`%${assignedCounselorFromSheet}%`, `%${assignedCounselorFromSheet}%`) as any;
+      if (matchedC) {
+        leadData.assigned_counselor_id = matchedC.id;
+        leadData.assigned_counselor_name = matchedC.name;
+      }
+    }
 
-    // 3. Log success in integration_logs
+    if (sheetLeadId) {
+      // Check if lead_id is unique
+      const existingId = db.prepare('SELECT id FROM leads WHERE lead_id = ?').get(sheetLeadId);
+      if (!existingId) {
+        leadData.lead_id = sheetLeadId;
+      }
+    }
+
+    const newLead = createLead(leadData, 'Google Sheets Sync');
+
+    // If sheet notes provided, record note
+    if (sheetNotes) {
+      logLeadActivity({
+        leadId: newLead.id,
+        activityType: 'Note',
+        title: 'Google Sheet Notes',
+        description: sheetNotes,
+        performedBy: 'Google Sheets Sync'
+      });
+    }
+
     db.prepare(`
       INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
       VALUES (?, 'Google Sheets', 'INBOUND', 'SUCCESS', '/api/integrations/google-sheets/webhook', ?, ?)
@@ -275,8 +383,9 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
     return {
       success: true,
       isDuplicate: false,
+      created: true,
       lead: newLead,
-      message: `Lead ${newLead.student_name} captured from Google Sheet and assigned to ${newLead.assigned_counselor_name || 'Counselor'}`
+      message: `New lead ${newLead.student_name} created and assigned to ${newLead.assigned_counselor_name || 'Counselor'}.`
     };
   } catch (err: any) {
     const errLogId = 'LOG-GS-ERR-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
@@ -284,7 +393,10 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, error_message)
       VALUES (?, 'Google Sheets', 'INBOUND', 'ERROR', '/api/integrations/google-sheets/webhook', ?, ?)
     `).run(errLogId, JSON.stringify(payload), err.message || 'Google Sheets inbound processing failed');
-    throw err;
+    return {
+      success: false,
+      error: err.message
+    };
   }
 }
 
@@ -355,43 +467,102 @@ export function getGoogleAppsScriptTemplate(baseUrl: string) {
  * Instructions:
  * 1. In your Google Sheet, open Extensions > Apps Script.
  * 2. Delete any existing code and paste this script.
- * 3. Update sheetName if different from "Leads".
- * 4. In Apps Script, click Triggers (clock icon) > Add Trigger:
- *    - Function: onFormSubmit (or onEdit)
- *    - Event source: From spreadsheet
- *    - Event type: On form submit (or On edit)
- * 5. Save and authorize permissions.
+ * 3. Update SHEET_NAME if your sheet tab is named something other than "Leads".
+ * 4. To test immediately: select "testSendLastRow" from the function dropdown and click "Run".
+ * 5. To set up automatic sync:
+ *    - Click Triggers (alarm clock icon on the left).
+ *    - Click "+ Add Trigger" (bottom right).
+ *    - Choose function: "onFormSubmit" (if linked to Google Form) OR "onEdit" (if manually editing sheet).
+ *    - Event source: "From spreadsheet".
+ *    - Event type: "On form submit" OR "On edit".
+ *    - Save and grant permissions.
  */
 
 const CRM_WEBHOOK_URL = "${webhookUrl}";
 const SHEET_NAME = "Leads";
 
+/**
+ * Triggered automatically when a Google Form submits a new response
+ */
 function onFormSubmit(e) {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const row = e.range ? e.range.getRow() : sheet.getLastRow();
-    sendRowToCRM(sheet, row);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME) 
+      || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    
+    // Safely get row number (whether triggered by event or manual run)
+    let row;
+    if (e && e.range) {
+      row = e.range.getRow();
+    } else {
+      row = sheet.getLastRow();
+    }
+
+    if (row > 1) {
+      sendRowToCRM(sheet, row);
+    } else {
+      Logger.log("No student data found to sync (row <= 1).");
+    }
   } catch (err) {
     Logger.log("Error in onFormSubmit: " + err.toString());
   }
 }
 
+/**
+ * Triggered automatically when any cell is edited in the sheet
+ */
 function onEdit(e) {
-  // Only trigger on edits in the configured sheet
-  const range = e.range;
-  const sheet = range.getSheet();
-  if (sheet.getName() !== SHEET_NAME) return;
-  
-  // Optional: trigger on row completion
-  const row = range.getRow();
-  if (row > 1) {
-    sendRowToCRM(sheet, row);
+  try {
+    const sheet = (e && e.range) 
+      ? e.range.getSheet() 
+      : (SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME) || SpreadsheetApp.getActiveSpreadsheet().getActiveSheet());
+    
+    // Only process edits on the target sheet tab
+    if (sheet.getName() !== SHEET_NAME) {
+      return;
+    }
+    
+    const row = (e && e.range) ? e.range.getRow() : sheet.getLastRow();
+    if (row > 1) {
+      sendRowToCRM(sheet, row);
+    }
+  } catch (err) {
+    Logger.log("Error in onEdit: " + err.toString());
   }
 }
 
+/**
+ * Test function: Click "Run" on this function in Apps Script to test the connection anytime!
+ */
+function testSendLastRow() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getActiveSheet();
+    const lastRow = sheet.getLastRow();
+    
+    if (lastRow <= 1) {
+      Logger.log("⚠️ Your sheet currently has no data rows (only headers or empty). Please add a row with Name & Phone to test.");
+      return;
+    }
+
+    Logger.log("🚀 Testing sync for Sheet: '" + sheet.getName() + "', Row: " + lastRow);
+    sendRowToCRM(sheet, lastRow);
+  } catch (err) {
+    Logger.log("❌ Test error: " + err.toString());
+  }
+}
+
+/**
+ * Core function to send row data to Education Sansar CRM webhook
+ */
 function sendRowToCRM(sheet, rowNumber) {
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const rowData = sheet.getRange(rowNumber, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    Logger.log("Sheet has no columns.");
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const rowData = sheet.getRange(rowNumber, 1, 1, lastCol).getValues()[0];
   
   const payload = {
     row_number: rowNumber,
@@ -401,19 +572,27 @@ function sendRowToCRM(sheet, rowNumber) {
   
   headers.forEach((header, index) => {
     if (header) {
-      payload[header.toString().trim()] = rowData[index];
+      const headerStr = header.toString().trim();
+      payload[headerStr] = rowData[index];
     }
   });
 
   const options = {
     method: "post",
     contentType: "application/json",
+    headers: {
+      "bypass-tunnel-reminder": "true"
+    },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
 
   const response = UrlFetchApp.fetch(CRM_WEBHOOK_URL, options);
-  Logger.log("CRM Response: " + response.getContentText());
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+  
+  Logger.log("CRM Status Code: " + responseCode);
+  Logger.log("CRM Response: " + responseText);
 }
 `;
 }
@@ -776,7 +955,9 @@ export async function syncLiveGoogleSheetLeads(
   const rows = liveData.allRows;
 
   let importedCount = 0;
+  let updatedCount = 0;
   let duplicateCount = 0;
+  let skippedCount = 0;
   let errorCount = 0;
   const importedLeads: any[] = [];
   const duplicateLeads: any[] = [];
@@ -792,22 +973,27 @@ export async function syncLiveGoogleSheetLeads(
 
       const res = handleGoogleSheetsLeadWebhook({
         row: rowData,
-        row_number: row.row_number || importedCount + duplicateCount + 2
+        row_number: row.row_number || importedCount + updatedCount + 2
       });
 
-      if (res.isDuplicate) {
+      if (res.skipped) {
+        skippedCount++;
+      } else if (res.updated) {
+        updatedCount++;
         duplicateCount++;
-        duplicateLeads.push(res.lead);
-      } else {
+        if (res.lead) duplicateLeads.push(res.lead);
+      } else if (res.created) {
         importedCount++;
-        importedLeads.push(res.lead);
+        if (res.lead) importedLeads.push(res.lead);
+      } else if (!res.success) {
+        errorCount++;
       }
     } catch (e) {
       errorCount++;
     }
   }
 
-  const syncStatus = errorCount > 0 && importedCount === 0 ? 'ERROR' : errorCount > 0 ? 'WARN' : 'SUCCESS';
+  const syncStatus = errorCount > 0 && importedCount === 0 && updatedCount === 0 ? 'ERROR' : errorCount > 0 ? 'WARN' : 'SUCCESS';
 
   // Update specific google_sheets_connections record if identified
   if (options?.connectionId) {
@@ -820,7 +1006,7 @@ export async function syncLiveGoogleSheetLeads(
           last_sync_error = NULL,
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(importedCount, rows.length, syncStatus, options.connectionId);
+    `).run(importedCount + updatedCount, rows.length, syncStatus, options.connectionId);
   } else {
     // Try matching by spreadsheet_id
     db.prepare(`

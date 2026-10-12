@@ -20,10 +20,20 @@ import {
   Snowflake,
   Upload,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  Check,
+  Landmark,
+  SlidersHorizontal,
+  Edit2,
+  DollarSign,
+  MapPin,
+  ExternalLink,
+  Search,
+  X
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Lead, Application, DocumentItem, FollowUp, LeadActivityItem, LeadStatus } from '../types';
+import { Lead, Application, DocumentItem, FollowUp, LeadActivityItem, LeadStatus, UniversityCourse } from '../types';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -44,7 +54,7 @@ export const LeadDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Active tab
-  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'applications' | 'documents' | 'timeline' | 'followups'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'finder' | 'applications' | 'documents' | 'timeline' | 'followups'>('profile');
 
   // Modals
   const [showNoteModal, setShowNoteModal] = useState(false);
@@ -52,6 +62,7 @@ export const LeadDetailPage: React.FC = () => {
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [showNewAppModal, setShowNewAppModal] = useState(false);
   const [showUploadDocModal, setShowUploadDocModal] = useState(false);
+  const [showEditLeadModal, setShowEditLeadModal] = useState(false);
 
   // Form states
   const [noteContent, setNoteContent] = useState('');
@@ -67,6 +78,32 @@ export const LeadDetailPage: React.FC = () => {
   const [docName, setDocName] = useState('');
   const [docType, setDocType] = useState('10th Marksheet');
 
+  // Finder states (Sections 8, 9, 20)
+  const [finderSearch, setFinderSearch] = useState('');
+  const [finderStream, setFinderStream] = useState('');
+  const [finderLevel, setFinderLevel] = useState('');
+  const [finderMaxBudget, setFinderMaxBudget] = useState<number | ''>('');
+  const [finderResults, setFinderResults] = useState<UniversityCourse[]>([]);
+  const [finderLoading, setFinderLoading] = useState(false);
+  const [selectedToCompare, setSelectedToCompare] = useState<string[]>([]);
+  const [showFinderCompareModal, setShowFinderCompareModal] = useState(false);
+  const [finderCompareData, setFinderCompareData] = useState<UniversityCourse[]>([]);
+  const [compareLoading, setCompareLoading] = useState(false);
+
+  // Edit Lead fields
+  const [editParentName, setEditParentName] = useState('');
+  const [editSchoolCollege, setEditSchoolCollege] = useState('');
+  const [editPassingYear, setEditPassingYear] = useState('');
+  const [editPriority, setEditPriority] = useState<'HIGH' | 'MEDIUM' | 'LOW'>('MEDIUM');
+  const [editQualification, setEditQualification] = useState('');
+  const [editP10, setEditP10] = useState('');
+  const [editP12, setEditP12] = useState('');
+  const [editGrad, setEditGrad] = useState('');
+  const [editEntranceExam, setEditEntranceExam] = useState('');
+  const [editEntranceScore, setEditEntranceScore] = useState('');
+  const [editBudget, setEditBudget] = useState('');
+  const [editRemarks, setEditRemarks] = useState('');
+
   const loadLeadDetails = async () => {
     if (!id) return;
     setLoading(true);
@@ -79,6 +116,9 @@ export const LeadDetailPage: React.FC = () => {
       setFollowups(res.followups || []);
       setStatusHistory(res.statusHistory || []);
       setAssignmentHistory(res.assignmentHistory || []);
+      if (!finderSearch && res.lead?.preferred_course) {
+        setFinderSearch(res.lead.preferred_course);
+      }
     } catch (err: any) {
       showToast('Error loading student profile: ' + err.message, 'error');
     } finally {
@@ -86,10 +126,129 @@ export const LeadDetailPage: React.FC = () => {
     }
   };
 
+  const searchUniversityCourses = async (overrideSearch?: string) => {
+    setFinderLoading(true);
+    try {
+      const q = overrideSearch !== undefined ? overrideSearch : finderSearch;
+      const data = await api.getUniversityCourses({
+        search: q,
+        stream: finderStream,
+        course_level: finderLevel,
+        max_fee: finderMaxBudget ? String(finderMaxBudget) : ''
+      });
+      setFinderResults(data);
+    } catch (err: any) {
+      showToast('Error searching courses: ' + err.message, 'error');
+    } finally {
+      setFinderLoading(false);
+    }
+  };
+
+  const handleStartAppForFinder = (item: UniversityCourse) => {
+    setNewAppUni(item.university_name);
+    setNewAppCourse(item.course_name);
+    setNewAppFee('1200');
+    setShowNewAppModal(true);
+  };
+
+  const handleSetPreferred = async (item: UniversityCourse) => {
+    if (!lead) return;
+    try {
+      await api.updateLead(lead.id, {
+        preferred_university: item.university_name,
+        preferred_course: item.course_name
+      });
+      showToast(`Preferred choice updated to ${item.course_name} at ${item.university_name}!`, 'success');
+      loadLeadDetails();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const toggleCompareFinder = (id: string) => {
+    setSelectedToCompare(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(x => x !== id);
+      } else {
+        if (prev.length >= 5) {
+          showToast('You can compare up to 5 universities side-by-side', 'warning');
+          return prev;
+        }
+        return [...prev, id];
+      }
+    });
+  };
+
+  const handleOpenFinderCompare = async () => {
+    if (selectedToCompare.length < 2) {
+      showToast('Please select at least 2 universities to compare', 'warning');
+      return;
+    }
+    setCompareLoading(true);
+    setShowFinderCompareModal(true);
+    try {
+      const data = await api.compareUniversityCourses(selectedToCompare);
+      setFinderCompareData(data);
+    } catch (err: any) {
+      showToast('Comparison failed: ' + err.message, 'error');
+    } finally {
+      setCompareLoading(false);
+    }
+  };
+
+  const handleOpenEditLeadModal = () => {
+    if (!lead) return;
+    setEditParentName(lead.parent_name || '');
+    setEditSchoolCollege(lead.school_college || '');
+    setEditPassingYear(lead.passing_year ? String(lead.passing_year) : '');
+    setEditPriority(lead.priority || 'MEDIUM');
+    setEditQualification(lead.academic_qualification || '');
+    setEditP10(lead.percentage_10th ? String(lead.percentage_10th) : '');
+    setEditP12(lead.percentage_12th ? String(lead.percentage_12th) : '');
+    setEditGrad(lead.graduation_percentage ? String(lead.graduation_percentage) : '');
+    setEditEntranceExam(lead.entrance_exam || '');
+    setEditEntranceScore(lead.entrance_score || '');
+    setEditBudget(lead.budget || '');
+    setEditRemarks(lead.remarks || '');
+    setShowEditLeadModal(true);
+  };
+
+  const handleSaveEditLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lead) return;
+    try {
+      await api.updateLead(lead.id, {
+        parent_name: editParentName,
+        school_college: editSchoolCollege,
+        passing_year: editPassingYear ? parseInt(editPassingYear, 10) : undefined,
+        priority: editPriority,
+        academic_qualification: editQualification,
+        percentage_10th: editP10 ? parseFloat(editP10) : undefined,
+        percentage_12th: editP12 ? parseFloat(editP12) : undefined,
+        graduation_percentage: editGrad ? parseFloat(editGrad) : undefined,
+        entrance_exam: editEntranceExam,
+        entrance_score: editEntranceScore,
+        budget: editBudget,
+        remarks: editRemarks,
+      });
+      showToast('Student academic details updated successfully', 'success');
+      setShowEditLeadModal(false);
+      loadLeadDetails();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
   useEffect(() => {
     loadLeadDetails();
     api.getCounselors().then(setCounselors).catch(() => {});
   }, [id]);
+
+  useEffect(() => {
+    if (activeTab === 'finder') {
+      searchUniversityCourses();
+    }
+  }, [activeTab, finderStream, finderLevel, finderMaxBudget]);
 
   if (loading && !lead) {
     return (
@@ -295,16 +454,15 @@ export const LeadDetailPage: React.FC = () => {
               <option value="Counseling Scheduled">Counseling Scheduled</option>
               <option value="Counseling Done">Counseling Done</option>
               <option value="Interested">Interested</option>
+              <option value="Not Interested">Not Interested</option>
+              <option value="Eligible">Eligible</option>
+              <option value="Not Eligible">Not Eligible</option>
               <option value="Application Started">Application Started</option>
               <option value="Documents Pending">Documents Pending</option>
-              <option value="Application Submitted">Application Submitted</option>
-              <option value="Offer Received">Offer Received</option>
-              <option value="Fee Pending">Fee Pending</option>
-              <option value="Fee Paid">Fee Paid</option>
+              <option value="Documents Submitted">Documents Submitted</option>
+              <option value="Offer Letter Issued">Offer Letter Issued</option>
               <option value="Admission Confirmed">Admission Confirmed 🎉</option>
-              <option value="Enrolled">Enrolled</option>
-              <option value="Lost">Lost</option>
-              <option value="Not Interested">Not Interested</option>
+              <option value="Dropped">Dropped</option>
             </select>
           </div>
         </div>
@@ -329,19 +487,28 @@ export const LeadDetailPage: React.FC = () => {
             <span>WhatsApp</span>
           </a>
 
-          {lead.email && (
-            <a
-              href={`mailto:${lead.email}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold"
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span>Email</span>
-            </a>
-          )}
+          <button
+            onClick={() => {
+              setActiveTab('finder');
+              searchUniversityCourses();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-bold border border-purple-200"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>Find University &amp; Fees</span>
+          </button>
+
+          <button
+            onClick={handleOpenEditLeadModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            <span>Edit Profile &amp; Academics</span>
+          </button>
 
           <button
             onClick={() => setShowFollowupModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-semibold"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-semibold"
           >
             <Calendar className="w-3.5 h-3.5" />
             <span>Schedule Follow-up</span>
@@ -361,19 +528,19 @@ export const LeadDetailPage: React.FC = () => {
                 setSelectedCounselorId(lead.assigned_counselor_id || '');
                 setShowReassignModal(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-semibold"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 hover:bg-blue-100 text-xs font-semibold"
             >
               <UserCheck className="w-3.5 h-3.5" />
-              <span>Reassign Counselor</span>
+              <span>Reassign</span>
             </button>
           )}
 
           <button
             onClick={() => setShowNewAppModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-semibold ml-auto"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold ml-auto shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Create University Application</span>
+            <span>Create Application</span>
           </button>
         </div>
       </div>
@@ -384,6 +551,7 @@ export const LeadDetailPage: React.FC = () => {
           { key: 'profile', label: 'Personal Information' },
           { key: 'academic', label: 'Academic & Entrance' },
           { key: 'preferences', label: 'Course Preferences' },
+          { key: 'finder', label: '⚡ University & Course Finder' },
           { key: 'applications', label: `Applications (${applications.length})` },
           { key: 'documents', label: `Documents (${documents.length})` },
           { key: 'timeline', label: `Communication Timeline (${activities.length})` },
@@ -419,24 +587,35 @@ export const LeadDetailPage: React.FC = () => {
             <div className="text-slate-900 font-mono font-semibold mt-1">{lead.whatsapp_number}</div>
           </div>
           <div>
+            <div className="text-slate-400 font-medium">Parent / Guardian Name</div>
+            <div className="text-slate-900 font-semibold mt-1">{lead.parent_name || 'Not provided'}</div>
+          </div>
+          <div>
             <div className="text-slate-400 font-medium">Email Address</div>
             <div className="text-slate-900 font-medium mt-1">{lead.email || 'N/A'}</div>
           </div>
           <div>
-            <div className="text-slate-400 font-medium">Gender</div>
-            <div className="text-slate-900 font-medium mt-1">{lead.gender || 'Not specified'}</div>
-          </div>
-          <div>
-            <div className="text-slate-400 font-medium">Date of Birth</div>
-            <div className="text-slate-900 font-medium mt-1">{lead.date_of_birth || 'Not specified'}</div>
+            <div className="text-slate-400 font-medium">Lead Priority</div>
+            <div className="mt-1">
+              <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                lead.priority === 'HIGH' ? 'bg-rose-100 text-rose-800' :
+                lead.priority === 'LOW' ? 'bg-slate-100 text-slate-700' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {lead.priority || 'MEDIUM'}
+              </span>
+            </div>
           </div>
           <div>
             <div className="text-slate-400 font-medium">Target Region &amp; City</div>
             <div className="text-slate-900 font-semibold mt-1">{lead.city}, {lead.country}</div>
           </div>
           <div>
-            <div className="text-slate-400 font-medium">Local Address</div>
-            <div className="text-slate-900 font-medium mt-1">{lead.address || 'N/A'}</div>
+            <div className="text-slate-400 font-medium">School / College Attended</div>
+            <div className="text-slate-900 font-medium mt-1">{lead.school_college || 'Not recorded'}</div>
+          </div>
+          <div>
+            <div className="text-slate-400 font-medium">Passing Year</div>
+            <div className="text-slate-900 font-medium mt-1">{lead.passing_year || 'N/A'}</div>
           </div>
           <div>
             <div className="text-slate-400 font-medium">Lead Source &amp; Campaign</div>
@@ -493,6 +672,17 @@ export const LeadDetailPage: React.FC = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-slate-400 font-medium">School / College Attended</div>
+              <div className="text-slate-900 font-semibold text-sm mt-1">{lead.school_college || 'Not recorded'}</div>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-slate-400 font-medium">Passing Year</div>
+              <div className="text-slate-900 font-semibold text-sm mt-1">{lead.passing_year || 'N/A'}</div>
+            </div>
+          </div>
+
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200/80">
             <h4 className="font-bold text-blue-900 text-xs uppercase tracking-wider mb-2">
               Entrance Exam Details
@@ -542,6 +732,253 @@ export const LeadDetailPage: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab: University & Course Finder (Sections 8, 9, 20) */}
+      {activeTab === 'finder' && (
+        <div className="space-y-5">
+          {/* Finder Toolbar */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  Fast University &amp; Course Matcher
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Filter university programs by student's target degree, city, and annual budget.
+                </p>
+              </div>
+
+              {selectedToCompare.length >= 2 && (
+                <button
+                  onClick={handleOpenFinderCompare}
+                  className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-900/20 flex items-center gap-1.5 animate-pulse"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Compare Selected ({selectedToCompare.length})</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={finderSearch}
+                  onChange={e => setFinderSearch(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && searchUniversityCourses()}
+                  placeholder="Course (e.g. B.Tech, MBA, BCA)..."
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-purple-500"
+                />
+              </div>
+
+              <select
+                value={finderStream}
+                onChange={e => setFinderStream(e.target.value)}
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-medium"
+              >
+                <option value="">All Academic Streams</option>
+                <option value="Engineering & Technology">Engineering</option>
+                <option value="Management & Business">Management</option>
+                <option value="Medical & Health Sciences">Medical &amp; Paramedical</option>
+                <option value="Computer Applications & IT">Computer Applications &amp; IT</option>
+                <option value="Law & Legal Studies">Law</option>
+                <option value="General">General</option>
+              </select>
+
+              <select
+                value={finderLevel}
+                onChange={e => setFinderLevel(e.target.value)}
+                className="px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-medium"
+              >
+                <option value="">All Degree Levels</option>
+                <option value="Undergraduate">Undergraduate (UG)</option>
+                <option value="Postgraduate">Postgraduate (PG)</option>
+                <option value="Diploma">Diploma / Polytechnic</option>
+              </select>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => searchUniversityCourses()}
+                  className="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Search Matches</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Budget Quick Filters */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-slate-500 flex items-center gap-1">
+                  <SlidersHorizontal className="w-3 h-3" /> Max 1st Yr Budget:
+                </span>
+                {[
+                  { label: 'Any', value: '' },
+                  { label: '≤ ₹3L', value: 300000 },
+                  { label: '≤ ₹5L', value: 500000 },
+                  { label: '≤ ₹8L', value: 800000 },
+                  { label: '≤ ₹12L', value: 1200000 },
+                ].map(b => (
+                  <button
+                    key={b.label}
+                    type="button"
+                    onClick={() => setFinderMaxBudget(b.value as any)}
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                      finderMaxBudget === b.value
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+
+              <span className="text-slate-500 font-medium">
+                Found <strong className="text-slate-900">{finderResults.length}</strong> matching options
+              </span>
+            </div>
+          </div>
+
+          {/* Results Grid */}
+          {finderLoading ? (
+            <div className="py-16 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin text-purple-600" />
+              <span>Matching universities &amp; fee structures...</span>
+            </div>
+          ) : finderResults.length === 0 ? (
+            <div className="bg-white p-12 text-center rounded-2xl border border-dashed border-slate-200 space-y-2">
+              <Landmark className="w-8 h-8 text-slate-300 mx-auto" />
+              <h4 className="text-xs font-bold text-slate-800">No programs match this search</h4>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Try loosening the course keyword or selecting a higher budget tier.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {finderResults.map(item => {
+                const isSelected = selectedToCompare.includes(item.id);
+
+                return (
+                  <div
+                    key={item.id}
+                    className={`bg-white rounded-2xl border p-5 flex flex-col justify-between transition-all space-y-3 ${
+                      isSelected
+                        ? 'border-purple-500 ring-2 ring-purple-500/20'
+                        : 'border-slate-200 hover:border-blue-300 shadow-xs'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                              {item.course_level || 'Undergraduate'}
+                            </span>
+                            {item.stream && (
+                              <span className="text-[10px] text-slate-500 font-medium truncate">
+                                {item.stream}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-900 mt-1 leading-snug">
+                            {item.course_name}
+                          </h4>
+                          <div className="text-xs font-semibold text-blue-800 flex items-center gap-1 mt-0.5">
+                            <Landmark className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>{item.university_name}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span>{item.university_city}, {item.university_state}</span>
+                            {item.university_ranking && (
+                              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 font-semibold border border-amber-200">
+                                {item.university_ranking}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Compare check */}
+                        <button
+                          onClick={() => toggleCompareFinder(item.id)}
+                          className={`shrink-0 w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${
+                            isSelected
+                              ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
+                              : 'border-slate-300 hover:border-purple-400 text-transparent'
+                          }`}
+                          title="Select to compare side-by-side"
+                        >
+                          <Check className="w-3.5 h-3.5 stroke-3" />
+                        </button>
+                      </div>
+
+                      {/* Fee Box */}
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1.5 text-xs">
+                        <div className="flex justify-between text-slate-600">
+                          <span>Tuition Fee / Yr:</span>
+                          <span className="font-bold text-slate-900 font-mono">
+                            ₹{item.tuition_fee_per_year.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Hostel &amp; Mess:</span>
+                          <span className="font-medium text-slate-700 font-mono">
+                            ₹{item.hostel_fee_per_year.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <div className="pt-1 border-t border-slate-200 flex justify-between font-bold text-slate-900">
+                          <span className="text-blue-900">1st Year Est Total:</span>
+                          <span className="text-blue-700 text-sm font-mono font-extrabold">
+                            ₹{item.total_first_year_fee.toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Scholarship info */}
+                      {item.scholarship_details && (
+                        <div className="p-2 rounded-lg bg-emerald-50 text-emerald-900 text-[11px] font-medium border border-emerald-100 flex items-start gap-1">
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                          <span><strong>Scholarship:</strong> {item.scholarship_details}</span>
+                        </div>
+                      )}
+
+                      {/* Eligibility */}
+                      {item.eligibility_notes && (
+                        <div className="text-[11px] text-slate-600">
+                          <span className="font-semibold text-slate-700">Eligibility:</span> {item.eligibility_notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => handleSetPreferred(item)}
+                        className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-slate-200"
+                        title="Set as preferred choice on student profile"
+                      >
+                        Set as Preferred
+                      </button>
+
+                      <button
+                        onClick={() => handleStartAppForFinder(item)}
+                        className="px-3 py-1.5 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Start Application</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -994,6 +1431,403 @@ export const LeadDetailPage: React.FC = () => {
               </button>
               <button type="submit" className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
                 Save Document
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal: Fast University Comparison (Finder Tab) */}
+      {showFinderCompareModal && (
+        <div className="fixed inset-0 z-50 p-4 sm:p-6 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-t-2xl">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-purple-600" />
+                  Fast University &amp; Fee Comparison
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Comparing {finderCompareData.length} selected programs for {lead.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowFinderCompareModal(false)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-x-auto flex-1">
+              {compareLoading ? (
+                <div className="py-20 text-center flex flex-col items-center justify-center gap-2 text-xs text-slate-500">
+                  <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
+                  <span>Loading comparative fee metrics...</span>
+                </div>
+              ) : finderCompareData.length === 0 ? (
+                <div className="text-center py-12 text-slate-500 text-xs">
+                  No comparison data returned.
+                </div>
+              ) : (
+                <div className="min-w-[650px]">
+                  <div className="grid grid-cols-[160px_repeat(auto-fit,minmax(200px,1fr))] border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
+                    {/* Row 1: University */}
+                    <div className="bg-slate-100 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      University
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 bg-purple-50/30 space-y-1">
+                        <div className="font-bold text-xs text-blue-900">{c.university_name}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {c.university_city}, {c.university_state}
+                        </div>
+                        {c.university_ranking && (
+                          <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                            {c.university_ranking}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Row 2: Program & Level */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Program &amp; Level
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 space-y-1">
+                        <div className="font-bold text-xs text-slate-800">{c.course_name}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {c.course_level} ({c.course_duration || '4 Years'})
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Row 3: Annual Tuition */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Annual Tuition
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 font-bold text-sm text-slate-900 font-mono">
+                        ₹{c.tuition_fee_per_year.toLocaleString('en-IN')}
+                      </div>
+                    ))}
+
+                    {/* Row 4: Hostel & Mess */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Hostel &amp; Mess / Yr
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 text-xs font-mono text-slate-700">
+                        ₹{c.hostel_fee_per_year.toLocaleString('en-IN')}
+                      </div>
+                    ))}
+
+                    {/* Row 5: 1st Year Estimated Cost */}
+                    <div className="bg-blue-50/70 p-3 font-bold text-xs text-blue-950 flex items-center">
+                      Total 1st Year Est.
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 bg-blue-50/70 font-extrabold text-sm text-blue-700 font-mono">
+                        ₹{c.total_first_year_fee.toLocaleString('en-IN')}
+                      </div>
+                    ))}
+
+                    {/* Row 6: Total Course Cost */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Full Course Est.
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 font-bold text-xs text-slate-800 font-mono">
+                        ₹{c.total_full_course_fee.toLocaleString('en-IN')}
+                      </div>
+                    ))}
+
+                    {/* Row 7: Scholarship */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Scholarship Offer
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 text-xs text-emerald-800 bg-emerald-50/40">
+                        {c.scholarship_details || 'Standard merit quota applies'}
+                      </div>
+                    ))}
+
+                    {/* Row 8: Eligibility */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Eligibility
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 text-xs text-slate-600">
+                        {c.eligibility_notes || c.course_eligibility || '50%+ in 10+2'}
+                      </div>
+                    ))}
+
+                    {/* Row 9: Application Deadline */}
+                    <div className="bg-slate-50 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Deadline
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 text-xs font-semibold text-rose-700">
+                        {c.application_deadline || 'Open / Rolling'}
+                      </div>
+                    ))}
+
+                    {/* Row 10: Counseling Fast Actions */}
+                    <div className="bg-slate-100 p-3 font-bold text-xs text-slate-700 flex items-center">
+                      Action
+                    </div>
+                    {finderCompareData.map((c) => (
+                      <div key={c.id} className="p-3 flex flex-col gap-1.5">
+                        <button
+                          onClick={() => {
+                            handleSetPreferred(c);
+                            setShowFinderCompareModal(false);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold border border-blue-200"
+                        >
+                          Set Preferred
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleStartAppForFinder(c);
+                            setShowFinderCompareModal(false);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs"
+                        >
+                          Start App
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 flex justify-end bg-slate-50 rounded-b-2xl">
+              <button
+                onClick={() => setShowFinderCompareModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Close Comparison
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Student Profile & Academic Details */}
+      {showEditLeadModal && (
+        <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+          <form
+            onSubmit={handleSaveEditLead}
+            className="w-full max-w-2xl bg-white rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-blue-600" />
+                  Edit Student Profile &amp; Academic Details
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Update guardian contacts, priority, scores, and admission eligibility
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditLeadModal(false)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Parent / Guardian Name
+                </label>
+                <input
+                  type="text"
+                  value={editParentName}
+                  onChange={e => setEditParentName(e.target.value)}
+                  placeholder="Father / Mother / Guardian"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Lead Urgency / Priority
+                </label>
+                <select
+                  value={editPriority}
+                  onChange={e => setEditPriority(e.target.value as any)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800"
+                >
+                  <option value="HIGH">HIGH (Urgent / Immediate)</option>
+                  <option value="MEDIUM">MEDIUM (Standard Follow-up)</option>
+                  <option value="LOW">LOW (Casual / Future Intake)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  School / College Attended
+                </label>
+                <input
+                  type="text"
+                  value={editSchoolCollege}
+                  onChange={e => setEditSchoolCollege(e.target.value)}
+                  placeholder="e.g. St. Xavier's, DAV Plus Two"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Year of Passing
+                </label>
+                <input
+                  type="number"
+                  value={editPassingYear}
+                  onChange={e => setEditPassingYear(e.target.value)}
+                  placeholder="e.g. 2024"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Academic Qualification Level
+                </label>
+                <select
+                  value={editQualification}
+                  onChange={e => setEditQualification(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800"
+                >
+                  <option value="">Select Qualification</option>
+                  <option value="+2 Science">+2 Science</option>
+                  <option value="+2 Management">+2 Management</option>
+                  <option value="+2 Humanities">+2 Humanities</option>
+                  <option value="12th CBSE / ISC">12th CBSE / ISC</option>
+                  <option value="A-Levels">A-Levels / Cambridge</option>
+                  <option value="Bachelor's Degree">Bachelor's Degree</option>
+                  <option value="Diploma">Diploma / Polytechnic</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  10th / SEE Score (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={editP10}
+                  onChange={e => setEditP10(e.target.value)}
+                  placeholder="e.g. 78.5"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  12th / +2 Score (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={editP12}
+                  onChange={e => setEditP12(e.target.value)}
+                  placeholder="e.g. 74.2"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Graduation Score (%) (if PG)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={editGrad}
+                  onChange={e => setEditGrad(e.target.value)}
+                  placeholder="e.g. 68.0"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Entrance Exam Name
+                </label>
+                <input
+                  type="text"
+                  value={editEntranceExam}
+                  onChange={e => setEditEntranceExam(e.target.value)}
+                  placeholder="e.g. JEE Main, NEET, CMAT, CAT, IELTS"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Entrance Score / Rank
+                </label>
+                <input
+                  type="text"
+                  value={editEntranceScore}
+                  onChange={e => setEditEntranceScore(e.target.value)}
+                  placeholder="e.g. 88.5 Percentile / Rank 1420"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Annual Budget Range
+                </label>
+                <input
+                  type="text"
+                  value={editBudget}
+                  onChange={e => setEditBudget(e.target.value)}
+                  placeholder="e.g. ₹3 - 5 Lakhs / Year (incl. hostel)"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Counselor Notes &amp; Observations
+                </label>
+                <textarea
+                  rows={3}
+                  value={editRemarks}
+                  onChange={e => setEditRemarks(e.target.value)}
+                  placeholder="Observations about student aptitude, family background, specific preferences..."
+                  className="w-full p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowEditLeadModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-600/20"
+              >
+                Save Student Info
               </button>
             </div>
           </form>

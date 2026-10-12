@@ -9,7 +9,8 @@ import {
   Calendar,
   AlertCircle,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  LogOut
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -19,17 +20,20 @@ interface HeaderProps {
   onOpenSidebar: () => void;
   onOpenSearch: () => void;
   onOpenCreateLead: () => void;
+  isSidebarCollapsed?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenSidebar,
   onOpenSearch,
-  onOpenCreateLead
+  onOpenCreateLead,
+  isSidebarCollapsed
 }) => {
-  const { user, currentRole, switchRole } = useAuth();
+  const { user, currentRole, switchRole, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const availableRoles: UserRole[] = [
     'Super Admin',
@@ -46,8 +50,9 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-3 flex-1 max-w-md">
         <button
           onClick={onOpenSidebar}
-          className="lg:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
-          aria-label="Open navigation menu"
+          className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
+          title={isSidebarCollapsed ? "Expand sidebar (⌘B)" : "Toggle sidebar (⌘B)"}
+          aria-label="Toggle navigation menu"
         >
           <Menu className="w-5 h-5" />
         </button>
@@ -69,12 +74,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Actions */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Demo Indicator */}
-        <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-[11px] font-semibold">
-          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-          <span>Demo System (Pre-loaded)</span>
-        </div>
-
         {/* Quick Add Lead Button */}
         <button
           onClick={onOpenCreateLead}
@@ -89,7 +88,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => setShowRoleMenu(!showRoleMenu)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium border border-slate-200 transition-all"
-            title="Switch demo persona to test RBAC permissions"
+            title="Switch active role persona"
           >
             <span className="text-[11px] text-slate-500 hidden sm:inline">Role:</span>
             <span className="font-semibold text-blue-700">{currentRole}</span>
@@ -190,19 +189,53 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* User Info Avatar */}
-        <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center font-bold text-xs">
-            {user?.name ? user.name.charAt(0) : 'U'}
-          </div>
-          <div className="hidden md:block text-left">
-            <div className="text-xs font-semibold text-slate-800 leading-tight truncate max-w-[120px]">
-              {user?.name || 'Administrator'}
+        {/* User Info Avatar & Menu */}
+        <div className="relative pl-2 border-l border-slate-200">
+          <button
+            onClick={() => setShowUserMenu(!showUserMenu)}
+            className="flex items-center gap-2 p-1 rounded-xl hover:bg-slate-100 transition-colors text-left"
+            title="User Profile & Sign Out"
+          >
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center font-bold text-xs shadow-2xs">
+              {user?.name ? user.name.charAt(0) : 'U'}
             </div>
-            <div className="text-[10px] text-slate-500 leading-tight truncate max-w-[120px]">
-              {user?.email || 'admin@educationsansar.com'}
+            <div className="hidden md:block">
+              <div className="text-xs font-semibold text-slate-800 leading-tight truncate max-w-[120px]">
+                {user?.name || 'Administrator'}
+              </div>
+              <div className="text-[10px] text-slate-500 leading-tight truncate max-w-[120px]">
+                {user?.email || 'admin@educationsansar.com'}
+              </div>
             </div>
-          </div>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
+          </button>
+
+          {showUserMenu && (
+            <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-1">
+              <div className="px-3.5 py-2 border-b border-slate-100">
+                <div className="font-bold text-xs text-slate-900">{user?.name}</div>
+                <div className="text-[11px] text-slate-500 truncate">{user?.email}</div>
+                <div className="mt-1">
+                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                    {currentRole}
+                  </span>
+                </div>
+              </div>
+
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    logout();
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-2 transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-rose-500" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -28,70 +28,54 @@ db.pragma('journal_mode = WAL');
 db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
 
+function runSafeMigrations() {
+  const addColumnIfNotExists = (table: string, column: string, columnDef: string) => {
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+      if (!cols.some(c => c.name === column)) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${columnDef};`);
+        console.log(`[Migration] Added column ${column} to ${table}`);
+      }
+    } catch (e: any) {
+      console.warn(`[Migration Notice] Table ${table}.${column}:`, e.message);
+    }
+  };
+
+  // Counselors fields
+  addColumnIfNotExists('counselors', 'username', 'TEXT');
+  addColumnIfNotExists('counselors', 'joining_date', 'TEXT');
+  addColumnIfNotExists('counselors', 'status', "TEXT NOT NULL DEFAULT 'Active'");
+
+  // Universities fields
+  addColumnIfNotExists('universities', 'short_name', 'TEXT');
+  addColumnIfNotExists('universities', 'description', 'TEXT');
+  addColumnIfNotExists('universities', 'status', "TEXT NOT NULL DEFAULT 'Active'");
+
+  // Courses fields
+  addColumnIfNotExists('courses', 'short_name', 'TEXT');
+  addColumnIfNotExists('courses', 'course_level', "TEXT NOT NULL DEFAULT 'UG'");
+  addColumnIfNotExists('courses', 'stream', "TEXT NOT NULL DEFAULT 'Engineering'");
+  addColumnIfNotExists('courses', 'entrance_requirement', 'TEXT');
+  addColumnIfNotExists('courses', 'description', 'TEXT');
+  addColumnIfNotExists('courses', 'status', "TEXT NOT NULL DEFAULT 'Active'");
+
+  // Leads fields
+  addColumnIfNotExists('leads', 'parent_name', 'TEXT');
+  addColumnIfNotExists('leads', 'school_college', 'TEXT');
+  addColumnIfNotExists('leads', 'passing_year', 'TEXT');
+  addColumnIfNotExists('leads', 'priority', "TEXT NOT NULL DEFAULT 'MEDIUM'");
+
+  // Google Sheets connections
+  addColumnIfNotExists('google_sheets_connections', 'column_mapping', 'TEXT');
+}
+
 // Initialize database schema
 export function initDatabase() {
   try {
     db.exec(SCHEMA_SQL);
-    console.log('✅ Database schema initialized successfully');
+    runSafeMigrations();
+    console.log('✅ Database schema initialized and migrated successfully');
 
-    // Ensure google_sheets_connections exists and has starter demo sheets
-    try {
-      const gsheetCount = (db.prepare('SELECT count(*) as count FROM google_sheets_connections').get() as { count: number })?.count || 0;
-      if (gsheetCount === 0) {
-        const insertGSheet = db.prepare(`
-          INSERT INTO google_sheets_connections (
-            id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        insertGSheet.run(
-          'gsheet-ktm-fair',
-          'Kathmandu Education Fair 2026',
-          'https://docs.google.com/spreadsheets/d/demo-sheet-kathmandu-fair-2026/edit?usp=sharing',
-          'demo-sheet-kathmandu-fair-2026',
-          '0',
-          'Leads 2026',
-          'Kathmandu Fair 2026',
-          'Kathmandu',
-          'Education Fair',
-          'ACTIVE',
-          4,
-          4,
-          1
-        );
-        insertGSheet.run(
-          'gsheet-birgunj-walkin',
-          'Birgunj & Janakpur Walk-ins',
-          'https://docs.google.com/spreadsheets/d/demo-sheet-birgunj-walkins-2026/edit?usp=sharing',
-          'demo-sheet-birgunj-walkins-2026',
-          '0',
-          'Inquiries',
-          'Branch Inquiries',
-          'Birgunj',
-          'Branch Walk-in',
-          'ACTIVE',
-          0,
-          4,
-          1
-        );
-        insertGSheet.run(
-          'gsheet-india-webinar',
-          'Study in India 2026 Webinar',
-          'https://docs.google.com/spreadsheets/d/demo-sheet-india-webinar-2026/edit?usp=sharing',
-          'demo-sheet-india-webinar-2026',
-          '0',
-          'Registrations',
-          'Study in India Webinar',
-          'Delhi',
-          'Webinar',
-          'ACTIVE',
-          0,
-          4,
-          1
-        );
-      }
-    } catch (e) {
-      console.warn('Google sheets table initialization warning:', e);
-    }
   } catch (error) {
     console.error('❌ Failed to initialize database schema:', error);
     throw error;

@@ -6,7 +6,7 @@
   "main": "server/index.ts",
   "scripts": {
     "dev:server": "tsx watch server/index.ts",
-    "dev:client": "vite",
+    "dev:client": "vite --port 5173",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",

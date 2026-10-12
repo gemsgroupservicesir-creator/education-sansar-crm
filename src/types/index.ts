@@ -98,6 +98,9 @@ export interface Counselor {
   name: string;
   email: string;
   phone: string;
+  username?: string;
+  joining_date?: string;
+  status?: string;
   specialization_country?: string;
   assigned_cities?: string;
   is_active: number;
@@ -119,6 +122,7 @@ export interface Lead {
   phone: string;
   whatsapp_number: string;
   email: string;
+  parent_name?: string; // Father's / Mother's Name
   gender?: string;
   date_of_birth?: string;
   country: string;
@@ -126,6 +130,8 @@ export interface Lead {
   city: string;
   address?: string;
   academic_qualification?: string;
+  school_college?: string;
+  passing_year?: string;
   percentage_10th?: number;
   percentage_12th?: number;
   graduation_percentage?: number;
@@ -146,6 +152,7 @@ export interface Lead {
   assigned_counselor_name?: string;
   lead_status: LeadStatus;
   lead_temperature: LeadTemperature;
+  priority?: 'HIGH' | 'MEDIUM' | 'LOW';
   last_contact_date?: string;
   next_follow_up_date?: string;
   remarks?: string;
@@ -230,34 +237,83 @@ export interface Student {
 export interface University {
   id: string;
   name: string;
+  short_name?: string;
   campus?: string;
   city: string;
   state: string;
   country: string;
-  university_type: 'Private' | 'Deemed' | 'State' | 'Central' | 'Autonomous';
+  university_type: string;
   accreditation?: string;
   ranking?: string;
   website?: string;
   contact?: string;
+  description?: string;
+  status?: string;
   is_active: number;
-  is_demo: number;
+  is_demo?: number;
   courses_count?: number;
+  applications_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Course {
   id: string;
   university_id?: string;
-  university_name: string;
+  university_name?: string;
   course_name: string;
-  degree_level: 'Undergraduate' | 'Postgraduate' | 'Diploma' | 'Doctorate';
+  short_name?: string;
+  course_level?: string; // 'UG' | 'PG' | 'Diploma' | 'PhD' | 'Other'
+  degree_level?: string;
+  stream?: string; // 'Engineering' | 'Management' | 'Commerce' | 'Computer Science' | 'Medical' | 'Law' | 'Arts' | 'Science' | 'Other'
   duration: string;
   eligibility?: string;
+  entrance_requirement?: string;
   fees_range?: string;
   scholarship_info?: string;
+  description?: string;
+  status?: string;
   intake?: string;
   application_deadline?: string;
   is_active: number;
-  is_demo: number;
+  is_demo?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UniversityCourse {
+  id: string;
+  university_id: string;
+  course_id: string;
+  tuition_fee: number;
+  hostel_fee: number;
+  other_fees: number;
+  total_fee: number;
+  duration: string;
+  eligibility?: string;
+  scholarship_available: number;
+  scholarship_details?: string;
+  application_fee: number;
+  admission_deadline?: string;
+  notes?: string;
+  status: 'Active' | 'Inactive';
+  created_at?: string;
+  updated_at?: string;
+  // Joined fields
+  university_name?: string;
+  university_short_name?: string;
+  university_city?: string;
+  university_state?: string;
+  university_country?: string;
+  university_type?: string;
+  university_ranking?: string;
+  university_accreditation?: string;
+  university_website?: string;
+  course_name?: string;
+  course_short_name?: string;
+  course_level?: string;
+  degree_level?: string;
+  stream?: string;
 }
 
 export interface DocumentItem {

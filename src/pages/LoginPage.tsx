@@ -22,56 +22,12 @@ import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { UserRole } from '../types';
 
-interface DemoAccount {
-  name: string;
-  role: UserRole;
-  email: string;
-  pass: string;
-  description: string;
-  badgeColor: string;
-}
-
-const DEMO_ACCOUNTS: DemoAccount[] = [
-  {
-    name: 'Bikash Karki',
-    role: 'Super Admin',
-    email: 'admin@educationsansar.com',
-    pass: 'admin123',
-    description: 'Full access: Counselor CRUD, Universities, Fees & Sheets',
-    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200'
-  },
-  {
-    name: 'Aarav Sharma',
-    role: 'Counselor',
-    email: 'aarav@educationsansar.com',
-    pass: 'pass123',
-    description: 'Counselor Desk: Nepal & North India assigned student leads',
-    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
-  },
-  {
-    name: 'Priya Patel',
-    role: 'Counselor',
-    email: 'priya@educationsansar.com',
-    pass: 'pass123',
-    description: 'Counselor Desk: Delhi NCR, Bangalore & Medical programs',
-    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200'
-  },
-  {
-    name: 'Sunil Shrestha',
-    role: 'Admin',
-    email: 'sunil@educationsansar.com',
-    pass: 'admin123',
-    description: 'Branch supervisor: Lead allocation & conversion oversight',
-    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200'
-  }
-];
-
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
   const { showToast } = useNotifications();
 
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState('admin@educationsansar.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -104,30 +60,6 @@ export const LoginPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickLogin = async (acc: DemoAccount) => {
-    setIdentifier(acc.email);
-    setPassword(acc.pass);
-    setError(null);
-    setLoading(true);
-
-    try {
-      const loggedUser = await login(acc.email, acc.pass);
-      showToast(`Logged in as ${loggedUser.name} (${acc.role})!`, 'success');
-      navigate('/');
-    } catch (err: any) {
-      setError(err.message || 'Quick login failed');
-      showToast(err.message || 'Quick login failed', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFillOnly = (acc: DemoAccount) => {
-    setIdentifier(acc.email);
-    setPassword(acc.pass);
-    setError(null);
   };
 
   return (
@@ -381,58 +313,13 @@ export const LoginPage: React.FC = () => {
             </button>
           </form>
 
-          {/* ========================================================== */}
-          {/* QUICK DEMO PRESET ACCOUNTS (Instant Testing) */}
-          {/* ========================================================== */}
-          <div className="pt-4 border-t border-slate-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span>Quick Demo Accounts</span>
-              </div>
-              <span className="text-[10px] text-slate-400 font-medium">1-Click Fill &amp; Sign In</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <div
-                  key={acc.email}
-                  className="p-2.5 rounded-xl bg-white border border-slate-200/80 hover:border-blue-300 hover:shadow-xs transition-all flex items-center justify-between gap-3 text-xs"
-                >
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 truncate">{acc.name}</span>
-                      <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${acc.badgeColor}`}>
-                        {acc.role}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 font-mono truncate">
-                      {acc.email} · <span className="text-slate-400">{acc.pass}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleFillOnly(acc)}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors"
-                      title="Fill email and password in form"
-                    >
-                      Fill
-                    </button>
-                    <button
-                      type="button"
-                      disabled={loading}
-                      onClick={() => handleQuickLogin(acc)}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-2xs transition-colors flex items-center gap-1"
-                      title="Sign in immediately with this account"
-                    >
-                      <span>Login</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+          {/* Production System Info */}
+          <div className="pt-4 border-t border-slate-200">
+            <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3 text-center space-y-1">
+              <p className="text-xs font-semibold text-slate-700">Official Staff &amp; Administrator Portal</p>
+              <p className="text-[11px] text-slate-500">
+                Please enter your registered Education Sansar CRM credentials.
+              </p>
             </div>
           </div>
         </div>

@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS counselors (
   total_assigned_leads INTEGER NOT NULL DEFAULT 0,
   total_admissions INTEGER NOT NULL DEFAULT 0,
   conversion_rate REAL NOT NULL DEFAULT 0.0,
+  username TEXT,
+  joining_date TEXT DEFAULT (date('now')),
+  status TEXT NOT NULL DEFAULT 'Active',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -54,32 +57,41 @@ CREATE TABLE IF NOT EXISTS counselors (
 CREATE TABLE IF NOT EXISTS universities (
   id TEXT PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
+  short_name TEXT,
   campus TEXT,
   city TEXT NOT NULL,
   state TEXT NOT NULL,
   country TEXT NOT NULL DEFAULT 'India',
-  university_type TEXT NOT NULL DEFAULT 'Private',
+  university_type TEXT NOT NULL DEFAULT 'Private', -- 'Private', 'Government', 'Deemed', 'Autonomous', 'Other'
   accreditation TEXT,
   ranking TEXT,
   website TEXT,
   contact TEXT,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'Active',
   is_active INTEGER NOT NULL DEFAULT 1,
   is_demo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- 6. Courses table
+-- 6. Courses table (Master Courses)
 CREATE TABLE IF NOT EXISTS courses (
   id TEXT PRIMARY KEY,
   university_id TEXT REFERENCES universities(id) ON DELETE CASCADE,
-  university_name TEXT NOT NULL,
+  university_name TEXT,
   course_name TEXT NOT NULL,
+  short_name TEXT,
+  course_level TEXT NOT NULL DEFAULT 'UG', -- 'UG', 'PG', 'Diploma', 'PhD', 'Other'
   degree_level TEXT NOT NULL DEFAULT 'Undergraduate',
+  stream TEXT NOT NULL DEFAULT 'Engineering', -- 'Engineering', 'Management', 'Commerce', 'Computer Science', 'Medical', 'Law', 'Arts', 'Science', 'Other'
   duration TEXT NOT NULL DEFAULT '4 Years',
   eligibility TEXT,
-  fees_range TEXT, -- Indicative/demo only
+  entrance_requirement TEXT,
+  fees_range TEXT, -- Indicative/demo range
   scholarship_info TEXT,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'Active',
   intake TEXT DEFAULT 'Fall 2026',
   application_deadline TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
@@ -87,6 +99,32 @@ CREATE TABLE IF NOT EXISTS courses (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 6b. University Courses & Fees junction (Structured University -> Course -> Fee relationship)
+CREATE TABLE IF NOT EXISTS university_courses (
+  id TEXT PRIMARY KEY,
+  university_id TEXT NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
+  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  tuition_fee REAL NOT NULL DEFAULT 0.0,
+  hostel_fee REAL NOT NULL DEFAULT 0.0,
+  other_fees REAL NOT NULL DEFAULT 0.0,
+  total_fee REAL NOT NULL DEFAULT 0.0,
+  duration TEXT NOT NULL DEFAULT '4 Years',
+  eligibility TEXT,
+  scholarship_available INTEGER NOT NULL DEFAULT 1,
+  scholarship_details TEXT,
+  application_fee REAL NOT NULL DEFAULT 0.0,
+  admission_deadline TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'Inactive'
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_uc_uni ON university_courses(university_id);
+CREATE INDEX IF NOT EXISTS idx_uc_course ON university_courses(course_id);
+CREATE INDEX IF NOT EXISTS idx_uc_total_fee ON university_courses(total_fee);
+CREATE INDEX IF NOT EXISTS idx_uc_status ON university_courses(status);
 
 -- 7. Leads table
 CREATE TABLE IF NOT EXISTS leads (
@@ -104,7 +142,10 @@ CREATE TABLE IF NOT EXISTS leads (
   state TEXT,
   city TEXT NOT NULL,
   address TEXT,
+  parent_name TEXT, -- Father's / Mother's Name
   academic_qualification TEXT,
+  school_college TEXT, -- School / College
+  passing_year TEXT, -- Passing Year
   percentage_10th REAL,
   percentage_12th REAL,
   graduation_percentage REAL,
@@ -125,6 +166,7 @@ CREATE TABLE IF NOT EXISTS leads (
   assigned_counselor_name TEXT,
   lead_status TEXT NOT NULL DEFAULT 'New Lead',
   lead_temperature TEXT NOT NULL DEFAULT 'WARM',
+  priority TEXT NOT NULL DEFAULT 'MEDIUM', -- 'HIGH', 'MEDIUM', 'LOW'
   last_contact_date TEXT,
   next_follow_up_date TEXT,
   remarks TEXT,

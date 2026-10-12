@@ -1,6 +1,15 @@
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
 import { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
 
+export function normalizePhoneNumber(phone?: string): string {
+  if (!phone) return '';
+  const digitsOnly = phone.replace(/[^0-9]/g, '');
+  if (digitsOnly.length >= 10) {
+    return digitsOnly.slice(-10);
+  }
+  return digitsOnly;
+}
+
 // Duplicate check
 export function checkDuplicate(params: {
   phone?: string;
@@ -13,17 +22,17 @@ export function checkDuplicate(params: {
   const queryParams: any[] = [];
   const matchReasons: string[] = [];
 
-  const cleanPhone = params.phone ? params.phone.replace(/[\s\-\(\)]/g, '') : '';
-  const cleanWa = params.whatsapp_number ? params.whatsapp_number.replace(/[\s\-\(\)]/g, '') : '';
+  const normPhone = normalizePhoneNumber(params.phone);
+  const normWa = normalizePhoneNumber(params.whatsapp_number);
   const cleanEmail = params.email ? params.email.trim().toLowerCase() : '';
 
-  if (cleanPhone) {
-    conditions.push("REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?");
-    queryParams.push(`%${cleanPhone.replace('+', '')}%`);
+  if (normPhone) {
+    conditions.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE ?");
+    queryParams.push(`%${normPhone}%`);
   }
-  if (cleanWa) {
-    conditions.push("REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?");
-    queryParams.push(`%${cleanWa.replace('+', '')}%`);
+  if (normWa) {
+    conditions.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE ?");
+    queryParams.push(`%${normWa}%`);
   }
   if (cleanEmail) {
     conditions.push("LOWER(TRIM(email)) = ?");
@@ -48,10 +57,13 @@ export function checkDuplicate(params: {
 
   if (duplicates.length > 0) {
     const d = duplicates[0];
-    if (cleanPhone && d.phone?.replace(/[\s\-\(\)\+]/g, '').includes(cleanPhone.replace('+', ''))) {
+    const dNormPhone = normalizePhoneNumber(d.phone);
+    const dNormWa = normalizePhoneNumber(d.whatsapp_number);
+
+    if (normPhone && (dNormPhone === normPhone || dNormPhone.includes(normPhone) || normPhone.includes(dNormPhone))) {
       matchReasons.push('Phone number matches existing record');
     }
-    if (cleanWa && d.whatsapp_number?.replace(/[\s\-\(\)\+]/g, '').includes(cleanWa.replace('+', ''))) {
+    if (normWa && (dNormWa === normWa || dNormWa.includes(normWa) || normWa.includes(dNormWa))) {
       matchReasons.push('WhatsApp number matches existing record');
     }
     if (cleanEmail && d.email?.toLowerCase().trim() === cleanEmail) {
@@ -194,20 +206,22 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
   const insertStmt = db.prepare(`
     INSERT INTO leads (
       id, lead_id, student_name, first_name, last_name, phone, whatsapp_number, email,
-      gender, date_of_birth, country, state, city, address, academic_qualification,
+      parent_name, gender, date_of_birth, country, state, city, address, academic_qualification,
+      school_college, passing_year,
       percentage_10th, percentage_12th, graduation_percentage, entrance_exam, entrance_score,
       preferred_course, preferred_university, second_university, budget, scholarship_required,
       lead_source, campaign, ad_set, ad, facebook_lead_id, lead_created_date,
-      assigned_counselor_id, assigned_counselor_name, lead_status, lead_temperature,
+      assigned_counselor_id, assigned_counselor_name, lead_status, lead_temperature, priority,
       last_contact_date, next_follow_up_date, remarks, created_by, updated_by,
       is_converted_to_student, is_deleted, is_demo
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, datetime('now'),
-      ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       0, 0, ?
     )
@@ -222,6 +236,7 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     data.phone || '',
     data.whatsapp_number || data.phone || '',
     data.email || '',
+    data.parent_name || null,
     data.gender || null,
     data.date_of_birth || null,
     data.country || 'Nepal',
@@ -229,6 +244,8 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     data.city || 'Kathmandu',
     data.address || null,
     data.academic_qualification || null,
+    data.school_college || null,
+    data.passing_year || null,
     data.percentage_10th || null,
     data.percentage_12th || null,
     data.graduation_percentage || null,
@@ -248,6 +265,7 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     counselorName || null,
     data.lead_status || 'New Lead',
     data.lead_temperature || 'WARM',
+    data.priority || 'MEDIUM',
     data.last_contact_date || null,
     data.next_follow_up_date || null,
     data.remarks || null,
@@ -338,10 +356,11 @@ export function updateLead(id: string, updates: Partial<Lead>, performedBy: stri
   // Build update query dynamically
   const allowedFields = [
     'student_name', 'first_name', 'last_name', 'phone', 'whatsapp_number', 'email',
-    'gender', 'date_of_birth', 'country', 'state', 'city', 'address', 'academic_qualification',
+    'parent_name', 'gender', 'date_of_birth', 'country', 'state', 'city', 'address', 'academic_qualification',
+    'school_college', 'passing_year',
     'percentage_10th', 'percentage_12th', 'graduation_percentage', 'entrance_exam', 'entrance_score',
     'preferred_course', 'preferred_university', 'second_university', 'budget', 'scholarship_required',
-    'lead_source', 'campaign', 'ad_set', 'ad', 'lead_status', 'lead_temperature',
+    'lead_source', 'campaign', 'ad_set', 'ad', 'lead_status', 'lead_temperature', 'priority',
     'last_contact_date', 'next_follow_up_date', 'remarks', 'assigned_counselor_id', 'assigned_counselor_name'
   ];
 

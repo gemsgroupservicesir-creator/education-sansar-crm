@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { CreateLeadModal } from './components/common/CreateLeadModal';
 
 // Pages
+import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LeadsPage } from './pages/LeadsPage';
 import { MyLeadsPage } from './pages/MyLeadsPage';
@@ -16,6 +17,7 @@ import { ApplicationsPage } from './pages/ApplicationsPage';
 import { StudentsPage } from './pages/StudentsPage';
 import { UniversitiesPage } from './pages/UniversitiesPage';
 import { CoursesPage } from './pages/CoursesPage';
+import { UniversityFeesPage } from './pages/UniversityFeesPage';
 import { CounselorsPage } from './pages/CounselorsPage';
 import { CampaignsPage } from './pages/CampaignsPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -24,20 +26,34 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { useNotifications } from './context/NotificationContext';
+import { useAuth } from './context/AuthContext';
 
 export const App: React.FC = () => {
+  const { isAuthenticated } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
   const { addToast } = useNotifications();
   const navigate = useNavigate();
 
-  // Keyboard shortcut: Cmd+K / Ctrl+K for search
+  const toggleSidebar = () => {
+    if (window.innerWidth < 1024) {
+      setSidebarOpen((prev) => !prev);
+    } else {
+      setSidebarCollapsed((prev) => !prev);
+    }
+  };
+
+  // Keyboard shortcut: Cmd+K / Ctrl+K for search, Cmd+B / Ctrl+B for sidebar toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -50,18 +66,34 @@ export const App: React.FC = () => {
     navigate(`/leads/${newLead.id}`);
   };
 
+  // If user is not logged in, render dedicated login view
+  if (!isAuthenticated) {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       {/* Sidebar Navigation */}
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Header */}
         <Header
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onOpenSidebar={toggleSidebar}
           onOpenSearch={() => setSearchOpen(true)}
           onOpenCreateLead={() => setCreateLeadOpen(true)}
+          isSidebarCollapsed={sidebarCollapsed}
         />
 
         {/* Dynamic Page Routes */}
@@ -78,6 +110,7 @@ export const App: React.FC = () => {
               <Route path="/students" element={<StudentsPage />} />
               <Route path="/universities" element={<UniversitiesPage />} />
               <Route path="/courses" element={<CoursesPage />} />
+              <Route path="/university-fees" element={<UniversityFeesPage />} />
               <Route path="/counselors" element={<CounselorsPage />} />
               <Route path="/campaigns" element={<CampaignsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
@@ -85,6 +118,8 @@ export const App: React.FC = () => {
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/login" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
         </main>

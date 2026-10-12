@@ -79,8 +79,8 @@ setInterval(async () => {
   }
 }, 15 * 60 * 1000);
 
-app.listen(Number(PORT), () => {
-  console.log(`🚀 Education Sansar CRM Server is LIVE:`);
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`🚀 Education Sansar CRM Server is LIVE on port ${PORT}:`);
   console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
   console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
 });

@@ -50,13 +50,25 @@ export function getDashboardKPIs(filters: FilterParams = {}) {
   const totalLeads = (db.prepare(`SELECT count(*) as count FROM leads ${whereSql}`).get(...params) as { count: number }).count;
 
   // New Leads Today
-  const newLeadsToday = (db.prepare(`SELECT count(*) as count FROM leads WHERE is_deleted = 0 AND date(created_at) = date('now')`).get() as { count: number }).count;
+  const newLeadsToday = (db.prepare(`
+    SELECT count(*) as count FROM leads 
+    WHERE is_deleted = 0 AND date(created_at) = date('now')
+    ${filters.counselorId ? 'AND assigned_counselor_id = ?' : ''}
+  `).get(...(filters.counselorId ? [filters.counselorId] : [])) as { count: number }).count;
 
   // New Leads This Week
-  const newLeadsThisWeek = (db.prepare(`SELECT count(*) as count FROM leads WHERE is_deleted = 0 AND date(created_at) >= date('now', '-7 days')`).get() as { count: number }).count;
+  const newLeadsThisWeek = (db.prepare(`
+    SELECT count(*) as count FROM leads 
+    WHERE is_deleted = 0 AND date(created_at) >= date('now', '-7 days')
+    ${filters.counselorId ? 'AND assigned_counselor_id = ?' : ''}
+  `).get(...(filters.counselorId ? [filters.counselorId] : [])) as { count: number }).count;
 
   // New Leads This Month
-  const newLeadsThisMonth = (db.prepare(`SELECT count(*) as count FROM leads WHERE is_deleted = 0 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')`).get() as { count: number }).count;
+  const newLeadsThisMonth = (db.prepare(`
+    SELECT count(*) as count FROM leads 
+    WHERE is_deleted = 0 AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+    ${filters.counselorId ? 'AND assigned_counselor_id = ?' : ''}
+  `).get(...(filters.counselorId ? [filters.counselorId] : [])) as { count: number }).count;
 
   // Follow-ups today
   const followupsToday = (db.prepare(`

@@ -5,3 +5,4 @@ dist-server/
 *.log
 *.db-shm
 *.db-wal
+*.db.bak
