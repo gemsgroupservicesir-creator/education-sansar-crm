@@ -1,12 +1,11 @@
 services:
   - type: web
     name: education-sansar-crm
-    runtime: docker
+    env: node
     plan: free
     region: singapore
-    dockerfilePath: ./Dockerfile
+    buildCommand: npm install
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 8080

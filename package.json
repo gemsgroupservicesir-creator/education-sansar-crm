@@ -11,8 +11,6 @@
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
-    "postinstall": "npm run build:client",
-    "prestart": "npm run build:client",
     "start": "NODE_ENV=production tsx server/index.ts",
     "tunnel": "npx localtunnel --port 5001",
     "seed": "tsx server/db/seed.ts"
@@ -28,7 +26,8 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.1",
     "recharts": "^2.15.0",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
@@ -42,7 +41,6 @@
     "concurrently": "^9.1.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
   }
