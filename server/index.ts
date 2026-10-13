@@ -47,16 +47,47 @@ app.get('/health', (req: Request, res: Response) => {
 
 // Production: serve built frontend static files
 const clientDist = path.resolve(__dirname, '../dist');
+let indexPath = path.join(clientDist, 'index.html');
+
+// Self-healing: Automatically build frontend if missing on startup
+if (!fs.existsSync(indexPath)) {
+  console.log('⚡ Frontend build not detected. Automatically compiling client with vite build...');
+  try {
+    const { execSync } = await import('child_process');
+    execSync('npm run build:client', { stdio: 'inherit', cwd: path.resolve(__dirname, '..') });
+    console.log('✅ Client successfully built on the fly!');
+  } catch (buildErr: any) {
+    console.error('⚠️ On-the-fly client build error:', buildErr.message);
+  }
+}
+
 app.use(express.static(clientDist));
 app.get('*', (req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
     return next();
   }
-  const indexPath = path.join(clientDist, 'index.html');
   if (fs.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
-  res.status(404).send('Frontend not built. Run npm run build:client');
+  // If still missing, try building once
+  try {
+    const { execSync } = require('child_process');
+    execSync('npm run build:client', { cwd: path.resolve(__dirname, '..') });
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+  } catch (e) {}
+
+  res.status(503).send(`
+    <!DOCTYPE html>
+    <html>
+      <head><title>Building Frontend...</title><meta http-equiv="refresh" content="5"></head>
+      <body style="font-family:sans-serif;text-align:center;padding:50px;">
+        <h2>Education Sansar CRM is starting up...</h2>
+        <p>The client bundle is being prepared. This page will refresh automatically in 5 seconds.</p>
+      </body>
+    </html>
+  `);
 });
 
 // User-friendly error handler (Avoid technical stack traces in UI)

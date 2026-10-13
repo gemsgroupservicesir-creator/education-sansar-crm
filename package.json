@@ -11,6 +11,8 @@
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
+    "postinstall": "npm run build:client",
+    "prestart": "npm run build:client",
     "start": "NODE_ENV=production tsx server/index.ts",
     "tunnel": "npx localtunnel --port 5001",
     "seed": "tsx server/db/seed.ts"
