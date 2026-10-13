@@ -1,0 +1,1172 @@
+import { Router } from 'express';
+import { db, logAudit, logLeadActivity } from '../db/database.ts';
+import { checkDuplicate, createLead, updateLead, reassignLead, convertLeadToStudent } from '../services/leadService.ts';
+import { getDashboardKPIs, getCampaignROIReport } from '../services/analyticsService.ts';
+import { verifyMetaWebhook, handleMetaLeadWebhook, sendWhatsAppMessage, handleGoogleSheetsLeadWebhook, exportLeadToGoogleSheet, getGoogleAppsScriptTemplate, fetchLiveGoogleSheetData, syncLiveGoogleSheetLeads } from '../services/integrationService.ts';
+export const apiRouter = Router();
+// ==========================================
+// 1. AUTH & ROLES
+// ==========================================
+apiRouter.post('/auth/login', (req, res) => {
+    const { email, password, role } = req.body;
+    // If role is passed for quick demo switching, find or create demo session
+    if (role) {
+        const user = db.prepare('SELECT * FROM users WHERE role = ? AND is_active = 1 LIMIT 1').get(role);
+        if (user) {
+            const { password_hash, ...safeUser } = user;
+            return res.json({ success: true, user: safeUser, token: 'demo-token-' + user.id });
+        }
+    }
+    // Standard email login
+    if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+    }
+    const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
+    if (!user || user.password_hash !== password) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    const { password_hash, ...safeUser } = user;
+    res.json({ success: true, user: safeUser, token: 'session-token-' + user.id });
+});
+apiRouter.get('/auth/users', (req, res) => {
+    const users = db.prepare('SELECT id, name, email, role, phone, is_active FROM users ORDER BY name ASC').all();
+    res.json(users);
+});
+// ==========================================
+// 2. LEADS
+// ==========================================
+apiRouter.get('/leads', (req, res) => {
+    const { search, status, counselorId, city, university, course, source, campaign, temperature, startDate, endDate, page = '1', limit = '25' } = req.query;
+    const whereClauses = ['is_deleted = 0'];
+    const params = [];
+    if (search) {
+        const s = `%${search}%`;
+        whereClauses.push('(student_name LIKE ? OR phone LIKE ? OR email LIKE ? OR lead_id LIKE ? OR city LIKE ?)');
+        params.push(s, s, s, s, s);
+    }
+    if (status) {
+        whereClauses.push('lead_status = ?');
+        params.push(status);
+    }
+    if (counselorId) {
+        whereClauses.push('assigned_counselor_id = ?');
+        params.push(counselorId);
+    }
+    if (city) {
+        whereClauses.push('city = ?');
+        params.push(city);
+    }
+    if (university) {
+        whereClauses.push('preferred_university = ?');
+        params.push(university);
+    }
+    if (course) {
+        whereClauses.push('preferred_course = ?');
+        params.push(course);
+    }
+    if (source) {
+        whereClauses.push('lead_source = ?');
+        params.push(source);
+    }
+    if (campaign) {
+        whereClauses.push('campaign = ?');
+        params.push(campaign);
+    }
+    if (temperature) {
+        whereClauses.push('lead_temperature = ?');
+        params.push(temperature);
+    }
+    if (startDate) {
+        whereClauses.push('date(created_at) >= date(?)');
+        params.push(startDate);
+    }
+    if (endDate) {
+        whereClauses.push('date(created_at) <= date(?)');
+        params.push(endDate);
+    }
+    const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
+    const total = db.prepare(`SELECT count(*) as count FROM leads ${whereSql}`).get(...params).count;
+    const p = Math.max(1, parseInt(page, 10));
+    const l = Math.max(1, parseInt(limit, 10));
+    const offset = (p - 1) * l;
+    const leads = db.prepare(`
+    SELECT * FROM leads 
+    ${whereSql}
+    ORDER BY created_at DESC 
+    LIMIT ? OFFSET ?
+  `).all(...params, l, offset);
+    res.json({
+        data: leads,
+        pagination: {
+            page: p,
+            limit: l,
+            total,
+            totalPages: Math.ceil(total / l)
+        }
+    });
+});
+apiRouter.post('/leads/check-duplicate', (req, res) => {
+    const result = checkDuplicate(req.body);
+    res.json(result);
+});
+apiRouter.post('/leads', (req, res) => {
+    try {
+        const { bypassDuplicateCheck, ...leadData } = req.body;
+        if (!leadData.student_name && !leadData.first_name) {
+            return res.status(400).json({ error: 'Student name is required' });
+        }
+        if (!leadData.phone) {
+            return res.status(400).json({ error: 'Phone number is required' });
+        }
+        // Check duplicate unless explicitly bypassed
+        if (!bypassDuplicateCheck) {
+            const dupCheck = checkDuplicate({
+                phone: leadData.phone,
+                whatsapp_number: leadData.whatsapp_number || leadData.phone,
+                email: leadData.email,
+                facebook_lead_id: leadData.facebook_lead_id
+            });
+            if (dupCheck.hasDuplicate) {
+                return res.status(409).json({
+                    error: 'Possible duplicate lead found',
+                    duplicates: dupCheck.duplicates,
+                    reasons: dupCheck.matchReasons
+                });
+            }
+        }
+        const lead = createLead(leadData, req.body.performedBy || 'User');
+        res.status(201).json(lead);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || 'Unable to create lead' });
+    }
+});
+apiRouter.get('/leads/:id', (req, res) => {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND is_deleted = 0').get(req.params.id);
+    if (!lead) {
+        return res.status(404).json({ error: 'Lead not found' });
+    }
+    // Linked Applications
+    const applications = db.prepare('SELECT * FROM applications WHERE lead_id = ? ORDER BY created_at DESC').all(lead.id);
+    // Linked Documents
+    const documents = db.prepare('SELECT * FROM documents WHERE lead_id = ? ORDER BY created_at DESC').all(lead.id);
+    // Activities timeline
+    const activities = db.prepare('SELECT * FROM lead_activities WHERE lead_id = ? ORDER BY created_at DESC').all(lead.id);
+    // Follow-ups
+    const followups = db.prepare('SELECT * FROM followups WHERE lead_id = ? ORDER BY follow_up_date DESC, follow_up_time DESC').all(lead.id);
+    // Status history
+    const statusHistory = db.prepare('SELECT * FROM lead_status_history WHERE lead_id = ? ORDER BY created_at DESC').all(lead.id);
+    // Assignment history
+    const assignmentHistory = db.prepare('SELECT * FROM lead_assignments WHERE lead_id = ? ORDER BY assigned_date DESC').all(lead.id);
+    res.json({
+        lead,
+        applications,
+        documents,
+        activities,
+        followups,
+        statusHistory,
+        assignmentHistory
+    });
+});
+apiRouter.put('/leads/:id', (req, res) => {
+    try {
+        const updated = updateLead(req.params.id, req.body, req.body.performedBy || 'User');
+        res.json(updated);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || 'Unable to update lead' });
+    }
+});
+apiRouter.delete('/leads/:id', (req, res) => {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+    if (!lead)
+        return res.status(404).json({ error: 'Lead not found' });
+    // Soft delete
+    db.prepare("UPDATE leads SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    logAudit({
+        userName: req.body.performedBy || 'User',
+        action: 'LEAD_DELETED_SOFT',
+        entity: 'lead',
+        entityId: req.params.id,
+        oldValue: { lead_id: lead.lead_id, student_name: lead.student_name }
+    });
+    res.json({ success: true, message: 'Lead soft-deleted successfully' });
+});
+apiRouter.post('/leads/:id/reassign', (req, res) => {
+    try {
+        const { counselorId, performedBy } = req.body;
+        if (!counselorId)
+            return res.status(400).json({ error: 'Please select a counselor' });
+        const updated = reassignLead(req.params.id, counselorId, performedBy || 'User');
+        res.json(updated);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || 'Unable to reassign lead' });
+    }
+});
+apiRouter.post('/leads/:id/activities', (req, res) => {
+    const { activity_type, title, description, performed_by } = req.body;
+    if (!title || !activity_type) {
+        return res.status(400).json({ error: 'Activity title and type are required' });
+    }
+    logLeadActivity({
+        leadId: req.params.id,
+        activityType: activity_type,
+        title,
+        description: description || '',
+        performedBy: performed_by || 'User'
+    });
+    // Update lead's last_contact_date if it's a contact activity
+    if (['Phone Call', 'WhatsApp', 'Meeting', 'Email'].includes(activity_type)) {
+        db.prepare("UPDATE leads SET last_contact_date = date('now'), updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+    }
+    res.json({ success: true });
+});
+// ==========================================
+// 3. COUNSELORS
+// ==========================================
+apiRouter.get('/counselors', (req, res) => {
+    const counselors = db.prepare(`
+    SELECT c.*,
+      (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.is_deleted = 0) as total_leads_count,
+      (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Interested', 'Application Started', 'Documents Pending') AND l.is_deleted = 0) as active_leads_count
+    FROM counselors c
+    ORDER BY c.name ASC
+  `).all();
+    res.json(counselors);
+});
+apiRouter.put('/counselors/:id/toggle-active', (req, res) => {
+    const c = db.prepare('SELECT is_active, name FROM counselors WHERE id = ?').get(req.params.id);
+    if (!c)
+        return res.status(404).json({ error: 'Counselor not found' });
+    const newActive = c.is_active === 1 ? 0 : 1;
+    db.prepare("UPDATE counselors SET is_active = ?, updated_at = datetime('now') WHERE id = ?").run(newActive, req.params.id);
+    logAudit({
+        userName: req.body.performedBy || 'Admin',
+        action: newActive ? 'COUNSELOR_ACTIVATED' : 'COUNSELOR_DEACTIVATED',
+        entity: 'counselor',
+        entityId: req.params.id,
+        newValue: { is_active: newActive, name: c.name }
+    });
+    res.json({ success: true, is_active: newActive });
+});
+apiRouter.post('/counselors', (req, res) => {
+    const { name, email, phone, specialization_country, assigned_cities, max_capacity } = req.body;
+    if (!name || !email || !phone)
+        return res.status(400).json({ error: 'Name, email and phone are required' });
+    const id = 'c-' + Date.now();
+    db.prepare(`
+    INSERT INTO counselors (id, name, email, phone, specialization_country, assigned_cities, max_capacity, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+  `).run(id, name, email, phone, specialization_country || 'Nepal & India', JSON.stringify(assigned_cities || []), max_capacity || 100);
+    res.status(201).json({ success: true, id });
+});
+apiRouter.put('/counselors/:id', (req, res) => {
+    const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active } = req.body;
+    db.prepare(`
+    UPDATE counselors 
+    SET name = COALESCE(?, name),
+        email = COALESCE(?, email),
+        phone = COALESCE(?, phone),
+        specialization_country = COALESCE(?, specialization_country),
+        assigned_cities = COALESCE(?, assigned_cities),
+        max_capacity = COALESCE(?, max_capacity),
+        is_active = COALESCE(?, is_active),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, is_active, req.params.id);
+    res.json({ success: true });
+});
+// ==========================================
+// 4. FOLLOW-UPS
+// ==========================================
+apiRouter.get('/followups', (req, res) => {
+    const { counselorId, status, view, date } = req.query;
+    let sql = `
+    SELECT f.*, 
+      l.student_name as lead_name, 
+      l.phone as lead_phone,
+      l.preferred_course,
+      l.preferred_university,
+      c.name as counselor_name
+    FROM followups f
+    JOIN leads l ON f.lead_id = l.id
+    LEFT JOIN counselors c ON f.counselor_id = c.id
+    WHERE l.is_deleted = 0
+  `;
+    const params = [];
+    if (counselorId) {
+        sql += ' AND f.counselor_id = ?';
+        params.push(counselorId);
+    }
+    if (view === 'today') {
+        sql += " AND date(f.follow_up_date) = date('now') AND f.status = 'Pending'";
+    }
+    else if (view === 'overdue') {
+        sql += " AND date(f.follow_up_date) < date('now') AND f.status = 'Pending'";
+    }
+    else if (view === 'upcoming') {
+        sql += " AND date(f.follow_up_date) > date('now') AND f.status = 'Pending'";
+    }
+    else if (view === 'completed') {
+        sql += " AND f.status = 'Completed'";
+    }
+    else if (status) {
+        sql += ' AND f.status = ?';
+        params.push(status);
+    }
+    if (date) {
+        sql += ' AND date(f.follow_up_date) = date(?)';
+        params.push(date);
+    }
+    sql += ' ORDER BY f.follow_up_date ASC, f.follow_up_time ASC';
+    const followups = db.prepare(sql).all(...params);
+    res.json(followups);
+});
+apiRouter.post('/followups', (req, res) => {
+    const { lead_id, counselor_id, follow_up_date, follow_up_time, type, priority, notes, performedBy } = req.body;
+    if (!lead_id || !follow_up_date) {
+        return res.status(400).json({ error: 'Lead ID and follow up date are required' });
+    }
+    const id = 'fup-' + Date.now();
+    db.prepare(`
+    INSERT INTO followups (id, lead_id, counselor_id, follow_up_date, follow_up_time, type, priority, notes, status, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+  `).run(id, lead_id, counselor_id || null, follow_up_date, follow_up_time || '10:00', type || 'Call', priority || 'MEDIUM', notes || '', performedBy || 'User');
+    // Update lead's next follow-up date
+    db.prepare("UPDATE leads SET next_follow_up_date = ?, updated_at = datetime('now') WHERE id = ?").run(follow_up_date, lead_id);
+    // Log activity
+    logLeadActivity({
+        leadId: lead_id,
+        activityType: 'Meeting',
+        title: `Follow-up Scheduled: ${type || 'Call'}`,
+        description: `Scheduled for ${follow_up_date} at ${follow_up_time || '10:00'}. Priority: ${priority || 'MEDIUM'}. Note: ${notes || 'None'}`,
+        performedBy: performedBy || 'User'
+    });
+    res.status(201).json({ success: true, id });
+});
+apiRouter.put('/followups/:id/complete', (req, res) => {
+    const { outcomeNotes, performedBy } = req.body;
+    const fup = db.prepare('SELECT * FROM followups WHERE id = ?').get(req.params.id);
+    if (!fup)
+        return res.status(404).json({ error: 'Follow-up not found' });
+    db.prepare(`
+    UPDATE followups 
+    SET status = 'Completed', 
+        completed_at = datetime('now'),
+        notes = CASE WHEN notes IS NOT NULL THEN notes || ' | Outcome: ' || ? ELSE ? END,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(outcomeNotes || 'Completed', outcomeNotes || 'Completed', req.params.id);
+    // Update lead last contact
+    db.prepare("UPDATE leads SET last_contact_date = date('now'), updated_at = datetime('now') WHERE id = ?").run(fup.lead_id);
+    // Log activity
+    logLeadActivity({
+        leadId: fup.lead_id,
+        activityType: fup.type === 'Call' ? 'Phone Call' : fup.type === 'WhatsApp' ? 'WhatsApp' : 'Meeting',
+        title: `Follow-up Completed: ${fup.type}`,
+        description: outcomeNotes ? `Outcome: ${outcomeNotes}` : 'Follow-up marked as completed.',
+        performedBy: performedBy || 'User'
+    });
+    res.json({ success: true });
+});
+// ==========================================
+// 5. APPLICATIONS
+// ==========================================
+apiRouter.get('/applications', (req, res) => {
+    const { status, counselorId, universityId, search } = req.query;
+    let sql = `
+    SELECT a.*, l.phone as student_phone, l.email as student_email
+    FROM applications a
+    JOIN leads l ON a.lead_id = l.id
+    WHERE l.is_deleted = 0
+  `;
+    const params = [];
+    if (status) {
+        sql += ' AND a.application_status = ?';
+        params.push(status);
+    }
+    if (counselorId) {
+        sql += ' AND a.counselor_id = ?';
+        params.push(counselorId);
+    }
+    if (universityId) {
+        sql += ' AND a.university_id = ?';
+        params.push(universityId);
+    }
+    if (search) {
+        sql += ' AND (a.student_name LIKE ? OR a.application_id LIKE ? OR a.application_number LIKE ?)';
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    sql += ' ORDER BY a.created_at DESC';
+    const apps = db.prepare(sql).all(...params);
+    res.json(apps);
+});
+apiRouter.post('/applications', (req, res) => {
+    const { lead_id, university_id, university_name, course_id, course_name, application_fee, deadline, remarks, performedBy } = req.body;
+    if (!lead_id || !university_name || !course_name) {
+        return res.status(400).json({ error: 'Lead, University and Course are required' });
+    }
+    const lead = db.prepare('SELECT student_name, assigned_counselor_id, assigned_counselor_name FROM leads WHERE id = ?').get(lead_id);
+    if (!lead)
+        return res.status(404).json({ error: 'Lead not found' });
+    const currentYear = new Date().getFullYear();
+    const countRow = db.prepare("SELECT count(*) as count FROM applications WHERE application_id LIKE ?").get(`APP-${currentYear}-%`);
+    const appId = `APP-${currentYear}-${(countRow.count + 1).toString().padStart(3, '0')}`;
+    const id = 'app-' + Date.now();
+    db.prepare(`
+    INSERT INTO applications (
+      id, application_id, lead_id, student_name, university_id, university_name, course_id, course_name,
+      application_date, application_status, application_fee, payment_status, deadline, counselor_id, counselor_name, remarks
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?,
+      date('now'), 'Application Started', ?, 'Unpaid', ?, ?, ?, ?
+    )
+  `).run(id, appId, lead_id, lead.student_name, university_id || null, university_name, course_id || null, course_name, application_fee || 0, deadline || null, lead.assigned_counselor_id || null, lead.assigned_counselor_name || null, remarks || '');
+    // Update lead status to Application Started if it was earlier stage
+    db.prepare(`
+    UPDATE leads 
+    SET lead_status = 'Application Started', updated_at = datetime('now')
+    WHERE id = ? AND lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Counseling Done', 'Interested')
+  `).run(lead_id);
+    // Log activity
+    logLeadActivity({
+        leadId: lead_id,
+        activityType: 'Application Update',
+        title: `New Application Created: ${appId}`,
+        description: `Applied for ${course_name} at ${university_name}`,
+        performedBy: performedBy || 'User'
+    });
+    res.status(201).json({ success: true, id, application_id: appId });
+});
+apiRouter.put('/applications/:id', (req, res) => {
+    const { application_status, payment_status, application_number, remarks, performedBy } = req.body;
+    const currentApp = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+    if (!currentApp)
+        return res.status(404).json({ error: 'Application not found' });
+    db.prepare(`
+    UPDATE applications 
+    SET application_status = COALESCE(?, application_status),
+        payment_status = COALESCE(?, payment_status),
+        application_number = COALESCE(?, application_number),
+        remarks = COALESCE(?, remarks),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(application_status, payment_status, application_number, remarks, req.params.id);
+    // If status is Admission Confirmed, trigger lead conversion
+    if (application_status === 'Admission Confirmed') {
+        convertLeadToStudent(currentApp.lead_id, performedBy || 'User');
+    }
+    // Log activity
+    logLeadActivity({
+        leadId: currentApp.lead_id,
+        activityType: 'Application Update',
+        title: `Application ${currentApp.application_id} Updated`,
+        description: `Status: ${application_status || currentApp.application_status}, Payment: ${payment_status || currentApp.payment_status}`,
+        performedBy: performedBy || 'User'
+    });
+    res.json({ success: true });
+});
+// ==========================================
+// 6. STUDENTS (Enrolled)
+// ==========================================
+apiRouter.get('/students', (req, res) => {
+    const { search, university, course } = req.query;
+    let sql = 'SELECT * FROM students WHERE 1=1';
+    const params = [];
+    if (search) {
+        sql += ' AND (student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?)';
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (university) {
+        sql += ' AND university = ?';
+        params.push(university);
+    }
+    if (course) {
+        sql += ' AND course = ?';
+        params.push(course);
+    }
+    sql += ' ORDER BY admission_date DESC';
+    const students = db.prepare(sql).all(...params);
+    res.json(students);
+});
+apiRouter.get('/students/:id', (req, res) => {
+    const student = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+    if (!student)
+        return res.status(404).json({ error: 'Student not found' });
+    // Get historical lead data
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(student.lead_id);
+    const applications = db.prepare('SELECT * FROM applications WHERE lead_id = ?').all(student.lead_id);
+    const documents = db.prepare('SELECT * FROM documents WHERE lead_id = ?').all(student.lead_id);
+    const activities = db.prepare('SELECT * FROM lead_activities WHERE lead_id = ? ORDER BY created_at DESC').all(student.lead_id);
+    res.json({
+        student,
+        lead,
+        applications,
+        documents,
+        activities
+    });
+});
+// ==========================================
+// 7. UNIVERSITIES & COURSES
+// ==========================================
+apiRouter.get('/universities', (req, res) => {
+    const unis = db.prepare(`
+    SELECT u.*,
+      (SELECT count(*) FROM courses c WHERE c.university_id = u.id) as courses_count,
+      (SELECT count(*) FROM applications a WHERE a.university_id = u.id) as applications_count
+    FROM universities u
+    ORDER BY u.name ASC
+  `).all();
+    res.json(unis);
+});
+apiRouter.post('/universities', (req, res) => {
+    const { name, campus, city, state, country, university_type, accreditation, ranking, website, contact } = req.body;
+    if (!name || !city || !state)
+        return res.status(400).json({ error: 'University name, city and state are required' });
+    const id = 'uni-' + Date.now();
+    db.prepare(`
+    INSERT INTO universities (id, name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active, is_demo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+  `).run(id, name, campus || '', city, state, country || 'India', university_type || 'Private', accreditation || '', ranking || '', website || '', contact || '');
+    res.status(201).json({ success: true, id });
+});
+apiRouter.put('/universities/:id', (req, res) => {
+    const { name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active } = req.body;
+    db.prepare(`
+    UPDATE universities 
+    SET name = COALESCE(?, name),
+        campus = COALESCE(?, campus),
+        city = COALESCE(?, city),
+        state = COALESCE(?, state),
+        country = COALESCE(?, country),
+        university_type = COALESCE(?, university_type),
+        accreditation = COALESCE(?, accreditation),
+        ranking = COALESCE(?, ranking),
+        website = COALESCE(?, website),
+        contact = COALESCE(?, contact),
+        is_active = COALESCE(?, is_active),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(name, campus, city, state, country, university_type, accreditation, ranking, website, contact, is_active, req.params.id);
+    res.json({ success: true });
+});
+apiRouter.delete('/universities/:id', (req, res) => {
+    db.prepare('DELETE FROM universities WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+});
+apiRouter.get('/courses', (req, res) => {
+    const { university_id } = req.query;
+    let sql = 'SELECT * FROM courses WHERE 1=1';
+    const params = [];
+    if (university_id) {
+        sql += ' AND university_id = ?';
+        params.push(university_id);
+    }
+    sql += ' ORDER BY course_name ASC';
+    const courses = db.prepare(sql).all(...params);
+    res.json(courses);
+});
+apiRouter.post('/courses', (req, res) => {
+    const { university_id, university_name, course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline } = req.body;
+    if (!university_name || !course_name)
+        return res.status(400).json({ error: 'University name and course name are required' });
+    const id = 'crs-' + Date.now();
+    db.prepare(`
+    INSERT INTO courses (id, university_id, university_name, course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active, is_demo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+  `).run(id, university_id || null, university_name, course_name, degree_level || 'Undergraduate', duration || '4 Years', eligibility || '', fees_range || '', scholarship_info || '', intake || 'Fall 2026', application_deadline || null);
+    res.status(201).json({ success: true, id });
+});
+apiRouter.put('/courses/:id', (req, res) => {
+    const { course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active } = req.body;
+    db.prepare(`
+    UPDATE courses 
+    SET course_name = COALESCE(?, course_name),
+        degree_level = COALESCE(?, degree_level),
+        duration = COALESCE(?, duration),
+        eligibility = COALESCE(?, eligibility),
+        fees_range = COALESCE(?, fees_range),
+        scholarship_info = COALESCE(?, scholarship_info),
+        intake = COALESCE(?, intake),
+        application_deadline = COALESCE(?, application_deadline),
+        is_active = COALESCE(?, is_active),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(course_name, degree_level, duration, eligibility, fees_range, scholarship_info, intake, application_deadline, is_active, req.params.id);
+    res.json({ success: true });
+});
+apiRouter.delete('/courses/:id', (req, res) => {
+    db.prepare('DELETE FROM courses WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+});
+// ==========================================
+// 8. DOCUMENTS
+// ==========================================
+apiRouter.get('/documents', (req, res) => {
+    const { lead_id, status } = req.query;
+    let sql = 'SELECT * FROM documents WHERE 1=1';
+    const params = [];
+    if (lead_id) {
+        sql += ' AND lead_id = ?';
+        params.push(lead_id);
+    }
+    if (status) {
+        sql += ' AND verification_status = ?';
+        params.push(status);
+    }
+    sql += ' ORDER BY upload_date DESC';
+    const docs = db.prepare(sql).all(...params);
+    res.json(docs);
+});
+apiRouter.post('/documents/upload', (req, res) => {
+    const { lead_id, student_id, application_id, file_name, file_url, document_type, uploaded_by } = req.body;
+    if (!lead_id || !file_name || !document_type) {
+        return res.status(400).json({ error: 'Lead, file name and document type are required' });
+    }
+    const id = 'doc-' + Date.now();
+    db.prepare(`
+    INSERT INTO documents (
+      id, lead_id, student_id, application_id, file_name, file_url, file_size, mime_type,
+      document_type, verification_status, uploaded_by, upload_date, is_demo
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, 250000, 'application/pdf',
+      ?, 'Uploaded', ?, datetime('now'), 0
+    )
+  `).run(id, lead_id, student_id || null, application_id || null, file_name, file_url || `/uploads/${file_name}`, document_type, uploaded_by || 'Counselor');
+    // Log activity
+    logLeadActivity({
+        leadId: lead_id,
+        activityType: 'Document Upload',
+        title: `Document Uploaded: ${document_type}`,
+        description: `File: ${file_name}`,
+        performedBy: uploaded_by || 'Counselor'
+    });
+    res.status(201).json({ success: true, id });
+});
+apiRouter.put('/documents/:id/verify', (req, res) => {
+    const { status, verification_notes, verified_by } = req.body;
+    if (!['Verified', 'Rejected', 'Pending'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid verification status' });
+    }
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!doc)
+        return res.status(404).json({ error: 'Document not found' });
+    db.prepare(`
+    UPDATE documents 
+    SET verification_status = ?,
+        verification_notes = ?,
+        verified_by = ?,
+        verified_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(status, verification_notes || '', verified_by || 'Admin', req.params.id);
+    // Log activity
+    logLeadActivity({
+        leadId: doc.lead_id,
+        activityType: 'Document Upload',
+        title: `Document ${status}: ${doc.document_type}`,
+        description: verification_notes ? `Notes: ${verification_notes}` : `Status marked as ${status}`,
+        performedBy: verified_by || 'Admin'
+    });
+    res.json({ success: true });
+});
+// ==========================================
+// 9. CAMPAIGNS
+// ==========================================
+apiRouter.get('/campaigns', (req, res) => {
+    const report = getCampaignROIReport();
+    res.json(report);
+});
+apiRouter.post('/campaigns', (req, res) => {
+    const { name, platform, university_focus, course_focus, target_city, start_date, end_date, budget, spend } = req.body;
+    if (!name || !start_date)
+        return res.status(400).json({ error: 'Campaign name and start date are required' });
+    const id = 'camp-' + Date.now();
+    db.prepare(`
+    INSERT INTO campaigns (id, name, platform, university_focus, course_focus, target_city, start_date, end_date, budget, spend, is_active, is_demo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+  `).run(id, name, platform || 'Meta', university_focus || '', course_focus || '', target_city || '', start_date, end_date || null, budget || 0, spend || 0);
+    res.status(201).json({ success: true, id });
+});
+// ==========================================
+// 10. NOTIFICATIONS
+// ==========================================
+apiRouter.get('/notifications', (req, res) => {
+    const { counselorId } = req.query;
+    let sql = 'SELECT * FROM notifications WHERE 1=1';
+    const params = [];
+    if (counselorId) {
+        sql += ' AND (counselor_id = ? OR counselor_id IS NULL)';
+        params.push(counselorId);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 50';
+    const notifs = db.prepare(sql).all(...params);
+    res.json(notifs);
+});
+apiRouter.put('/notifications/:id/read', (req, res) => {
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+});
+apiRouter.put('/notifications/read-all', (req, res) => {
+    db.prepare('UPDATE notifications SET is_read = 1').run();
+    res.json({ success: true });
+});
+// ==========================================
+// 11. INTEGRATIONS (META & WHATSAPP)
+// ==========================================
+apiRouter.get('/integrations', (req, res) => {
+    const integrations = db.prepare('SELECT * FROM integrations').all();
+    res.json(integrations);
+});
+apiRouter.put('/integrations/:id', (req, res) => {
+    const { is_enabled, status, config } = req.body;
+    db.prepare(`
+    UPDATE integrations 
+    SET is_enabled = COALESCE(?, is_enabled),
+        status = COALESCE(?, status),
+        config = COALESCE(?, config),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(is_enabled, status, typeof config === 'object' ? JSON.stringify(config) : config, req.params.id);
+    logAudit({
+        userName: req.body.performedBy || 'Admin',
+        action: 'INTEGRATION_CONFIG_UPDATED',
+        entity: 'integration',
+        entityId: req.params.id,
+        newValue: { status, is_enabled }
+    });
+    res.json({ success: true });
+});
+apiRouter.get('/integrations/logs', (req, res) => {
+    const logs = db.prepare('SELECT * FROM integration_logs ORDER BY created_at DESC LIMIT 100').all();
+    res.json(logs);
+});
+apiRouter.get('/integrations/templates', (req, res) => {
+    const templates = db.prepare('SELECT * FROM message_templates WHERE is_active = 1 ORDER BY category ASC').all();
+    res.json(templates);
+});
+// Live Meta Webhook endpoints
+apiRouter.get('/integrations/meta/webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    const verified = verifyMetaWebhook(mode, token, challenge);
+    if (verified) {
+        return res.status(200).send(verified);
+    }
+    res.status(403).send('Forbidden');
+});
+apiRouter.post('/integrations/meta/webhook', (req, res) => {
+    try {
+        const result = handleMetaLeadWebhook(req.body);
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || 'Webhook processing failed' });
+    }
+});
+// Simulator endpoint so user can test Meta Lead inflow right from UI!
+apiRouter.post('/integrations/meta/test-webhook', (req, res) => {
+    try {
+        const sampleLead = {
+            simulatedLead: {
+                student_name: req.body.student_name || 'Bikram Thapa',
+                phone: req.body.phone || '+977 9801' + Math.floor(100000 + Math.random() * 900000),
+                email: req.body.email || `bikram.test.${Date.now()}@gmail.com`,
+                city: req.body.city || 'Kathmandu',
+                country: 'Nepal',
+                preferred_course: req.body.preferred_course || 'B.Tech Computer Science & Engineering',
+                preferred_university: req.body.preferred_university || 'SRM Institute of Science and Technology',
+                facebook_lead_id: 'meta-test-' + Date.now(),
+                lead_source: 'Meta Ads',
+                campaign: 'Meta Nepal Admission Wave 2026',
+                ad_set: 'Engineering Aspirants',
+                ad: 'SRM Admissions 2026 Nepal',
+                academic_qualification: '+2 Science',
+                percentage_10th: 85.0,
+                percentage_12th: 82.0
+            }
+        };
+        const result = handleMetaLeadWebhook(sampleLead);
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// WhatsApp outreach sender / test endpoint
+apiRouter.post('/integrations/whatsapp/send', (req, res) => {
+    try {
+        const result = sendWhatsAppMessage(req.body);
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// Google Sheets Integration Endpoints
+apiRouter.post('/integrations/google-sheets/webhook', (req, res) => {
+    try {
+        const result = handleGoogleSheetsLeadWebhook(req.body);
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || 'Google Sheets webhook processing failed' });
+    }
+});
+apiRouter.post('/integrations/google-sheets/test-inbound', (req, res) => {
+    try {
+        const sampleRow = req.body.simulatedRow || {
+            student_name: req.body.student_name || 'Rohan Maharjan',
+            phone: req.body.phone || '+977 9811' + Math.floor(100000 + Math.random() * 900000),
+            email: req.body.email || `rohan.sheets.${Date.now()}@gmail.com`,
+            city: req.body.city || 'Kathmandu',
+            preferred_course: req.body.preferred_course || 'B.Tech Computer Science & Engineering',
+            preferred_university: req.body.preferred_university || 'SRM Institute of Science and Technology',
+            academic_qualification: req.body.academic_qualification || '+2 Science',
+            campaign: req.body.campaign || 'Kathmandu Education Fair 2026 - Sheet Response',
+            row_number: req.body.row_number || 42
+        };
+        const result = handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+apiRouter.post('/integrations/google-sheets/test-export', (req, res) => {
+    try {
+        let leadId = req.body.leadId;
+        if (!leadId) {
+            const firstLead = db.prepare('SELECT id FROM leads WHERE is_deleted = 0 ORDER BY created_at DESC LIMIT 1').get();
+            if (!firstLead) {
+                return res.status(404).json({ error: 'No leads available to export' });
+            }
+            leadId = firstLead.id;
+        }
+        const result = exportLeadToGoogleSheet(leadId, req.body.performedBy || 'Admin');
+        res.json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+apiRouter.get('/integrations/google-sheets/apps-script-code', (req, res) => {
+    const protocol = req.protocol;
+    const host = req.get('host') || 'localhost:5001';
+    const baseUrl = `${protocol}://${host}`;
+    const script = getGoogleAppsScriptTemplate(baseUrl);
+    res.json({
+        script,
+        webhookUrl: `${baseUrl}/api/integrations/google-sheets/webhook`,
+        instructions: 'Copy and paste into Google Sheet > Extensions > Apps Script, then add an onFormSubmit or onEdit trigger.'
+    });
+});
+// Live Google Sheet Link Connection & Preview
+apiRouter.post('/integrations/google-sheets/connect-link', async (req, res) => {
+    try {
+        const { sheetUrl, sheetName, performedBy } = req.body;
+        if (!sheetUrl) {
+            return res.status(400).json({ error: 'Please provide a Google Sheet link or Spreadsheet ID.' });
+        }
+        const liveData = await fetchLiveGoogleSheetData(sheetUrl, sheetName);
+        // Save configuration in integrations table
+        const config = {
+            spreadsheetUrl: liveData.cleanUrl,
+            spreadsheetId: liveData.spreadsheetId,
+            gid: liveData.gid,
+            sheetName: sheetName || 'Leads',
+            syncDirection: 'TWO_WAY',
+            autoExport: false,
+            headers: liveData.headers,
+            lastSyncedRows: liveData.totalRows
+        };
+        db.prepare(`
+      UPDATE integrations
+      SET is_enabled = 1,
+          status = 'CONNECTED',
+          config = ?,
+          last_sync_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+    `).run(JSON.stringify(config));
+        logAudit({
+            userName: performedBy || 'Admin',
+            action: 'GOOGLE_SHEETS_CONNECTED',
+            entity: 'integration',
+            entityId: liveData.spreadsheetId,
+            newValue: { sheetUrl: liveData.cleanUrl, rows: liveData.totalRows }
+        });
+        res.json({
+            success: true,
+            message: 'Google Sheet connected successfully!',
+            ...liveData
+        });
+    }
+    catch (err) {
+        res.status(400).json({ error: err.message || 'Failed to connect to Google Sheet.' });
+    }
+});
+// Sync / Pull Leads from Live Connected Google Sheet
+apiRouter.post('/integrations/google-sheets/sync-live', async (req, res) => {
+    try {
+        let sheetUrl = req.body.sheetUrl;
+        if (!sheetUrl) {
+            const row = db.prepare("SELECT config FROM integrations WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'").get();
+            if (row?.config) {
+                try {
+                    const cfg = JSON.parse(row.config);
+                    sheetUrl = cfg.spreadsheetUrl || cfg.spreadsheetId;
+                }
+                catch (e) { }
+            }
+        }
+        if (!sheetUrl) {
+            return res.status(400).json({ error: 'No Google Sheet link configured. Please enter and connect a sheet link first.' });
+        }
+        const syncReport = await syncLiveGoogleSheetLeads(sheetUrl, req.body.performedBy || 'Admin');
+        res.json(syncReport);
+    }
+    catch (err) {
+        res.status(400).json({ error: err.message || 'Failed to sync leads from Google Sheet.' });
+    }
+});
+// Disconnect Live Google Sheet
+apiRouter.post('/integrations/google-sheets/disconnect', (req, res) => {
+    try {
+        const config = {
+            spreadsheetUrl: '',
+            spreadsheetId: '',
+            gid: '0',
+            sheetName: 'Leads 2026',
+            syncDirection: 'TWO_WAY',
+            autoExport: false
+        };
+        db.prepare(`
+      UPDATE integrations
+      SET is_enabled = 0,
+          status = 'NOT CONNECTED',
+          config = ?,
+          updated_at = datetime('now')
+      WHERE name = 'Google Sheets Sync' OR id = 'int-sheets'
+    `).run(JSON.stringify(config));
+        logAudit({
+            userName: req.body.performedBy || 'Admin',
+            action: 'GOOGLE_SHEETS_DISCONNECTED',
+            entity: 'integration',
+            entityId: 'int-sheets'
+        });
+        res.json({ success: true, message: 'Google Sheet disconnected successfully.' });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ==========================================
+// 12. SETTINGS & AUDIT LOGS
+// ==========================================
+apiRouter.get('/settings', (req, res) => {
+    const rows = db.prepare('SELECT * FROM settings').all();
+    const settingsObj = {};
+    for (const r of rows)
+        settingsObj[r.key] = r.value;
+    res.json(settingsObj);
+});
+apiRouter.put('/settings', (req, res) => {
+    const updates = req.body;
+    const updateStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
+    for (const [key, value] of Object.entries(updates)) {
+        updateStmt.run(key, typeof value === 'string' ? value : JSON.stringify(value));
+    }
+    logAudit({
+        userName: req.body.performedBy || 'Admin',
+        action: 'SETTINGS_UPDATED',
+        entity: 'settings',
+        newValue: updates
+    });
+    res.json({ success: true });
+});
+apiRouter.get('/audit-logs', (req, res) => {
+    const logs = db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100').all();
+    res.json(logs);
+});
+// ==========================================
+// 13. GLOBAL SEARCH
+// ==========================================
+apiRouter.get('/search/global', (req, res) => {
+    const q = req.query.q;
+    if (!q || q.trim().length === 0) {
+        return res.json({ leads: [], students: [], applications: [], universities: [], courses: [] });
+    }
+    const query = `%${q.trim()}%`;
+    const leads = db.prepare(`
+    SELECT id, lead_id, student_name, phone, email, preferred_course, preferred_university, lead_status
+    FROM leads
+    WHERE is_deleted = 0 AND (student_name LIKE ? OR phone LIKE ? OR email LIKE ? OR lead_id LIKE ? OR city LIKE ?)
+    LIMIT 6
+  `).all(query, query, query, query, query);
+    const students = db.prepare(`
+    SELECT id, student_id, student_name, phone, university, course
+    FROM students
+    WHERE student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?
+    LIMIT 6
+  `).all(query, query, query, query);
+    const applications = db.prepare(`
+    SELECT id, application_id, student_name, university_name, course_name, application_status
+    FROM applications
+    WHERE student_name LIKE ? OR application_id LIKE ? OR application_number LIKE ?
+    LIMIT 6
+  `).all(query, query, query);
+    const universities = db.prepare(`
+    SELECT id, name, city, state, country, university_type
+    FROM universities
+    WHERE name LIKE ? OR city LIKE ?
+    LIMIT 5
+  `).all(query, query);
+    const courses = db.prepare(`
+    SELECT id, university_name, course_name, degree_level
+    FROM courses
+    WHERE course_name LIKE ? OR university_name LIKE ?
+    LIMIT 5
+  `).all(query, query);
+    res.json({
+        leads,
+        students,
+        applications,
+        universities,
+        courses
+    });
+});
+// ==========================================
+// 14. REPORTS & KPIS
+// ==========================================
+apiRouter.get('/reports/dashboard-kpis', (req, res) => {
+    const { startDate, endDate, counselorId, city, university, course, source, campaign } = req.query;
+    const kpis = getDashboardKPIs({
+        startDate: startDate,
+        endDate: endDate,
+        counselorId: counselorId,
+        city: city,
+        university: university,
+        course: course,
+        source: source,
+        campaign: campaign
+    });
+    res.json(kpis);
+});
+// ==========================================
+// 15. CSV EXPORT & IMPORT
+// ==========================================
+apiRouter.get('/export/:entity', (req, res) => {
+    const entity = req.params.entity;
+    if (entity === 'leads') {
+        const leads = db.prepare('SELECT lead_id, student_name, phone, whatsapp_number, email, city, country, preferred_course, preferred_university, lead_status, lead_temperature, assigned_counselor_name, lead_source, created_at FROM leads WHERE is_deleted = 0').all();
+        const csvHeader = 'Lead ID,Student Name,Phone,WhatsApp,Email,City,Country,Preferred Course,Preferred University,Status,Temperature,Counselor,Source,Created At\n';
+        const csvRows = leads.map((l) => `"${l.lead_id}","${l.student_name}","${l.phone}","${l.whatsapp_number}","${l.email}","${l.city}","${l.country}","${l.preferred_course}","${l.preferred_university}","${l.lead_status}","${l.lead_temperature}","${l.assigned_counselor_name || 'Unassigned'}","${l.lead_source}","${l.created_at}"`).join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_leads.csv"');
+        return res.send(csvHeader + csvRows);
+    }
+    if (entity === 'students') {
+        const students = db.prepare('SELECT student_id, student_name, phone, email, university, course, admission_date, fee_paid, counselor_name, city, country FROM students').all();
+        const csvHeader = 'Student ID,Student Name,Phone,Email,University,Course,Admission Date,Fee Paid,Counselor,City,Country\n';
+        const csvRows = students.map((s) => `"${s.student_id}","${s.student_name}","${s.phone}","${s.email}","${s.university}","${s.course}","${s.admission_date}",${s.fee_paid},"${s.counselor_name || ''}","${s.city}","${s.country}"`).join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_students.csv"');
+        return res.send(csvHeader + csvRows);
+    }
+    if (entity === 'applications') {
+        const apps = db.prepare('SELECT application_id, student_name, university_name, course_name, application_date, application_status, application_fee, payment_status, counselor_name FROM applications').all();
+        const csvHeader = 'Application ID,Student Name,University,Course,Application Date,Status,Fee,Payment Status,Counselor\n';
+        const csvRows = apps.map((a) => `"${a.application_id}","${a.student_name}","${a.university_name}","${a.course_name}","${a.application_date}","${a.application_status}",${a.application_fee},"${a.payment_status}","${a.counselor_name || ''}"`).join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_applications.csv"');
+        return res.send(csvHeader + csvRows);
+    }
+    res.status(400).json({ error: 'Unknown export entity' });
+});
+apiRouter.post('/import/leads', (req, res) => {
+    const { leads, previewOnly, performedBy } = req.body;
+    if (!Array.isArray(leads) || leads.length === 0) {
+        return res.status(400).json({ error: 'No leads provided for import' });
+    }
+    const results = [];
+    let validCount = 0;
+    let duplicateCount = 0;
+    let errorCount = 0;
+    for (const item of leads) {
+        const cleanPhone = item.phone || item.Phone;
+        const cleanName = item.name || item.student_name || item['Student Name'];
+        const cleanEmail = item.email || item.Email;
+        if (!cleanName || !cleanPhone) {
+            results.push({
+                name: cleanName || 'Unknown',
+                phone: cleanPhone || '',
+                status: 'ERROR',
+                message: 'Name and Phone are mandatory'
+            });
+            errorCount++;
+            continue;
+        }
+        // Duplicate check
+        const dup = checkDuplicate({
+            phone: cleanPhone,
+            email: cleanEmail
+        });
+        if (dup.hasDuplicate) {
+            results.push({
+                name: cleanName,
+                phone: cleanPhone,
+                status: 'DUPLICATE',
+                message: `Matches existing lead ${dup.duplicates[0].lead_id} (${dup.duplicates[0].student_name})`,
+                existingLead: dup.duplicates[0]
+            });
+            duplicateCount++;
+            continue;
+        }
+        results.push({
+            name: cleanName,
+            phone: cleanPhone,
+            status: 'VALID',
+            data: item
+        });
+        validCount++;
+    }
+    // If preview only, return preview report without saving
+    if (previewOnly) {
+        return res.json({
+            preview: true,
+            total: leads.length,
+            validCount,
+            duplicateCount,
+            errorCount,
+            results
+        });
+    }
+    // Commit valid leads
+    let createdCount = 0;
+    for (const item of results) {
+        if (item.status === 'VALID') {
+            const d = item.data;
+            createLead({
+                student_name: d.name || d.student_name || d['Student Name'],
+                phone: d.phone || d.Phone,
+                email: d.email || d.Email || '',
+                city: d.city || d.City || 'Kathmandu',
+                preferred_course: d.course || d.preferred_course || d['Course'] || 'B.Tech CSE',
+                preferred_university: d.university || d.preferred_university || d['University'] || 'SRM Institute of Science and Technology',
+                lead_source: d.source || d.lead_source || d['Source'] || 'Referral',
+                lead_status: 'New Lead'
+            }, performedBy || 'CSV Import');
+            createdCount++;
+        }
+    }
+    res.json({
+        success: true,
+        total: leads.length,
+        createdCount,
+        duplicateCount,
+        errorCount
+    });
+});

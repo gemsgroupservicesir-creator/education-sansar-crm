@@ -26,9 +26,11 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // Ensure uploads folder exists
-const uploadsDir = path.resolve(__dirname, '../uploads');
+const uploadsDir = path.resolve(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (e) {}
 }
 app.use('/uploads', express.static(uploadsDir));
 
@@ -46,7 +48,7 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Production: serve built frontend static files
-const clientDist = path.resolve(__dirname, '../dist');
+const clientDist = path.resolve(process.cwd(), 'dist');
 const indexPath = path.join(clientDist, 'index.html');
 
 app.use(express.static(clientDist));

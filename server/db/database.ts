@@ -4,13 +4,15 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SCHEMA_SQL } from './schema.ts';
 
-// Resolve directory paths in ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Resolve directory paths safely across tsx and bundled dist-server
+const dbDir = process.env.DATABASE_DIR 
+  ? path.resolve(process.env.DATABASE_DIR)
+  : path.resolve(process.cwd(), 'server/db');
 
-const dbDir = path.resolve(__dirname);
 if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+  try {
+    fs.mkdirSync(dbDir, { recursive: true });
+  } catch (e) {}
 }
 
 const dbPath = process.env.DATABASE_PATH 
