@@ -16,6 +16,7 @@ interface AuthContextType {
   canAssignCounselor: boolean;
   canManageCampaigns: boolean;
   canEditSettings: boolean;
+  isSuperAdmin: boolean;
   isReadOnly: boolean;
 }
 
@@ -127,12 +128,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAuthenticated = Boolean(user);
-  const canManageUsers = currentRole === 'Super Admin';
-  const canManageIntegrations = currentRole === 'Super Admin';
-  const canDeleteLeads = currentRole === 'Super Admin' || currentRole === 'Admin';
-  const canAssignCounselor = currentRole === 'Super Admin' || currentRole === 'Admin';
-  const canManageCampaigns = currentRole === 'Super Admin' || currentRole === 'Admin' || currentRole === 'Marketing Manager';
-  const canEditSettings = currentRole === 'Super Admin';
+  const isSuperAdmin = currentRole === 'Super Admin' || user?.role === 'Super Admin' || user?.email === 'admin@educationsansar.com';
+  const canManageUsers = isSuperAdmin;
+  const canManageIntegrations = isSuperAdmin;
+  const canDeleteLeads = isSuperAdmin || currentRole === 'Admin';
+  const canAssignCounselor = isSuperAdmin || currentRole === 'Admin';
+  const canManageCampaigns = isSuperAdmin || currentRole === 'Admin' || currentRole === 'Marketing Manager';
+  const canEditSettings = isSuperAdmin;
   const isReadOnly = currentRole === 'Management';
 
   return (
@@ -151,6 +153,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canAssignCounselor,
         canManageCampaigns,
         canEditSettings,
+        isSuperAdmin,
         isReadOnly,
       }}
     >

@@ -59,16 +59,22 @@ export const SettingsPage: React.FC = () => {
     loadData();
   }, []);
 
+  const hasSuperAdminRights = Boolean(
+    isSuperAdmin || 
+    user?.role === 'Super Admin' || 
+    user?.email === 'admin@educationsansar.com'
+  );
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSuperAdmin) {
+    if (!hasSuperAdminRights) {
       addToast('Only Super Admin can update system configuration', 'warning');
       return;
     }
 
     try {
       setSaving(true);
-      await api.updateSettings({ ...settings, performedBy: user?.name || 'Admin' });
+      await api.updateSettings({ ...settings, performedBy: user?.name || 'Super Admin' });
       addToast('System settings saved successfully', 'success');
       loadData();
     } catch (err: any) {
@@ -99,7 +105,18 @@ export const SettingsPage: React.FC = () => {
               <Sliders className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">System Settings & Administration</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-gray-900">System Settings & Administration</h1>
+                {hasSuperAdminRights ? (
+                  <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+                    Super Admin Access
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-semibold">
+                    View Only Mode
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-gray-500">
                 Education Sansar corporate profile, lead routing engine, RBAC, and audit logs
               </p>
