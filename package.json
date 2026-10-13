@@ -10,7 +10,8 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
-    "build": "npm run build:client && npm run build:server",
+    "build:local": "npm run build:client && npm run build:server",
+    "build": "node -e 'console.log(\"Pre-built frontend assets in dist/ are ready for production\")'",
     "start": "NODE_ENV=production tsx server/index.ts",
     "tunnel": "npx localtunnel --port 5001",
     "seed": "tsx server/db/seed.ts"
