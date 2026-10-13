@@ -600,14 +600,39 @@ function sendRowToCRM(sheet, rowNumber) {
 // ==========================================
 // Live Google Sheet URL Parser & Fetcher
 // ==========================================
-export function parseGoogleSheetUrl(urlOrId: string): { spreadsheetId: string; gid: string; cleanUrl: string } {
+// ==========================================
+// Live Google Sheet URL Parser & Fetcher
+// ==========================================
+export function parseGoogleSheetUrl(urlOrId: string): { 
+  spreadsheetId: string; 
+  gid: string; 
+  cleanUrl: string; 
+  isPublished?: boolean; 
+  publishedCsvUrl?: string 
+} {
   if (!urlOrId || typeof urlOrId !== 'string') {
     throw new Error('Please provide a valid Google Sheet link or Spreadsheet ID.');
   }
 
   const trimmed = urlOrId.trim();
 
-  // Extract ID from full URL
+  // Check for Google Sheet "Publish to web" URL
+  // e.g. https://docs.google.com/spreadsheets/d/e/2PACX-1vR.../pubhtml or /pub?output=csv
+  const pubMatch = trimmed.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+  if (pubMatch) {
+    const pubId = pubMatch[1];
+    const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
+    const gid = gidMatch ? gidMatch[1] : '0';
+    return {
+      spreadsheetId: pubId,
+      gid,
+      cleanUrl: `https://docs.google.com/spreadsheets/d/e/${pubId}/pubhtml`,
+      isPublished: true,
+      publishedCsvUrl: `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?output=csv&gid=${gid}`
+    };
+  }
+
+  // Extract ID from full standard URL or raw ID
   const idMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   const spreadsheetId = idMatch ? idMatch[1] : (trimmed.includes('/') ? '' : trimmed);
 
@@ -717,43 +742,66 @@ export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?:
     };
   }
 
-  const { spreadsheetId, gid, cleanUrl } = parseGoogleSheetUrl(sheetUrlOrId);
+  const parsed = parseGoogleSheetUrl(sheetUrlOrId);
+  const { spreadsheetId, gid, cleanUrl } = parsed;
 
-  // Attempt Google Visualization CSV endpoint (works for any sheet with link sharing)
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}${sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''}`;
-  const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
-
-  let csvContent = '';
-
-  try {
-    const res = await fetch(gvizUrl, {
-      headers: {
-        'User-Agent': 'EducationSansarCRM/1.0',
-        'Accept': 'text/csv,text/plain,application/json'
-      }
-    });
-
-    if (res.ok) {
-      csvContent = await res.text();
-    } else {
-      // Fallback to export endpoint
-      const fallbackRes = await fetch(exportUrl, {
-        headers: { 'User-Agent': 'EducationSansarCRM/1.0' }
-      });
-      if (!fallbackRes.ok) {
-        throw new Error(`Google returned status ${fallbackRes.status}`);
-      }
-      csvContent = await fallbackRes.text();
-    }
-  } catch (err: any) {
-    throw new Error(`Failed to fetch Google Sheet: Unable to reach Google Sheets (${err.message}). Check your internet connection or verify the link is accessible. You can also use "Try Sample Sheet Link" to test offline.`);
+  const candidateUrls: string[] = [];
+  if (parsed.isPublished && parsed.publishedCsvUrl) {
+    candidateUrls.push(parsed.publishedCsvUrl);
+  } else {
+    // 1. Google Visualization CSV API (best for link-shared sheets)
+    candidateUrls.push(
+      `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}${sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''}`
+    );
+    // 2. Direct Export format endpoint
+    candidateUrls.push(
+      `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`
+    );
   }
 
-  // Check if Google returned an HTML login page (private sheet)
-  if (csvContent.includes('<!DOCTYPE html>') || csvContent.includes('<html') || csvContent.includes('accounts.google.com')) {
-    throw new Error(
-      'Google Sheet is currently PRIVATE. To connect: in your Google Sheet, click Share > General access > change "Restricted" to "Anyone with the link can view", then try again.'
-    );
+  let csvContent = '';
+  let lastError = '';
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/csv,text/plain,*/*'
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(12000)
+      });
+
+      if (res.ok) {
+        const text = await res.text();
+        if (text && !text.includes('<!DOCTYPE html>') && !text.includes('accounts.google.com') && !text.includes('<html')) {
+          csvContent = text;
+          break;
+        } else if (text.includes('accounts.google.com') || text.includes('ServiceLogin') || text.includes('Sign in')) {
+          throw new Error('Google Sheet is PRIVATE. Please change General Access to "Anyone with the link can view".');
+        }
+      } else if (res.status === 401 || res.status === 403) {
+        throw new Error('Google Sheet is PRIVATE (Permission Denied). Please set General Access to "Anyone with the link can view".');
+      } else {
+        lastError = `Google returned HTTP ${res.status}`;
+      }
+    } catch (err: any) {
+      lastError = err.message || String(err);
+      if (lastError.includes('PRIVATE')) {
+        throw err;
+      }
+    }
+  }
+
+  if (!csvContent) {
+    if (lastError.includes('PRIVATE')) {
+      throw new Error(
+        'Google Sheet is currently PRIVATE. To connect: in your Google Sheet, click Share > General access > change "Restricted" to "Anyone with the link can view", then try again.'
+      );
+    }
+    throw new Error(`Failed to fetch Google Sheet: Unable to reach Google Sheets (${lastError}). Check your internet connection or verify the link is accessible. You can also use "Try Sample Sheet Link" to test offline.`);
   }
 
   const { headers, rows } = parseCSVContent(csvContent);
