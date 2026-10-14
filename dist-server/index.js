@@ -125,26 +125,40 @@ CREATE TABLE IF NOT EXISTS university_courses (
   id TEXT PRIMARY KEY,
   university_id TEXT NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
   course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  tuition_fee_per_year REAL NOT NULL DEFAULT 0.0,
+  hostel_fee_per_year REAL NOT NULL DEFAULT 0.0,
+  one_time_fee REAL NOT NULL DEFAULT 0.0,
+  other_charges REAL NOT NULL DEFAULT 0.0,
+  total_first_year_fee REAL NOT NULL DEFAULT 0.0,
+  total_full_course_fee REAL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  eligibility_notes TEXT,
+  scholarship_available INTEGER NOT NULL DEFAULT 1,
+  scholarship_details TEXT,
+  application_deadline TEXT,
+  admission_process TEXT DEFAULT 'Direct Merit / Counseling',
+  remarks TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  -- Legacy compatibility fields
   tuition_fee REAL NOT NULL DEFAULT 0.0,
   hostel_fee REAL NOT NULL DEFAULT 0.0,
   other_fees REAL NOT NULL DEFAULT 0.0,
   total_fee REAL NOT NULL DEFAULT 0.0,
   duration TEXT NOT NULL DEFAULT '4 Years',
   eligibility TEXT,
-  scholarship_available INTEGER NOT NULL DEFAULT 1,
-  scholarship_details TEXT,
   application_fee REAL NOT NULL DEFAULT 0.0,
   admission_deadline TEXT,
   notes TEXT,
-  status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'Inactive'
+  status TEXT NOT NULL DEFAULT 'Active',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_uc_uni ON university_courses(university_id);
 CREATE INDEX IF NOT EXISTS idx_uc_course ON university_courses(course_id);
-CREATE INDEX IF NOT EXISTS idx_uc_total_fee ON university_courses(total_fee);
-CREATE INDEX IF NOT EXISTS idx_uc_status ON university_courses(status);
+CREATE INDEX IF NOT EXISTS idx_uc_total_first_year ON university_courses(total_first_year_fee);
+CREATE INDEX IF NOT EXISTS idx_uc_tuition ON university_courses(tuition_fee_per_year);
+CREATE INDEX IF NOT EXISTS idx_uc_active ON university_courses(is_active);
 
 -- 7. Leads table
 CREATE TABLE IF NOT EXISTS leads (
@@ -542,6 +556,18 @@ function runSafeMigrations() {
   addColumnIfNotExists("leads", "passing_year", "TEXT");
   addColumnIfNotExists("leads", "priority", "TEXT NOT NULL DEFAULT 'MEDIUM'");
   addColumnIfNotExists("google_sheets_connections", "column_mapping", "TEXT");
+  addColumnIfNotExists("university_courses", "tuition_fee_per_year", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "hostel_fee_per_year", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "one_time_fee", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "other_charges", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "total_first_year_fee", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "total_full_course_fee", "REAL DEFAULT 0.0");
+  addColumnIfNotExists("university_courses", "currency", "TEXT DEFAULT 'INR'");
+  addColumnIfNotExists("university_courses", "eligibility_notes", "TEXT");
+  addColumnIfNotExists("university_courses", "application_deadline", "TEXT");
+  addColumnIfNotExists("university_courses", "admission_process", "TEXT DEFAULT 'Direct Merit / Counseling'");
+  addColumnIfNotExists("university_courses", "remarks", "TEXT");
+  addColumnIfNotExists("university_courses", "is_active", "INTEGER DEFAULT 1");
 }
 function initDatabase() {
   try {
@@ -841,8 +867,8 @@ function createLead(data, performedBy = "System") {
     data.graduation_percentage || null,
     data.entrance_exam || null,
     data.entrance_score || null,
-    data.preferred_course || "B.Tech CSE",
-    data.preferred_university || "SRM Institute of Science and Technology",
+    data.preferred_course || "Not Specified",
+    data.preferred_university || "Not Specified",
     data.second_university || null,
     data.budget || null,
     data.scholarship_required ? 1 : 0,
@@ -1286,34 +1312,73 @@ function sendWhatsAppMessage(params) {
     note: isConnected ? "Sent via live WhatsApp Cloud API" : "Simulated/Queued (Configure WhatsApp Cloud API token in Settings to enable live delivery)"
   };
 }
+function extractSheetValue(raw, candidates) {
+  if (!raw || typeof raw !== "object") return "";
+  for (const c of candidates) {
+    if (raw[c] !== void 0 && raw[c] !== null && String(raw[c]).trim() !== "") {
+      return String(raw[c]).trim();
+    }
+  }
+  const candidateNorms = candidates.map((c) => c.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === void 0 || v === null || String(v).trim() === "") continue;
+    const normKey = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (candidateNorms.includes(normKey)) {
+      return String(v).trim();
+    }
+  }
+  return "";
+}
 function handleGoogleSheetsLeadWebhook(payload) {
   const logId = "LOG-GS-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
   try {
     const raw = payload.simulatedRow || payload.row || payload.lead || payload;
-    const sheetLeadId = raw.lead_id || raw["Lead ID"] || raw["leadId"];
-    const student_name = (raw.student_name || raw["Student Name"] || raw["Full Name"] || raw["Name"] || raw.name || raw.fullName || "").trim();
-    const rawPhone = (raw.phone || raw["Phone"] || raw["Phone Number"] || raw["Mobile"] || raw["Contact Number"] || raw.mobile || "").toString().trim();
-    const rawWa = (raw.whatsapp_number || raw["WhatsApp"] || raw["WhatsApp Number"] || raw.whatsapp || rawPhone).toString().trim();
-    const email = (raw.email || raw["Email"] || raw["Email Address"] || "").toString().trim();
-    const city = (raw.city || raw["City"] || raw["Location"] || raw["Branch"] || "Kathmandu").toString().trim();
-    const stateCountry = (raw["State/Country"] || raw["State"] || raw["Country"] || raw.country || "").toString().trim();
+    const student_name = extractSheetValue(raw, ["full_name", "Full Name", "student_name", "Student Name", "name", "Name"]);
+    const rawPhone = extractSheetValue(raw, ["phone_number", "Phone Number", "phone", "Phone", "mobile", "Mobile", "contact_number", "Contact Number"]);
+    const email = extractSheetValue(raw, ["email", "Email", "email_address", "Email Address"]);
+    const preferred_course = extractSheetValue(raw, [
+      "which_course_are_you_interested_in?",
+      "which_course_are_you_interested_in",
+      "Which Course are you interested in?",
+      "Which course are you interested in?",
+      "Which course are you interested in",
+      "which course are you interested in",
+      "preferred_course",
+      "Course Interested",
+      "Course"
+    ]);
+    const preferred_university = extractSheetValue(raw, [
+      "which_univsities_are_you_looking_for?",
+      "which_univsities_are_you_looking_for",
+      "which_universities_are_you_looking_for?",
+      "which_universities_are_you_looking_for",
+      "Which Universities are you looking for?",
+      "Which universities are you looking for?",
+      "Which universities are you looking for",
+      "which universities are you looking for",
+      "preferred_university",
+      "University Interested",
+      "University"
+    ]);
+    const sheetLeadId = extractSheetValue(raw, ["lead_id", "Lead ID", "leadId"]);
+    const rawWa = extractSheetValue(raw, ["whatsapp_number", "WhatsApp", "WhatsApp Number", "whatsapp"]) || rawPhone;
+    const city = extractSheetValue(raw, ["city", "City", "Location", "Branch"]) || "Kathmandu";
+    const stateCountry = extractSheetValue(raw, ["State/Country", "State", "Country", "country"]);
     const country = stateCountry.toLowerCase().includes("india") ? "India" : ["Delhi", "Noida", "Bangalore", "Chennai", "Mumbai", "Pune"].includes(city) ? "India" : "Nepal";
-    const preferred_course = (raw.preferred_course || raw["Course Interested"] || raw["Course"] || raw["Preferred Course"] || raw.interestedCourse || "B.Tech Computer Science & Engineering").toString().trim();
-    const preferred_university = (raw.preferred_university || raw["University Interested"] || raw["University"] || raw["Preferred University"] || raw.interestedUniversity || "SRM Institute of Science and Technology").toString().trim();
-    const academic_qualification = (raw.academic_qualification || raw["Qualification"] || raw["12th Stream"] || "+2 Science").toString().trim();
+    const academic_qualification = extractSheetValue(raw, ["academic_qualification", "Qualification", "12th Stream"]);
     const rawPercent = raw["Percentage/Score"] || raw["Percentage"] || raw["Score"] || raw.percentage_12th || raw.percentage_10th || raw.academicPercentage;
     const percentage = rawPercent ? parseFloat(String(rawPercent).replace(/[^0-9.]/g, "")) : void 0;
-    const passing_year = (raw["Passing Year"] || raw.passing_year || raw.passingYear || "").toString().trim();
-    const budget = (raw["Budget"] || raw.budget || raw.budgetRange || "").toString().trim();
-    const assignedCounselorFromSheet = (raw["Assigned Counselor"] || raw.assigned_counselor_name || raw["Counselor"] || raw.assignedCounselor || "").toString().trim();
-    const lead_status = (raw["Lead Status"] || raw.lead_status || raw["Status"] || raw.leadStatus || "New Lead").toString().trim();
-    const next_follow_up_date = (raw["Next Follow-up Date"] || raw.next_follow_up_date || raw["Follow-up Date"] || raw.nextFollowUpDate || "").toString().trim();
-    const sheetNotes = (raw["Counselor Notes"] || raw.counselor_notes || raw["Notes"] || raw["Remarks"] || raw.remarks || raw.leadNotes || "").toString().trim();
-    const parent_name = (raw["Father's/Mother's Name"] || raw["Parent Name"] || raw.parent_name || raw.fatherName || raw.parentName || "").toString().trim();
-    const school_college = (raw["School/College"] || raw.school_college || raw["College"] || raw["School"] || raw.schoolCollege || "").toString().trim();
-    const campaign = (raw.campaign || raw["Campaign"] || raw["Source Sheet"] || payload.sheetName || "Google Sheets Lead Sheet").toString().trim();
-    const lead_source = (raw.lead_source || raw["Lead Source"] || raw["Source"] || "Google Sheets").toString().trim();
-    const priority = (raw.priority || raw["Priority"] || "").toString().trim().toUpperCase();
+    const passing_year = extractSheetValue(raw, ["Passing Year", "passing_year", "passingYear"]);
+    const budget = extractSheetValue(raw, ["Budget", "budget", "budgetRange"]);
+    const assignedCounselorFromSheet = extractSheetValue(raw, ["Assigned Counselor", "assigned_counselor_name", "Counselor", "assignedCounselor"]);
+    const lead_status = extractSheetValue(raw, ["Lead Status", "lead_status", "Status", "leadStatus"]) || "New Lead";
+    const next_follow_up_date = extractSheetValue(raw, ["Next Follow-up Date", "next_follow_up_date", "Follow-up Date", "nextFollowUpDate"]);
+    const sheetNotes = extractSheetValue(raw, ["Counselor Notes", "counselor_notes", "Notes", "Remarks", "remarks", "leadNotes"]);
+    const parent_name = extractSheetValue(raw, ["Father's/Mother's Name", "Parent Name", "parent_name", "fatherName", "parentName"]);
+    const school_college = extractSheetValue(raw, ["School/College", "school_college", "College", "School", "schoolCollege"]);
+    const campaign = extractSheetValue(raw, ["campaign", "Campaign", "Source Sheet"]) || payload.sheetName || "Google Sheets Lead Sheet";
+    const lead_source = extractSheetValue(raw, ["lead_source", "Lead Source", "Source"]) || "Google Sheets";
+    const priority = extractSheetValue(raw, ["priority", "Priority"]).toUpperCase();
     if (!rawPhone && !email && !student_name) {
       return {
         success: false,
@@ -1325,7 +1390,7 @@ function handleGoogleSheetsLeadWebhook(payload) {
       return {
         success: false,
         skipped: true,
-        message: "Row missing contact details (Phone/Email required)"
+        message: "Row missing contact details (Phone Number or Email required)"
       };
     }
     const leadData = {
@@ -1340,8 +1405,8 @@ function handleGoogleSheetsLeadWebhook(payload) {
       passing_year: passing_year || null,
       academic_qualification: academic_qualification || null,
       percentage_12th: percentage || null,
-      preferred_course,
-      preferred_university,
+      preferred_course: preferred_course || "Not Specified",
+      preferred_university: preferred_university || "Not Specified",
       budget: budget || null,
       campaign,
       lead_source,
@@ -1370,8 +1435,8 @@ function handleGoogleSheetsLeadWebhook(payload) {
       if (percentage) updates.percentage_12th = percentage;
       if (budget) updates.budget = budget;
       if (priority && ["HIGH", "MEDIUM", "LOW"].includes(priority)) updates.priority = priority;
-      if (preferred_course && existing.preferred_course !== preferred_course) updates.preferred_course = preferred_course;
-      if (preferred_university && existing.preferred_university !== preferred_university) updates.preferred_university = preferred_university;
+      if (preferred_course && preferred_course !== "Not Specified" && existing.preferred_course !== preferred_course) updates.preferred_course = preferred_course;
+      if (preferred_university && preferred_university !== "Not Specified" && existing.preferred_university !== preferred_university) updates.preferred_university = preferred_university;
       if (next_follow_up_date) updates.next_follow_up_date = next_follow_up_date;
       if (!existing.assigned_counselor_id && assignedCounselorFromSheet) {
         const matchedCounselor = db.prepare("SELECT id, name FROM counselors WHERE is_active = 1 AND (name LIKE ? OR username LIKE ?) LIMIT 1").get(`%${assignedCounselorFromSheet}%`, `%${assignedCounselorFromSheet}%`);
@@ -1535,6 +1600,13 @@ function getGoogleAppsScriptTemplate(baseUrl) {
   const webhookUrl = `${baseUrl}/api/integrations/google-sheets/webhook`;
   return `/**
  * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
+ * 
+ * Standard Column Headers (Row 1):
+ * 1. full_name
+ * 2. phone_number
+ * 3. email
+ * 4. which_course_are_you_interested_in?
+ * 5. which_univsities_are_you_looking_for?
  * 
  * Instructions:
  * 1. In your Google Sheet, open Extensions > Apps Script.
@@ -2627,15 +2699,27 @@ apiRouter.delete("/leads/:id", (req, res) => {
   }
   const lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: "Lead not found" });
-  db.prepare("UPDATE leads SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  const deleteTx = db.transaction((id) => {
+    db.prepare("DELETE FROM students WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM followups WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM lead_activities WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM lead_status_history WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM lead_assignments WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM applications WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM documents WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM messages WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM campaign_leads WHERE lead_id = ?").run(id);
+    db.prepare("DELETE FROM leads WHERE id = ?").run(id);
+  });
+  deleteTx(req.params.id);
   logAudit({
     userName: req.body.performedBy || "User",
-    action: "LEAD_DELETED_SOFT",
+    action: "LEAD_DELETED_PERMANENT",
     entity: "lead",
     entityId: req.params.id,
     oldValue: { lead_id: lead.lead_id, student_name: lead.student_name }
   });
-  res.json({ success: true, message: "Lead soft-deleted successfully" });
+  res.json({ success: true, message: "Lead deleted permanently" });
 });
 apiRouter.post("/leads/:id/reassign", (req, res) => {
   try {
@@ -2893,6 +2977,10 @@ apiRouter.put("/followups/:id/complete", (req, res) => {
   });
   res.json({ success: true });
 });
+apiRouter.delete("/followups/:id", (req, res) => {
+  db.prepare("DELETE FROM followups WHERE id = ?").run(req.params.id);
+  res.json({ success: true, message: "Follow-up deleted permanently." });
+});
 apiRouter.get("/applications", (req, res) => {
   const { status, counselorId, universityId, search } = req.query;
   let sql = `
@@ -2995,6 +3083,10 @@ apiRouter.put("/applications/:id", (req, res) => {
   });
   res.json({ success: true });
 });
+apiRouter.delete("/applications/:id", (req, res) => {
+  db.prepare("DELETE FROM applications WHERE id = ?").run(req.params.id);
+  res.json({ success: true, message: "Application deleted permanently." });
+});
 apiRouter.get("/students", (req, res) => {
   const { search, university, course } = req.query;
   let sql = "SELECT * FROM students WHERE 1=1";
@@ -3029,6 +3121,10 @@ apiRouter.get("/students/:id", (req, res) => {
     documents,
     activities
   });
+});
+apiRouter.delete("/students/:id", (req, res) => {
+  db.prepare("DELETE FROM students WHERE id = ?").run(req.params.id);
+  res.json({ success: true, message: "Student record deleted permanently." });
 });
 apiRouter.get("/universities", (req, res) => {
   const unis = db.prepare(`
@@ -3500,6 +3596,10 @@ apiRouter.put("/documents/:id/verify", (req, res) => {
   });
   res.json({ success: true });
 });
+apiRouter.delete("/documents/:id", (req, res) => {
+  db.prepare("DELETE FROM documents WHERE id = ?").run(req.params.id);
+  res.json({ success: true, message: "Document deleted permanently." });
+});
 apiRouter.get("/campaigns", (req, res) => {
   const report = getCampaignROIReport();
   res.json(report);
@@ -3629,15 +3729,11 @@ apiRouter.post("/integrations/google-sheets/webhook", (req, res) => {
 apiRouter.post("/integrations/google-sheets/test-inbound", (req, res) => {
   try {
     const sampleRow = req.body.simulatedRow || {
-      student_name: req.body.student_name || "Rohan Maharjan",
-      phone: req.body.phone || "+977 9811" + Math.floor(1e5 + Math.random() * 9e5),
-      email: req.body.email || `rohan.sheets.${Date.now()}@gmail.com`,
-      city: req.body.city || "Kathmandu",
-      preferred_course: req.body.preferred_course || "B.Tech Computer Science & Engineering",
-      preferred_university: req.body.preferred_university || "SRM Institute of Science and Technology",
-      academic_qualification: req.body.academic_qualification || "+2 Science",
-      campaign: req.body.campaign || "Kathmandu Education Fair 2026 - Sheet Response",
-      row_number: req.body.row_number || 42
+      full_name: req.body.full_name || req.body.student_name || "Aarav Sharma",
+      phone_number: req.body.phone_number || req.body.phone || "+977 9811" + Math.floor(1e5 + Math.random() * 9e5),
+      email: req.body.email || `aarav.sheets.${Date.now()}@gmail.com`,
+      "which_course_are_you_interested_in?": req.body["which_course_are_you_interested_in?"] || req.body.preferred_course || "B.Tech Computer Science & Engineering",
+      "which_univsities_are_you_looking_for?": req.body["which_univsities_are_you_looking_for?"] || req.body.preferred_university || "SRM Institute of Science and Technology"
     };
     const result = handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
     res.json(result);

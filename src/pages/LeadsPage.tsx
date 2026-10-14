@@ -87,12 +87,12 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to remove lead for ${name}? The lead will be safely soft-deleted.`)) {
+    if (!window.confirm(`Are you sure you want to permanently delete lead for ${name}? This action cannot be undone.`)) {
       return;
     }
     try {
       await api.deleteLead(id, 'Admin User');
-      showToast(`Lead ${name} removed`, 'success');
+      showToast(`Lead ${name} deleted permanently`, 'success');
       fetchLeads();
     } catch (err: any) {
       showToast(err.message || 'Unable to delete lead', 'error');

@@ -69,6 +69,20 @@ function runSafeMigrations() {
 
   // Google Sheets connections
   addColumnIfNotExists('google_sheets_connections', 'column_mapping', 'TEXT');
+
+  // University Courses & Fees fields
+  addColumnIfNotExists('university_courses', 'tuition_fee_per_year', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'hostel_fee_per_year', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'one_time_fee', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'other_charges', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'total_first_year_fee', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'total_full_course_fee', 'REAL DEFAULT 0.0');
+  addColumnIfNotExists('university_courses', 'currency', "TEXT DEFAULT 'INR'");
+  addColumnIfNotExists('university_courses', 'eligibility_notes', 'TEXT');
+  addColumnIfNotExists('university_courses', 'application_deadline', 'TEXT');
+  addColumnIfNotExists('university_courses', 'admission_process', "TEXT DEFAULT 'Direct Merit / Counseling'");
+  addColumnIfNotExists('university_courses', 'remarks', 'TEXT');
+  addColumnIfNotExists('university_courses', 'is_active', 'INTEGER DEFAULT 1');
 }
 
 // Initialize database schema

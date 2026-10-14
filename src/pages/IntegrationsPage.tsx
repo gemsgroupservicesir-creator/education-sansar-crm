@@ -68,17 +68,13 @@ export const IntegrationsPage: React.FC = () => {
   const [livePreviewData, setLivePreviewData] = useState<any>(null);
   const [liveSyncReport, setLiveSyncReport] = useState<any>(null);
 
-  // Google Sheets Simulator State
+  // Google Sheets Simulator State - Standardized 5 Fields
   const [sheetSimData, setSheetSimData] = useState({
-    student_name: 'Rohan Maharjan',
-    phone: '+977 9811234567',
-    email: 'rohan.maharjan.ktm@gmail.com',
-    city: 'Kathmandu',
-    preferred_course: 'B.Tech Computer Science & Engineering',
-    preferred_university: 'SRM Institute of Science and Technology',
-    academic_qualification: '+2 Science',
-    campaign: 'Kathmandu Education Fair 2026 - Registration Desk',
-    row_number: 45,
+    full_name: 'Aarav Sharma',
+    phone_number: '+977 9811234567',
+    email: 'aarav.sharma@gmail.com',
+    'which_course_are_you_interested_in?': 'B.Tech Computer Science & Engineering',
+    'which_univsities_are_you_looking_for?': 'SRM Institute of Science and Technology',
   });
   const [simulatingSheet, setSimulatingSheet] = useState(false);
   const [sheetInboundResult, setSheetInboundResult] = useState<any>(null);
@@ -1251,53 +1247,79 @@ export const IntegrationsPage: React.FC = () => {
               </div>
 
               <form onSubmit={handleSimulateSheetInbound} className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/60 rounded-lg text-[11px] text-emerald-900">
+                  <span className="font-semibold">Standard 5-Field Payload Mapping:</span>
+                  <div className="text-[10px] text-emerald-700 mt-0.5">
+                    1. <code>full_name</code> &bull; 2. <code>phone_number</code> &bull; 3. <code>email</code> &bull; 4. <code>which_course_are_you_interested_in?</code> &bull; 5. <code>which_univsities_are_you_looking_for?</code>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Student Name</label>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">
+                      1. full_name <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       required
-                      value={sheetSimData.student_name}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, student_name: e.target.value })}
+                      placeholder="e.g. Aarav Sharma"
+                      value={sheetSimData.full_name}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, full_name: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Phone Number</label>
+                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">
+                      2. phone_number <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       required
-                      value={sheetSimData.phone}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, phone: e.target.value })}
+                      placeholder="e.g. +977 9811234567"
+                      value={sheetSimData.phone_number}
+                      onChange={(e) => setSheetSimData({ ...sheetSimData, phone_number: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">City</label>
-                    <select
-                      value={sheetSimData.city}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, city: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    >
-                      <option value="Kathmandu">Kathmandu (Nepal)</option>
-                      <option value="Birgunj">Birgunj (Nepal)</option>
-                      <option value="Janakpur">Janakpur (Nepal)</option>
-                      <option value="Delhi">Delhi (India)</option>
-                      <option value="Noida">Noida (India)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-gray-700 mb-0.5">Course</label>
-                    <input
-                      type="text"
-                      value={sheetSimData.preferred_course}
-                      onChange={(e) => setSheetSimData({ ...sheetSimData, preferred_course: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-0.5">
+                    3. email
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. aarav.sharma@gmail.com"
+                    value={sheetSimData.email}
+                    onChange={(e) => setSheetSimData({ ...sheetSimData, email: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-0.5">
+                    4. which_course_are_you_interested_in?
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. B.Tech Computer Science & Engineering"
+                    value={sheetSimData['which_course_are_you_interested_in?']}
+                    onChange={(e) => setSheetSimData({ ...sheetSimData, 'which_course_are_you_interested_in?': e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-0.5">
+                    5. which_univsities_are_you_looking_for?
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. SRM Institute of Science and Technology"
+                    value={sheetSimData['which_univsities_are_you_looking_for?']}
+                    onChange={(e) => setSheetSimData({ ...sheetSimData, 'which_univsities_are_you_looking_for?': e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
                 </div>
 
                 <button
@@ -1305,7 +1327,7 @@ export const IntegrationsPage: React.FC = () => {
                   disabled={simulatingSheet}
                   className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50"
                 >
-                  {simulatingSheet ? 'Testing Row...' : 'Simulate Single Row Webhook Inbound'}
+                  {simulatingSheet ? 'Submitting Row to CRM...' : 'Simulate Single Row Webhook Inbound (5 Fields)'}
                 </button>
               </form>
 

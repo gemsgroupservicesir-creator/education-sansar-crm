@@ -1,6 +1,6 @@
 import { db, logAudit, logLeadActivity } from '../db/database.ts';
 import { createLead, checkDuplicate, updateLead } from './leadService.ts';
-import { Lead } from '../types/index.ts';
+import type { Lead } from '../types/index.ts';
 
 // Meta Lead Ads Webhook & Payload Processing
 export function verifyMetaWebhook(mode: string, token: string, challenge: string): string | null {
@@ -181,39 +181,82 @@ export function sendWhatsAppMessage(params: {
 // ==========================================
 // Google Sheets Integration & Webhook Handler
 // ==========================================
+function extractSheetValue(raw: Record<string, any>, candidates: string[]): string {
+  if (!raw || typeof raw !== 'object') return '';
+  for (const c of candidates) {
+    if (raw[c] !== undefined && raw[c] !== null && String(raw[c]).trim() !== '') {
+      return String(raw[c]).trim();
+    }
+  }
+  const candidateNorms = candidates.map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === undefined || v === null || String(v).trim() === '') continue;
+    const normKey = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (candidateNorms.includes(normKey)) {
+      return String(v).trim();
+    }
+  }
+  return '';
+}
+
 export function handleGoogleSheetsLeadWebhook(payload: any) {
   const logId = 'LOG-GS-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
   try {
     const raw = payload.simulatedRow || payload.row || payload.lead || payload;
     
-    // Normalize fields from all expected Google Sheet columns:
-    // Lead ID, Date, Student Name, Phone, WhatsApp, Email, City, State/Country,
-    // Lead Source, Campaign, Course Interested, University Interested, Qualification,
-    // Percentage/Score, Passing Year, Budget, Assigned Counselor, Lead Status, Next Follow-up Date, Counselor Notes
-    const sheetLeadId = raw.lead_id || raw['Lead ID'] || raw['leadId'];
-    const student_name = (raw.student_name || raw['Student Name'] || raw['Full Name'] || raw['Name'] || raw.name || raw.fullName || '').trim();
-    const rawPhone = (raw.phone || raw['Phone'] || raw['Phone Number'] || raw['Mobile'] || raw['Contact Number'] || raw.mobile || '').toString().trim();
-    const rawWa = (raw.whatsapp_number || raw['WhatsApp'] || raw['WhatsApp Number'] || raw.whatsapp || rawPhone).toString().trim();
-    const email = (raw.email || raw['Email'] || raw['Email Address'] || '').toString().trim();
-    const city = (raw.city || raw['City'] || raw['Location'] || raw['Branch'] || 'Kathmandu').toString().trim();
-    const stateCountry = (raw['State/Country'] || raw['State'] || raw['Country'] || raw.country || '').toString().trim();
+    // 5-Field Standardization:
+    // 1. full_name
+    // 2. phone_number
+    // 3. email
+    // 4. which_course_are_you_interested_in?
+    // 5. which_univsities_are_you_looking_for?
+    const student_name = extractSheetValue(raw, ['full_name', 'Full Name', 'student_name', 'Student Name', 'name', 'Name']);
+    const rawPhone = extractSheetValue(raw, ['phone_number', 'Phone Number', 'phone', 'Phone', 'mobile', 'Mobile', 'contact_number', 'Contact Number']);
+    const email = extractSheetValue(raw, ['email', 'Email', 'email_address', 'Email Address']);
+    const preferred_course = extractSheetValue(raw, [
+      'which_course_are_you_interested_in?',
+      'which_course_are_you_interested_in',
+      'Which Course are you interested in?',
+      'Which course are you interested in?',
+      'Which course are you interested in',
+      'which course are you interested in',
+      'preferred_course',
+      'Course Interested',
+      'Course'
+    ]);
+    const preferred_university = extractSheetValue(raw, [
+      'which_univsities_are_you_looking_for?',
+      'which_univsities_are_you_looking_for',
+      'which_universities_are_you_looking_for?',
+      'which_universities_are_you_looking_for',
+      'Which Universities are you looking for?',
+      'Which universities are you looking for?',
+      'Which universities are you looking for',
+      'which universities are you looking for',
+      'preferred_university',
+      'University Interested',
+      'University'
+    ]);
+
+    const sheetLeadId = extractSheetValue(raw, ['lead_id', 'Lead ID', 'leadId']);
+    const rawWa = extractSheetValue(raw, ['whatsapp_number', 'WhatsApp', 'WhatsApp Number', 'whatsapp']) || rawPhone;
+    const city = extractSheetValue(raw, ['city', 'City', 'Location', 'Branch']) || 'Kathmandu';
+    const stateCountry = extractSheetValue(raw, ['State/Country', 'State', 'Country', 'country']);
     const country = stateCountry.toLowerCase().includes('india') ? 'India' : (['Delhi', 'Noida', 'Bangalore', 'Chennai', 'Mumbai', 'Pune'].includes(city) ? 'India' : 'Nepal');
-    const preferred_course = (raw.preferred_course || raw['Course Interested'] || raw['Course'] || raw['Preferred Course'] || raw.interestedCourse || 'B.Tech Computer Science & Engineering').toString().trim();
-    const preferred_university = (raw.preferred_university || raw['University Interested'] || raw['University'] || raw['Preferred University'] || raw.interestedUniversity || 'SRM Institute of Science and Technology').toString().trim();
-    const academic_qualification = (raw.academic_qualification || raw['Qualification'] || raw['12th Stream'] || '+2 Science').toString().trim();
+    const academic_qualification = extractSheetValue(raw, ['academic_qualification', 'Qualification', '12th Stream']);
     const rawPercent = raw['Percentage/Score'] || raw['Percentage'] || raw['Score'] || raw.percentage_12th || raw.percentage_10th || raw.academicPercentage;
     const percentage = rawPercent ? parseFloat(String(rawPercent).replace(/[^0-9.]/g, '')) : undefined;
-    const passing_year = (raw['Passing Year'] || raw.passing_year || raw.passingYear || '').toString().trim();
-    const budget = (raw['Budget'] || raw.budget || raw.budgetRange || '').toString().trim();
-    const assignedCounselorFromSheet = (raw['Assigned Counselor'] || raw.assigned_counselor_name || raw['Counselor'] || raw.assignedCounselor || '').toString().trim();
-    const lead_status = (raw['Lead Status'] || raw.lead_status || raw['Status'] || raw.leadStatus || 'New Lead').toString().trim();
-    const next_follow_up_date = (raw['Next Follow-up Date'] || raw.next_follow_up_date || raw['Follow-up Date'] || raw.nextFollowUpDate || '').toString().trim();
-    const sheetNotes = (raw['Counselor Notes'] || raw.counselor_notes || raw['Notes'] || raw['Remarks'] || raw.remarks || raw.leadNotes || '').toString().trim();
-    const parent_name = (raw["Father's/Mother's Name"] || raw['Parent Name'] || raw.parent_name || raw.fatherName || raw.parentName || '').toString().trim();
-    const school_college = (raw['School/College'] || raw.school_college || raw['College'] || raw['School'] || raw.schoolCollege || '').toString().trim();
-    const campaign = (raw.campaign || raw['Campaign'] || raw['Source Sheet'] || payload.sheetName || 'Google Sheets Lead Sheet').toString().trim();
-    const lead_source = (raw.lead_source || raw['Lead Source'] || raw['Source'] || 'Google Sheets').toString().trim();
-    const priority = (raw.priority || raw['Priority'] || '').toString().trim().toUpperCase();
+    const passing_year = extractSheetValue(raw, ['Passing Year', 'passing_year', 'passingYear']);
+    const budget = extractSheetValue(raw, ['Budget', 'budget', 'budgetRange']);
+    const assignedCounselorFromSheet = extractSheetValue(raw, ['Assigned Counselor', 'assigned_counselor_name', 'Counselor', 'assignedCounselor']);
+    const lead_status = extractSheetValue(raw, ['Lead Status', 'lead_status', 'Status', 'leadStatus']) || 'New Lead';
+    const next_follow_up_date = extractSheetValue(raw, ['Next Follow-up Date', 'next_follow_up_date', 'Follow-up Date', 'nextFollowUpDate']);
+    const sheetNotes = extractSheetValue(raw, ['Counselor Notes', 'counselor_notes', 'Notes', 'Remarks', 'remarks', 'leadNotes']);
+    const parent_name = extractSheetValue(raw, ["Father's/Mother's Name", 'Parent Name', 'parent_name', 'fatherName', 'parentName']);
+    const school_college = extractSheetValue(raw, ['School/College', 'school_college', 'College', 'School', 'schoolCollege']);
+    const campaign = extractSheetValue(raw, ['campaign', 'Campaign', 'Source Sheet']) || payload.sheetName || 'Google Sheets Lead Sheet';
+    const lead_source = extractSheetValue(raw, ['lead_source', 'Lead Source', 'Source']) || 'Google Sheets';
+    const priority = extractSheetValue(raw, ['priority', 'Priority']).toUpperCase();
 
     // If completely empty phone and student name, skip gracefully
     if (!rawPhone && !email && !student_name) {
@@ -228,7 +271,7 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       return {
         success: false,
         skipped: true,
-        message: 'Row missing contact details (Phone/Email required)'
+        message: 'Row missing contact details (Phone Number or Email required)'
       };
     }
 
@@ -244,8 +287,8 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       passing_year: passing_year || null,
       academic_qualification: academic_qualification || null,
       percentage_12th: percentage || null,
-      preferred_course,
-      preferred_university,
+      preferred_course: preferred_course || 'Not Specified',
+      preferred_university: preferred_university || 'Not Specified',
       budget: budget || null,
       campaign,
       lead_source,
@@ -280,8 +323,8 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       if (percentage) updates.percentage_12th = percentage;
       if (budget) updates.budget = budget;
       if (priority && ['HIGH', 'MEDIUM', 'LOW'].includes(priority)) updates.priority = priority;
-      if (preferred_course && existing.preferred_course !== preferred_course) updates.preferred_course = preferred_course;
-      if (preferred_university && existing.preferred_university !== preferred_university) updates.preferred_university = preferred_university;
+      if (preferred_course && preferred_course !== 'Not Specified' && existing.preferred_course !== preferred_course) updates.preferred_course = preferred_course;
+      if (preferred_university && preferred_university !== 'Not Specified' && existing.preferred_university !== preferred_university) updates.preferred_university = preferred_university;
       if (next_follow_up_date) updates.next_follow_up_date = next_follow_up_date;
 
       // If existing lead has no counselor and sheet specified one, try matching
@@ -463,6 +506,13 @@ export function getGoogleAppsScriptTemplate(baseUrl: string) {
   const webhookUrl = `${baseUrl}/api/integrations/google-sheets/webhook`;
   return `/**
  * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
+ * 
+ * Standard Column Headers (Row 1):
+ * 1. full_name
+ * 2. phone_number
+ * 3. email
+ * 4. which_course_are_you_interested_in?
+ * 5. which_univsities_are_you_looking_for?
  * 
  * Instructions:
  * 1. In your Google Sheet, open Extensions > Apps Script.

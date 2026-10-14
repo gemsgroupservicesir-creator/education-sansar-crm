@@ -105,26 +105,40 @@ CREATE TABLE IF NOT EXISTS university_courses (
   id TEXT PRIMARY KEY,
   university_id TEXT NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
   course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  tuition_fee_per_year REAL NOT NULL DEFAULT 0.0,
+  hostel_fee_per_year REAL NOT NULL DEFAULT 0.0,
+  one_time_fee REAL NOT NULL DEFAULT 0.0,
+  other_charges REAL NOT NULL DEFAULT 0.0,
+  total_first_year_fee REAL NOT NULL DEFAULT 0.0,
+  total_full_course_fee REAL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  eligibility_notes TEXT,
+  scholarship_available INTEGER NOT NULL DEFAULT 1,
+  scholarship_details TEXT,
+  application_deadline TEXT,
+  admission_process TEXT DEFAULT 'Direct Merit / Counseling',
+  remarks TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  -- Legacy compatibility fields
   tuition_fee REAL NOT NULL DEFAULT 0.0,
   hostel_fee REAL NOT NULL DEFAULT 0.0,
   other_fees REAL NOT NULL DEFAULT 0.0,
   total_fee REAL NOT NULL DEFAULT 0.0,
   duration TEXT NOT NULL DEFAULT '4 Years',
   eligibility TEXT,
-  scholarship_available INTEGER NOT NULL DEFAULT 1,
-  scholarship_details TEXT,
   application_fee REAL NOT NULL DEFAULT 0.0,
   admission_deadline TEXT,
   notes TEXT,
-  status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'Inactive'
+  status TEXT NOT NULL DEFAULT 'Active',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_uc_uni ON university_courses(university_id);
 CREATE INDEX IF NOT EXISTS idx_uc_course ON university_courses(course_id);
-CREATE INDEX IF NOT EXISTS idx_uc_total_fee ON university_courses(total_fee);
-CREATE INDEX IF NOT EXISTS idx_uc_status ON university_courses(status);
+CREATE INDEX IF NOT EXISTS idx_uc_total_first_year ON university_courses(total_first_year_fee);
+CREATE INDEX IF NOT EXISTS idx_uc_tuition ON university_courses(tuition_fee_per_year);
+CREATE INDEX IF NOT EXISTS idx_uc_active ON university_courses(is_active);
 
 -- 7. Leads table
 CREATE TABLE IF NOT EXISTS leads (

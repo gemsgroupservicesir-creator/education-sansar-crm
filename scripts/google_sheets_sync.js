@@ -1,6 +1,13 @@
 /**
  * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
  * 
+ * Standard Column Headers (Row 1):
+ * 1. full_name
+ * 2. phone_number
+ * 3. email
+ * 4. which_course_are_you_interested_in?
+ * 5. which_univsities_are_you_looking_for?
+ * 
  * Instructions:
  * 1. In your Google Sheet, open Extensions > Apps Script.
  * 2. Delete any existing code and paste this script.

@@ -1,5 +1,5 @@
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
-import { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
+import type { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
 
 export function normalizePhoneNumber(phone?: string): string {
   if (!phone) return '';
@@ -251,8 +251,8 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     data.graduation_percentage || null,
     data.entrance_exam || null,
     data.entrance_score || null,
-    data.preferred_course || 'B.Tech CSE',
-    data.preferred_university || 'SRM Institute of Science and Technology',
+    data.preferred_course || 'Not Specified',
+    data.preferred_university || 'Not Specified',
     data.second_university || null,
     data.budget || null,
     data.scholarship_required ? 1 : 0,

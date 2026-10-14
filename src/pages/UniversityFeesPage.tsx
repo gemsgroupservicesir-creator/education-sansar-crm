@@ -22,7 +22,8 @@ import {
   ShieldCheck,
   Check,
   SlidersHorizontal,
-  FileText
+  FileText,
+  AlertCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { UniversityCourse, University, Course } from '../types';
@@ -75,7 +76,7 @@ export const UniversityFeesPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [uniList, courseList, feesList] = await Promise.all([
+      const [uniRes, courseRes, feesRes] = await Promise.allSettled([
         api.getUniversities(),
         api.getCourses(),
         api.getUniversityCourses({
@@ -87,9 +88,25 @@ export const UniversityFeesPage: React.FC = () => {
           max_fee: maxBudget ? String(maxBudget) : ''
         })
       ]);
-      setUniversities(uniList);
-      setCourses(courseList);
-      setFeeStructures(feesList);
+
+      if (uniRes.status === 'fulfilled') {
+        setUniversities(uniRes.value || []);
+      } else {
+        console.error('Failed to load universities:', uniRes.reason);
+      }
+
+      if (courseRes.status === 'fulfilled') {
+        setCourses(courseRes.value || []);
+      } else {
+        console.error('Failed to load courses:', courseRes.reason);
+      }
+
+      if (feesRes.status === 'fulfilled') {
+        setFeeStructures(feesRes.value || []);
+      } else {
+        console.error('Failed to load fee structures:', feesRes.reason);
+        addToast(feesRes.reason?.message || 'Failed to load fee database', 'error');
+      }
     } catch (err: any) {
       addToast(err.message || 'Failed to load fee database', 'error');
     } finally {
@@ -796,15 +813,53 @@ export const UniversityFeesPage: React.FC = () => {
               </button>
             </div>
 
+            {(universities.length === 0 || courses.length === 0) && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600" />
+                  Prerequisite: Add University &amp; Course Program First
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Fee structures require selecting a valid University and Course Program. Currently found:{' '}
+                  <strong>{universities.length} universities</strong> and{' '}
+                  <strong>{courses.length} courses</strong>.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  {universities.length === 0 && (
+                    <a
+                      href="/universities"
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-semibold"
+                    >
+                      + Go to Universities
+                    </a>
+                  )}
+                  {courses.length === 0 && (
+                    <a
+                      href="/courses"
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-semibold"
+                    >
+                      + Go to Courses
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">University</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  University <span className="text-red-500">*</span>
+                </label>
                 <select
                   required
                   value={formUniId}
                   onChange={(e) => setFormUniId(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  disabled={universities.length === 0}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 disabled:bg-slate-100 disabled:text-slate-400"
                 >
+                  <option value="">
+                    {universities.length === 0 ? '-- No Universities Added Yet --' : '-- Select University --'}
+                  </option>
                   {universities.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name} ({u.city})
@@ -814,13 +869,19 @@ export const UniversityFeesPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Course Program</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Course Program <span className="text-red-500">*</span>
+                </label>
                 <select
                   required
                   value={formCourseId}
                   onChange={(e) => setFormCourseId(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  disabled={courses.length === 0}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 disabled:bg-slate-100 disabled:text-slate-400"
                 >
+                  <option value="">
+                    {courses.length === 0 ? '-- No Courses Added Yet --' : '-- Select Course Program --'}
+                  </option>
                   {courses.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.course_name}

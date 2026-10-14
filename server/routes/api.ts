@@ -298,18 +298,30 @@ apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id) as Lead | undefined;
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  // Soft delete
-  db.prepare("UPDATE leads SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
+  // Permanent Hard Delete with Cascade
+  const deleteTx = db.transaction((id: string) => {
+    db.prepare('DELETE FROM students WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM followups WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM lead_activities WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM lead_status_history WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM lead_assignments WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM applications WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM documents WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM messages WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM campaign_leads WHERE lead_id = ?').run(id);
+    db.prepare('DELETE FROM leads WHERE id = ?').run(id);
+  });
+  deleteTx(req.params.id);
 
   logAudit({
     userName: req.body.performedBy || 'User',
-    action: 'LEAD_DELETED_SOFT',
+    action: 'LEAD_DELETED_PERMANENT',
     entity: 'lead',
     entityId: req.params.id,
     oldValue: { lead_id: lead.lead_id, student_name: lead.student_name }
   });
 
-  res.json({ success: true, message: 'Lead soft-deleted successfully' });
+  res.json({ success: true, message: 'Lead deleted permanently' });
 });
 
 apiRouter.post('/leads/:id/reassign', (req: Request, res: Response) => {
@@ -630,6 +642,11 @@ apiRouter.put('/followups/:id/complete', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+apiRouter.delete('/followups/:id', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM followups WHERE id = ?').run(req.params.id);
+  res.json({ success: true, message: 'Follow-up deleted permanently.' });
+});
+
 // ==========================================
 // 5. APPLICATIONS
 // ==========================================
@@ -745,6 +762,11 @@ apiRouter.put('/applications/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+apiRouter.delete('/applications/:id', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM applications WHERE id = ?').run(req.params.id);
+  res.json({ success: true, message: 'Application deleted permanently.' });
+});
+
 // ==========================================
 // 6. STUDENTS (Enrolled)
 // ==========================================
@@ -790,6 +812,11 @@ apiRouter.get('/students/:id', (req: Request, res: Response) => {
     documents,
     activities
   });
+});
+
+apiRouter.delete('/students/:id', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
+  res.json({ success: true, message: 'Student record deleted permanently.' });
 });
 
 // ==========================================
@@ -1299,6 +1326,11 @@ apiRouter.put('/documents/:id/verify', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+apiRouter.delete('/documents/:id', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM documents WHERE id = ?').run(req.params.id);
+  res.json({ success: true, message: 'Document deleted permanently.' });
+});
+
 // ==========================================
 // 9. CAMPAIGNS
 // ==========================================
@@ -1461,15 +1493,11 @@ apiRouter.post('/integrations/google-sheets/webhook', (req: Request, res: Respon
 apiRouter.post('/integrations/google-sheets/test-inbound', (req: Request, res: Response) => {
   try {
     const sampleRow = req.body.simulatedRow || {
-      student_name: req.body.student_name || 'Rohan Maharjan',
-      phone: req.body.phone || '+977 9811' + Math.floor(100000 + Math.random() * 900000),
-      email: req.body.email || `rohan.sheets.${Date.now()}@gmail.com`,
-      city: req.body.city || 'Kathmandu',
-      preferred_course: req.body.preferred_course || 'B.Tech Computer Science & Engineering',
-      preferred_university: req.body.preferred_university || 'SRM Institute of Science and Technology',
-      academic_qualification: req.body.academic_qualification || '+2 Science',
-      campaign: req.body.campaign || 'Kathmandu Education Fair 2026 - Sheet Response',
-      row_number: req.body.row_number || 42
+      full_name: req.body.full_name || req.body.student_name || 'Aarav Sharma',
+      phone_number: req.body.phone_number || req.body.phone || '+977 9811' + Math.floor(100000 + Math.random() * 900000),
+      email: req.body.email || `aarav.sheets.${Date.now()}@gmail.com`,
+      'which_course_are_you_interested_in?': req.body['which_course_are_you_interested_in?'] || req.body.preferred_course || 'B.Tech Computer Science & Engineering',
+      'which_univsities_are_you_looking_for?': req.body['which_univsities_are_you_looking_for?'] || req.body.preferred_university || 'SRM Institute of Science and Technology'
     };
 
     const result = handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
