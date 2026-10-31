@@ -27,6 +27,7 @@ import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HRPage } from './pages/HRPage';
 import { FinancePage } from './pages/FinancePage';
+import { CommunicationsPage } from './pages/CommunicationsPage';
 import { useNotifications } from './context/NotificationContext';
 import { useAuth } from './context/AuthContext';
 
@@ -122,6 +123,7 @@ export const App: React.FC = () => {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/hr" element={<HRPage />} />
               <Route path="/finance" element={<FinancePage />} />
+              <Route path="/communications" element={<CommunicationsPage />} />
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

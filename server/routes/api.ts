@@ -71,6 +71,16 @@ import {
   getUniversityCommissionsSummary
 } from '../services/financeService.ts';
 
+import {
+  getEmailTemplates,
+  saveEmailTemplate,
+  deleteEmailTemplate,
+  previewEmailResolution,
+  getTargetLeadsForBulkEmail,
+  sendBulkEmailCampaign,
+  getBulkEmailCampaigns
+} from '../services/emailService.ts';
+
 export const apiRouter = Router();
 
 // ==========================================
@@ -632,6 +642,49 @@ apiRouter.get('/counselors', (req: Request, res: Response) => {
   res.json(counselors);
 });
 
+apiRouter.get('/counselors/:id', (req: Request, res: Response) => {
+  const counselor = db.prepare(`
+    SELECT c.*,
+      COALESCE(u.role, 'Counselor') as role,
+      u.permissions as permissions,
+      u.avatar_url,
+      (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.is_deleted = 0) as total_leads_count,
+      (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Interested', 'Application Started', 'Documents Pending') AND l.is_deleted = 0) as active_leads_count,
+      (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('Admitted', 'Visa Approved', 'Fee Paid') AND l.is_deleted = 0) as converted_leads_count,
+      (SELECT count(*) FROM followups f WHERE f.counselor_id = c.id AND f.status = 'Pending') as pending_followups_count
+    FROM counselors c
+    LEFT JOIN users u ON (c.user_id = u.id OR LOWER(c.email) = LOWER(u.email))
+    WHERE c.id = ?
+  `).get(req.params.id) as any;
+
+  if (!counselor) return res.status(404).json({ error: 'Staff member not found' });
+
+  const recentLeads = db.prepare(`
+    SELECT id, lead_id, student_name, preferred_course, preferred_university, lead_status, lead_temperature, created_at
+    FROM leads
+    WHERE assigned_counselor_id = ? AND is_deleted = 0
+    ORDER BY created_at DESC LIMIT 10
+  `).all(req.params.id);
+
+  let assignedCities: string[] = [];
+  let specCourses: string[] = [];
+  let specUnis: string[] = [];
+  let permissions: string[] = [];
+  try { assignedCities = JSON.parse(counselor.assigned_cities || '[]'); } catch { assignedCities = []; }
+  try { specCourses = JSON.parse(counselor.specialization_courses || '[]'); } catch { specCourses = []; }
+  try { specUnis = JSON.parse(counselor.specialization_universities || '[]'); } catch { specUnis = []; }
+  try { permissions = JSON.parse(counselor.permissions || '[]'); } catch { permissions = []; }
+
+  res.json({
+    ...counselor,
+    assigned_cities: assignedCities,
+    specialization_courses: specCourses,
+    specialization_universities: specUnis,
+    permissions,
+    recent_leads: recentLeads
+  });
+});
+
 apiRouter.put('/counselors/:id/toggle-active', async (req: Request, res: Response) => {
   const c = db.prepare('SELECT is_active, name, email, user_id FROM counselors WHERE id = ?').get(req.params.id) as any;
   if (!c) return res.status(404).json({ error: 'Counselor not found' });
@@ -661,7 +714,8 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const { 
       name, email, phone, specialization_country, assigned_cities, 
       max_capacity, password, username, role, permissions,
-      specialization_courses, specialization_universities, daily_lead_quota 
+      specialization_courses, specialization_universities, daily_lead_quota,
+      designation, department, employee_code, alternate_phone, work_location, notes
     } = req.body;
     if (!name || !email || !phone) {
       return res.status(400).json({ error: 'Name, email, and phone number are required' });
@@ -701,9 +755,10 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       INSERT INTO counselors (
         id, user_id, name, username, email, phone, specialization_country, assigned_cities,
         max_capacity, is_active, status, joining_date, specialization_courses,
-        specialization_universities, daily_lead_quota, created_at, updated_at
+        specialization_universities, daily_lead_quota, designation, department,
+        employee_code, alternate_phone, work_location, notes, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -718,6 +773,12 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       specCoursesJson,
       specUnisJson,
       daily_lead_quota || 25,
+      designation || (userRole === 'Counselor' ? 'Senior Admission Counselor' : userRole),
+      department || 'Admissions',
+      employee_code || ('EMP-' + Math.floor(1000 + Math.random() * 9000)),
+      alternate_phone || null,
+      work_location || 'Kathmandu HQ',
+      notes || null,
       now,
       now
     );
@@ -770,7 +831,8 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
     const { 
       name, email, phone, specialization_country, assigned_cities, max_capacity, 
       is_active, status, role, permissions, specialization_courses, 
-      specialization_universities, daily_lead_quota 
+      specialization_universities, daily_lead_quota,
+      designation, department, employee_code, alternate_phone, work_location, notes
     } = req.body;
     const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
     if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
@@ -791,6 +853,12 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
           specialization_courses = COALESCE(?, specialization_courses),
           specialization_universities = COALESCE(?, specialization_universities),
           daily_lead_quota = COALESCE(?, daily_lead_quota),
+          designation = COALESCE(?, designation),
+          department = COALESCE(?, department),
+          employee_code = COALESCE(?, employee_code),
+          alternate_phone = COALESCE(?, alternate_phone),
+          work_location = COALESCE(?, work_location),
+          notes = COALESCE(?, notes),
           updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -805,6 +873,12 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
       specialization_courses ? JSON.stringify(specialization_courses) : null,
       specialization_universities ? JSON.stringify(specialization_universities) : null,
       daily_lead_quota || null,
+      designation || null,
+      department || null,
+      employee_code || null,
+      alternate_phone || null,
+      work_location || null,
+      notes || null,
       req.params.id
     );
 
@@ -2771,5 +2845,106 @@ apiRouter.get('/finance/university-commissions', (req: Request, res: Response) =
     res.json(commissions);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch university commissions' });
+  }
+});
+
+// ==========================================
+// 19. EMAIL TEMPLATES & BULK CAMPAIGNS
+// ==========================================
+apiRouter.get('/email/templates', (req: Request, res: Response) => {
+  try {
+    const filters = {
+      course: req.query.course as string,
+      university: req.query.university as string,
+      category: req.query.category as string
+    };
+    const templates = getEmailTemplates(filters);
+    res.json(templates);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch email templates' });
+  }
+});
+
+apiRouter.post('/email/templates', (req: Request, res: Response) => {
+  try {
+    const { name, subject, content } = req.body;
+    if (!name || !subject || !content) {
+      return res.status(400).json({ error: 'Template name, subject, and content are required' });
+    }
+    const template = saveEmailTemplate(req.body, req.body.performedBy || 'Super Admin');
+    res.status(201).json(template);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create email template' });
+  }
+});
+
+apiRouter.put('/email/templates/:id', (req: Request, res: Response) => {
+  try {
+    const template = saveEmailTemplate({ id: req.params.id, ...req.body }, req.body.performedBy || 'Super Admin');
+    res.json(template);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update email template' });
+  }
+});
+
+apiRouter.delete('/email/templates/:id', (req: Request, res: Response) => {
+  try {
+    const performedBy = (req.query.performedBy as string) || req.body?.performedBy || 'Super Admin';
+    const success = deleteEmailTemplate(req.params.id, performedBy);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete email template' });
+  }
+});
+
+apiRouter.post('/email/preview', (req: Request, res: Response) => {
+  try {
+    const { subject, content, sampleData } = req.body;
+    const preview = previewEmailResolution(subject || '', content || '', sampleData);
+    res.json(preview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to preview email template' });
+  }
+});
+
+apiRouter.post('/email/target-count', (req: Request, res: Response) => {
+  try {
+    const matchingLeads = getTargetLeadsForBulkEmail(req.body || {});
+    res.json({
+      count: matchingLeads.length,
+      sample: matchingLeads.slice(0, 5).map(l => ({
+        id: l.id,
+        student_name: l.student_name,
+        email: l.email,
+        course: l.preferred_course,
+        university: l.preferred_university,
+        city: l.city,
+        temperature: l.lead_temperature
+      }))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to compute target leads count' });
+  }
+});
+
+apiRouter.post('/email/send-bulk', (req: Request, res: Response) => {
+  try {
+    const { subject, content } = req.body;
+    if (!subject || !content) {
+      return res.status(400).json({ error: 'Subject and email content body are required' });
+    }
+    const result = sendBulkEmailCampaign(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to dispatch bulk email campaign' });
+  }
+});
+
+apiRouter.get('/email/campaigns', (req: Request, res: Response) => {
+  try {
+    const campaigns = getBulkEmailCampaigns();
+    res.json(campaigns);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch bulk email campaigns' });
   }
 });

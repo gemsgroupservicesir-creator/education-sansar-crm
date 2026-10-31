@@ -378,13 +378,35 @@ CREATE TABLE IF NOT EXISTS message_templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   channel TEXT NOT NULL DEFAULT 'WhatsApp', -- 'WhatsApp', 'Email', 'SMS'
-  category TEXT NOT NULL, -- 'WELCOME', 'COUNSELOR_INTRO', 'FOLLOWUP_REMINDER', 'DOCUMENT_REMINDER', 'FEE_REMINDER', 'ADMISSION_CONFIRMATION'
+  category TEXT NOT NULL, -- 'WELCOME', 'COUNSELOR_INTRO', 'FOLLOWUP_REMINDER', 'DOCUMENT_REMINDER', 'FEE_REMINDER', 'ADMISSION_CONFIRMATION', 'COURSE_PROSPECTUS', 'SCHOLARSHIP_OFFER', 'UNIVERSITY_INVITE'
   subject TEXT,
   content TEXT NOT NULL,
-  variables TEXT DEFAULT '[]', -- JSON array of var names e.g. ["student_name", "counselor_name"]
+  variables TEXT DEFAULT '[]', -- JSON array of var names e.g. ["student_name", "preferred_course"]
+  target_courses TEXT DEFAULT '[]', -- JSON array of courses e.g. ["B.Tech", "MBBS", "MBA"]
+  target_universities TEXT DEFAULT '[]', -- JSON array of partner universities e.g. ["Sharda University"]
+  description TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 19b. Bulk Email Campaigns & History
+CREATE TABLE IF NOT EXISTS bulk_email_campaigns (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  template_id TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
+  subject TEXT NOT NULL,
+  content TEXT NOT NULL,
+  filter_course TEXT,
+  filter_university TEXT,
+  filter_status TEXT,
+  filter_temperature TEXT,
+  total_recipients INTEGER NOT NULL DEFAULT 0,
+  sent_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'COMPLETED', -- 'QUEUED', 'SENDING', 'COMPLETED', 'FAILED'
+  sent_by TEXT NOT NULL DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 20. Messages log

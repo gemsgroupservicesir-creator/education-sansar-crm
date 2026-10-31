@@ -116,6 +116,12 @@ export interface Counselor {
   specialization_universities?: string[] | string;
   daily_lead_quota?: number;
   leads_assigned_today?: number;
+  designation?: string;
+  department?: string;
+  employee_code?: string;
+  alternate_phone?: string;
+  work_location?: string;
+  notes?: string;
   created_at: string;
   updated_at: string;
 }
@@ -495,8 +501,11 @@ export const FEATURE_PERMISSIONS: FeaturePermission[] = [
   { id: 'students', name: 'Enrolled Students', category: 'Admissions', description: 'Manage converted students and tuition fee records' },
   { id: 'universities', name: 'Universities & Courses', category: 'Academics', description: 'Browse partner universities, courses, and fee structures' },
   { id: 'counselors_manage', name: 'Counselors & Staff Logins', category: 'Team & Operations', description: 'Add/edit staff accounts, roles, and feature permissions' },
+  { id: 'staff_info_view', name: 'Staff Information & Directory', category: 'Team & Operations', description: 'Access complete staff directory, designations, and academic focus' },
   { id: 'hr_management', name: 'HR & Staff Directory', category: 'Team & Operations', description: 'Employee records, daily attendance, leaves, and payroll' },
   { id: 'finance_management', name: 'Finance & Accounts', category: 'Team & Operations', description: 'Student fee invoicing, university commissions, and expenses' },
+  { id: 'bulk_email', name: 'Bulk Email & Outreach', category: 'Marketing', description: 'Filter leads by course/university and send bulk personalized emails' },
+  { id: 'email_templates', name: 'Course & University Templates', category: 'Marketing', description: 'Create and manage rich course & university targeted email templates' },
   { id: 'campaigns', name: 'Marketing Campaigns', category: 'Marketing', description: 'Track Meta ads, Google ads, and lead acquisition costs' },
   { id: 'reports', name: 'Reports & Export', category: 'Marketing', description: 'Export Excel reports, counselor KPIs, and ROI metrics' },
   { id: 'documents', name: 'Document Vault', category: 'Operations' as any, description: 'Upload, inspect, and verify student marksheets and passports' },
@@ -508,30 +517,67 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Super Admin': FEATURE_PERMISSIONS.map(p => p.id),
   'Admin': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'leads_delete', 'lead_distribution',
-    'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'hr_management',
-    'finance_management', 'campaigns', 'reports', 'documents'
+    'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'staff_info_view',
+    'hr_management', 'finance_management', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'documents'
   ],
   'Counselor': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline',
-    'applications', 'students', 'universities', 'documents'
+    'applications', 'students', 'universities', 'staff_info_view', 'documents'
   ],
   'Telecaller': [
-    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'documents'
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'staff_info_view', 'documents'
   ],
   'Marketing Manager': [
-    'dashboard', 'leads_view', 'leads_create', 'campaigns', 'reports', 'integrations'
+    'dashboard', 'leads_view', 'leads_create', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'integrations', 'staff_info_view'
   ],
   'Management': [
     'dashboard', 'leads_view', 'pipeline', 'applications', 'students',
-    'universities', 'reports', 'finance_management', 'hr_management'
+    'universities', 'reports', 'finance_management', 'hr_management', 'bulk_email', 'staff_info_view'
   ],
   'Accountant': [
-    'dashboard', 'students', 'finance_management', 'hr_management', 'reports'
+    'dashboard', 'students', 'finance_management', 'hr_management', 'reports', 'staff_info_view'
   ],
   'HR Manager': [
-    'dashboard', 'counselors_manage', 'hr_management'
+    'dashboard', 'counselors_manage', 'hr_management', 'staff_info_view'
   ],
 };
+
+// ==========================================
+// EMAIL TEMPLATES & BULK CAMPAIGN TYPES
+// ==========================================
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  channel: 'Email' | 'WhatsApp' | 'SMS';
+  category: string;
+  subject?: string;
+  content: string;
+  variables: string[] | string;
+  target_courses?: string[] | string;
+  target_universities?: string[] | string;
+  description?: string;
+  is_active: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BulkEmailCampaign {
+  id: string;
+  name: string;
+  template_id?: string;
+  subject: string;
+  content: string;
+  filter_course?: string;
+  filter_university?: string;
+  filter_status?: string;
+  filter_temperature?: string;
+  total_recipients: number;
+  sent_count: number;
+  failed_count: number;
+  status: 'QUEUED' | 'SENDING' | 'COMPLETED' | 'FAILED';
+  sent_by: string;
+  created_at: string;
+}
 
 // ==========================================
 // LEAD DISTRIBUTION ENGINE TYPES

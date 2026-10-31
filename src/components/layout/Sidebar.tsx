@@ -26,7 +26,8 @@ import {
   LogOut,
   X,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Mail
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -61,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { name: 'Counselors', path: '/counselors', icon: Briefcase, permission: 'counselors_manage' },
     { name: 'HR Solution', path: '/hr', icon: UserCog, permission: 'hr_management' },
     { name: 'Finance & Accounts', path: '/finance', icon: Wallet, permission: 'finance_management' },
+    { name: 'Bulk Outreach', path: '/communications', icon: Mail, permission: 'bulk_email' },
     { name: 'Campaigns', path: '/campaigns', icon: Megaphone, permission: 'campaigns' },
     { name: 'Reports', path: '/reports', icon: BarChart3, permission: 'reports' },
     { name: 'Documents', path: '/documents', icon: FileText, permission: 'documents' },

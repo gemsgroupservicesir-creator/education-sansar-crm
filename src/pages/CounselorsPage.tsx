@@ -24,7 +24,13 @@ import {
   GraduationCap,
   Building2,
   Sparkles,
-  Lock
+  Lock,
+  Eye,
+  Building,
+  Calendar,
+  FileText,
+  Layers,
+  GraduationCap as GradCap
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Counselor, FEATURE_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, FeaturePermission } from '../types';
@@ -33,8 +39,9 @@ import { useAuth } from '../context/AuthContext';
 
 export const CounselorsPage: React.FC = () => {
   const { addToast } = useNotifications();
-  const { currentRole, isSuperAdmin } = useAuth();
+  const { currentRole, isSuperAdmin, hasPermission } = useAuth();
   const isAdmin = isSuperAdmin || currentRole === 'Super Admin' || currentRole === 'Admin';
+  const canViewStaffDetails = isSuperAdmin || isAdmin || hasPermission('staff_info_view');
 
   const [counselors, setCounselors] = useState<Counselor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +51,9 @@ export const CounselorsPage: React.FC = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [viewStaffData, setViewStaffData] = useState<any>(null);
+  const [loadingStaffDetails, setLoadingStaffDetails] = useState(false);
 
   // Target counselor for edit/password/delete
   const [selectedCounselor, setSelectedCounselor] = useState<Counselor | null>(null);
@@ -58,6 +68,14 @@ export const CounselorsPage: React.FC = () => {
   const [formPassword, setFormPassword] = useState('counselor123');
   const [formCities, setFormCities] = useState('Kathmandu, Janakpur');
   const [formStatus, setFormStatus] = useState('Active');
+
+  // Extended Staff Professional Information
+  const [formDesignation, setFormDesignation] = useState('Senior Admission Counselor');
+  const [formDepartment, setFormDepartment] = useState('Admissions & Counseling');
+  const [formEmployeeCode, setFormEmployeeCode] = useState('');
+  const [formAltPhone, setFormAltPhone] = useState('');
+  const [formWorkLocation, setFormWorkLocation] = useState('Kathmandu HQ');
+  const [formNotes, setFormNotes] = useState('');
 
   // Lead Routing & Specialization Form States
   const [formCourses, setFormCourses] = useState('B.Tech, MBBS, MBA, BCA, BBA');
@@ -133,6 +151,12 @@ export const CounselorsPage: React.FC = () => {
     setFormCourses('B.Tech, MBBS, MBA, BCA, BBA');
     setFormUniversities('Sharda University, Chandigarh University');
     setFormDailyQuota('25');
+    setFormDesignation('Senior Admission Counselor');
+    setFormDepartment('Admissions & Counseling');
+    setFormEmployeeCode('EMP-' + Math.floor(1000 + Math.random() * 9000));
+    setFormAltPhone('');
+    setFormWorkLocation('Kathmandu HQ');
+    setFormNotes('');
     setFormPermissions(DEFAULT_ROLE_PERMISSIONS['Counselor'] || []);
     setAddModalOpen(true);
   };
@@ -158,6 +182,12 @@ export const CounselorsPage: React.FC = () => {
         specialization_courses: coursesArray,
         specialization_universities: unisArray,
         daily_lead_quota: parseInt(formDailyQuota, 10) || 25,
+        designation: formDesignation,
+        department: formDepartment,
+        employee_code: formEmployeeCode,
+        alternate_phone: formAltPhone,
+        work_location: formWorkLocation,
+        notes: formNotes,
       });
       addToast(`${formRole} ${formName} created with ${formPermissions.length} feature permissions!`, 'success');
       setAddModalOpen(false);
@@ -177,6 +207,12 @@ export const CounselorsPage: React.FC = () => {
     setFormSpec(c.specialization_country || 'Nepal & India');
     setFormCapacity(String(c.max_capacity || 100));
     setFormStatus(c.is_active === 1 ? 'Active' : 'Inactive');
+    setFormDesignation(c.designation || (roleVal === 'Counselor' ? 'Senior Admission Counselor' : roleVal));
+    setFormDepartment(c.department || 'Admissions & Counseling');
+    setFormEmployeeCode(c.employee_code || '');
+    setFormAltPhone(c.alternate_phone || '');
+    setFormWorkLocation(c.work_location || 'Kathmandu HQ');
+    setFormNotes(c.notes || '');
 
     try {
       const cities = typeof c.assigned_cities === 'string' ? JSON.parse(c.assigned_cities || '[]') : (c.assigned_cities || []);
@@ -254,12 +290,33 @@ export const CounselorsPage: React.FC = () => {
         specialization_courses: coursesArray,
         specialization_universities: unisArray,
         daily_lead_quota: parseInt(formDailyQuota, 10) || 25,
+        designation: formDesignation,
+        department: formDepartment,
+        employee_code: formEmployeeCode,
+        alternate_phone: formAltPhone,
+        work_location: formWorkLocation,
+        notes: formNotes,
       });
       addToast(`Staff member ${formName} updated with ${formPermissions.length} permissions!`, 'success');
       setEditModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
       addToast(err.message || 'Failed to update counselor', 'error');
+    }
+  };
+
+  const handleOpenViewModal = async (c: Counselor) => {
+    setSelectedCounselor(c);
+    setViewStaffData(c);
+    setViewModalOpen(true);
+    setLoadingStaffDetails(true);
+    try {
+      const full = await api.getCounselor(c.id);
+      setViewStaffData(full);
+    } catch (e) {
+      // Keep initial c object
+    } finally {
+      setLoadingStaffDetails(false);
     }
   };
 
@@ -377,6 +434,14 @@ export const CounselorsPage: React.FC = () => {
                           >
                             {staffRole}
                           </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1.5 mt-0.5">
+                          <span>{c.designation || (staffRole === 'Counselor' ? 'Admission Counselor' : staffRole)}</span>
+                          {c.employee_code && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                              {c.employee_code}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-400 font-mono mt-0.5">{c.email}</div>
                       </div>
@@ -513,10 +578,21 @@ export const CounselorsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Admin Actions Footer */}
-                {isAdmin && (
-                  <div className="pt-3 mt-2 border-t border-slate-100 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-400 font-medium">Account Controls:</span>
+                {/* Card Actions Footer */}
+                <div className="pt-3 mt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    {canViewStaffDetails && (
+                      <button
+                        onClick={() => handleOpenViewModal(c)}
+                        className="px-2.5 py-1 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors flex items-center gap-1.5 text-[11px] font-bold border border-indigo-200/80 shadow-2xs"
+                        title="View comprehensive staff information & statistics"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Staff Info</span>
+                      </button>
+                    )}
+                  </div>
+                  {isAdmin && (
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleOpenResetPwdModal(c)}
@@ -544,8 +620,8 @@ export const CounselorsPage: React.FC = () => {
                         <Trash2 className="w-3.5 h-3.5 text-rose-500" />
                       </button>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             );
           })}
@@ -676,6 +752,74 @@ export const CounselorsPage: React.FC = () => {
                     className="w-full p-2 text-xs rounded-xl border border-slate-300"
                   />
                 </div>
+              </div>
+
+              {/* Extended Staff Profile Information */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Designation</label>
+                  <input
+                    type="text"
+                    value={formDesignation}
+                    onChange={(e) => setFormDesignation(e.target.value)}
+                    placeholder="e.g. Senior Admission Counselor"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={formDepartment}
+                    onChange={(e) => setFormDepartment(e.target.value)}
+                    placeholder="e.g. Admissions / Counseling"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Employee Code</label>
+                  <input
+                    type="text"
+                    value={formEmployeeCode}
+                    onChange={(e) => setFormEmployeeCode(e.target.value)}
+                    placeholder="e.g. EMP-1042"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Alternate Phone / Mobile</label>
+                  <input
+                    type="tel"
+                    value={formAltPhone}
+                    onChange={(e) => setFormAltPhone(e.target.value)}
+                    placeholder="+977 9811..."
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Work Location / Branch</label>
+                  <input
+                    type="text"
+                    value={formWorkLocation}
+                    onChange={(e) => setFormWorkLocation(e.target.value)}
+                    placeholder="e.g. Kathmandu HQ, Pokhara Branch"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Staff Notes / Bio</label>
+                <textarea
+                  rows={2}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder="Special achievements, language proficiencies, or notes..."
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                />
               </div>
             </div>
 
@@ -950,6 +1094,74 @@ export const CounselorsPage: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* Extended Staff Profile Information */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Designation</label>
+                  <input
+                    type="text"
+                    value={formDesignation}
+                    onChange={(e) => setFormDesignation(e.target.value)}
+                    placeholder="e.g. Senior Admission Counselor"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={formDepartment}
+                    onChange={(e) => setFormDepartment(e.target.value)}
+                    placeholder="e.g. Admissions / Outreach"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Employee Code</label>
+                  <input
+                    type="text"
+                    value={formEmployeeCode}
+                    onChange={(e) => setFormEmployeeCode(e.target.value)}
+                    placeholder="e.g. EMP-1042"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Alternate Phone / Mobile</label>
+                  <input
+                    type="tel"
+                    value={formAltPhone}
+                    onChange={(e) => setFormAltPhone(e.target.value)}
+                    placeholder="+977 9811..."
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Work Location / Branch</label>
+                  <input
+                    type="text"
+                    value={formWorkLocation}
+                    onChange={(e) => setFormWorkLocation(e.target.value)}
+                    placeholder="e.g. Kathmandu HQ, Pokhara Branch"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Staff Notes / Bio</label>
+                <textarea
+                  rows={2}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder="Special achievements, language proficiencies, or notes..."
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                />
+              </div>
             </div>
 
             {/* Section B: Automated Lead Routing & Quotas */}
@@ -1220,6 +1432,304 @@ export const CounselorsPage: React.FC = () => {
                 className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
               >
                 Delete Staff &amp; Login
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Comprehensive Staff Profile & Performance Dossier Modal */}
+      {viewModalOpen && viewStaffData && (
+        <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+          <div className="w-full max-w-3xl bg-white rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl border border-slate-200 my-8 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-5">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white font-black text-2xl flex items-center justify-center shadow-lg shadow-blue-900/20">
+                  {viewStaffData.name?.charAt(0) || 'S'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h2 className="text-xl font-bold text-slate-900">{viewStaffData.name}</h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                      {viewStaffData.role || 'Staff Member'}
+                    </span>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 border ${
+                        viewStaffData.is_active === 1
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                    >
+                      {viewStaffData.is_active === 1 ? '● Active' : '○ Inactive'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-600 font-medium mt-1 flex items-center gap-2 flex-wrap">
+                    <span className="text-blue-900 font-semibold">{viewStaffData.designation || 'Senior Admission Counselor'}</span>
+                    <span className="text-slate-300">•</span>
+                    <span>{viewStaffData.department || 'Admissions & Counseling'}</span>
+                    {viewStaffData.employee_code && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-bold border border-slate-200">
+                          {viewStaffData.employee_code}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {loadingStaffDetails ? (
+              <div className="py-16 text-center flex flex-col items-center justify-center gap-2 text-slate-500 text-xs">
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
+                <span>Loading staff records and live metrics...</span>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* 1. Key Performance Indicators Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-100 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Total Leads</div>
+                    <div className="text-xl font-black text-blue-900 mt-1">
+                      {viewStaffData.total_leads_count || viewStaffData.current_active_leads || 0}
+                    </div>
+                    <div className="text-[10px] text-blue-600/70 mt-0.5">Assigned to staff</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-100 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Active Pipeline</div>
+                    <div className="text-xl font-black text-amber-900 mt-1">
+                      {viewStaffData.active_leads_count || 0}
+                    </div>
+                    <div className="text-[10px] text-amber-700/70 mt-0.5">In follow-up &amp; review</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-100 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Admissions / Won</div>
+                    <div className="text-xl font-black text-emerald-900 mt-1">
+                      {viewStaffData.total_admissions || viewStaffData.converted_leads_count || 0}
+                    </div>
+                    <div className="text-[10px] text-emerald-700/70 mt-0.5">Enrolled students</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-purple-50/70 border border-purple-100 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Conversion Rate</div>
+                    <div className="text-xl font-black text-purple-900 mt-1">
+                      {viewStaffData.conversion_rate || 0}%
+                    </div>
+                    <div className="text-[10px] text-purple-700/70 mt-0.5">Target: 20%+</div>
+                  </div>
+                </div>
+
+                {/* 2. Professional & Contact Dossier */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Left Column: Contact & Office */}
+                  <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Phone className="w-4 h-4 text-blue-600" />
+                      <span>Contact &amp; Work Location</span>
+                    </div>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Official Email:</span>
+                        <span className="font-mono font-bold text-slate-900">{viewStaffData.email}</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Primary Mobile:</span>
+                        <span className="font-mono font-bold text-slate-900">{viewStaffData.phone}</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Alternate Phone:</span>
+                        <span className="font-mono text-slate-800">{viewStaffData.alternate_phone || 'None provided'}</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Office Location:</span>
+                        <span className="font-semibold text-slate-900">{viewStaffData.work_location || 'Kathmandu HQ'}</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-slate-500">Country Focus:</span>
+                        <span className="font-semibold text-slate-900">{viewStaffData.specialization_country || 'General'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Routing & Quota Focus */}
+                  <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Sliders className="w-4 h-4 text-purple-600" />
+                      <span>Routing &amp; Capacity Engine</span>
+                    </div>
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Daily Lead Quota:</span>
+                        <span className="font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                          {viewStaffData.daily_lead_quota || 25} leads/day
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Maximum Active Capacity:</span>
+                        <span className="font-bold text-slate-900">{viewStaffData.max_capacity || 100} active leads</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
+                        <span className="text-slate-500">Pending Follow-ups:</span>
+                        <span className="font-bold text-amber-700">{viewStaffData.pending_followups_count || 0} scheduled</span>
+                      </div>
+                      <div className="flex items-center justify-between py-1">
+                        <span className="text-slate-500">Joining Date:</span>
+                        <span className="text-slate-700">
+                          {viewStaffData.joining_date ? new Date(viewStaffData.joining_date).toLocaleDateString() : 'Active Member'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Academic Focus & Territory Badges */}
+                <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                    <span>Specialized Courses, Universities &amp; Territory</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Course Specializations:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {Array.isArray(viewStaffData.specialization_courses) && viewStaffData.specialization_courses.length > 0 ? (
+                          viewStaffData.specialization_courses.map((crs: string, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100/70 text-purple-800 border border-purple-200">
+                              {crs}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">All university courses</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Partner Universities:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {Array.isArray(viewStaffData.specialization_universities) && viewStaffData.specialization_universities.length > 0 ? (
+                          viewStaffData.specialization_universities.map((uni: string, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100/70 text-indigo-800 border border-indigo-200">
+                              {uni}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">All partner institutions</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 mb-1.5">Assigned Cities / Territory:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {Array.isArray(viewStaffData.assigned_cities) && viewStaffData.assigned_cities.length > 0 ? (
+                          viewStaffData.assigned_cities.map((city: string, i: number) => (
+                            <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100/70 text-blue-800 border border-blue-200">
+                              {city}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-400 italic">All territories</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Granted Permissions Matrix */}
+                <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <span>Active Feature Permissions (Managed by Super Admin)</span>
+                    </div>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      {Array.isArray(viewStaffData.permissions) ? viewStaffData.permissions.length : 0} of {FEATURE_PERMISSIONS.length} Features Granted
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1">
+                    {FEATURE_PERMISSIONS.map((perm) => {
+                      const isGranted = Array.isArray(viewStaffData.permissions)
+                        ? viewStaffData.permissions.includes(perm.id)
+                        : (DEFAULT_ROLE_PERMISSIONS[viewStaffData.role || 'Counselor'] || []).includes(perm.id);
+
+                      return (
+                        <span
+                          key={perm.id}
+                          className={`text-[10px] font-semibold px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                            isGranted
+                              ? 'bg-white text-slate-800 border-slate-300 shadow-2xs'
+                              : 'bg-slate-100 text-slate-400 border-dashed border-slate-200 opacity-60'
+                          }`}
+                        >
+                          <span className={isGranted ? 'text-emerald-600 font-bold' : 'text-slate-300'}>
+                            {isGranted ? '✓' : '×'}
+                          </span>
+                          <span>{perm.name}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 5. Recent Leads Assigned */}
+                {viewStaffData.recent_leads && viewStaffData.recent_leads.length > 0 && (
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 space-y-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center justify-between">
+                      <span>Recent 10 Leads Assigned to this Counselor</span>
+                      <span className="text-[11px] text-slate-400 font-normal">Direct student pipeline</span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-slate-400 text-[10px] uppercase font-bold">
+                            <th className="pb-2">Lead ID</th>
+                            <th className="pb-2">Student Name</th>
+                            <th className="pb-2">Preferred Program</th>
+                            <th className="pb-2">University</th>
+                            <th className="pb-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {viewStaffData.recent_leads.map((ld: any) => (
+                            <tr key={ld.id} className="hover:bg-slate-50/70">
+                              <td className="py-2 font-mono text-[11px] text-blue-600 font-bold">{ld.lead_id || ld.id.substring(0, 8)}</td>
+                              <td className="py-2 font-semibold text-slate-900">{ld.student_name}</td>
+                              <td className="py-2 text-slate-700">{ld.preferred_course || '-'}</td>
+                              <td className="py-2 text-slate-600">{ld.preferred_university || '-'}</td>
+                              <td className="py-2">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800">
+                                  {ld.lead_status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setViewModalOpen(false)}
+                className="px-5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Close Staff Dossier
               </button>
             </div>
           </div>

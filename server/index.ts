@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { apiRouter } from './routes/api.ts';
 import { initDatabase } from './db/database.ts';
 import { seedDatabase } from './db/seed.ts';
+import { ensureInitialCourseEmailTemplatesSeed } from './services/emailService.ts';
 
 dotenv.config();
 
@@ -19,6 +20,11 @@ const PORT = process.env.PORT || 5000;
 // Ensure database and initial demo seed
 initDatabase();
 seedDatabase();
+try {
+  ensureInitialCourseEmailTemplatesSeed();
+} catch (e) {
+  console.warn('Initial email template seed warning:', e);
+}
 
 // Middleware
 app.use(cors());

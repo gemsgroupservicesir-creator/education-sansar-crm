@@ -144,6 +144,44 @@ function runSafeMigrations() {
   addColumnIfNotExists('counselors', 'daily_lead_quota', 'INTEGER DEFAULT 25');
   addColumnIfNotExists('counselors', 'leads_assigned_today', 'INTEGER DEFAULT 0');
   addColumnIfNotExists('counselors', 'last_assigned_date', 'TEXT');
+
+  // Staff Extended Information fields
+  addColumnIfNotExists('counselors', 'designation', "TEXT DEFAULT 'Senior Counselor'");
+  addColumnIfNotExists('counselors', 'department', "TEXT DEFAULT 'Counseling & Admissions'");
+  addColumnIfNotExists('counselors', 'employee_code', 'TEXT');
+  addColumnIfNotExists('counselors', 'alternate_phone', 'TEXT');
+  addColumnIfNotExists('counselors', 'work_location', "TEXT DEFAULT 'Office'");
+  addColumnIfNotExists('counselors', 'notes', 'TEXT');
+
+  // Email Templates & Outreach fields
+  addColumnIfNotExists('message_templates', 'target_courses', "TEXT DEFAULT '[]'");
+  addColumnIfNotExists('message_templates', 'target_universities', "TEXT DEFAULT '[]'");
+  addColumnIfNotExists('message_templates', 'description', 'TEXT');
+
+  // Bulk Email Campaigns Table
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bulk_email_campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        template_id TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
+        subject TEXT NOT NULL,
+        content TEXT NOT NULL,
+        filter_course TEXT,
+        filter_university TEXT,
+        filter_status TEXT,
+        filter_temperature TEXT,
+        total_recipients INTEGER NOT NULL DEFAULT 0,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'COMPLETED',
+        sent_by TEXT NOT NULL DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] bulk_email_campaigns table:', e.message);
+  }
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

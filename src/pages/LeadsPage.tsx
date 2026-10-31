@@ -18,7 +18,8 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCheck,
-  Sliders
+  Sliders,
+  Mail
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Lead, LeadStatus, LeadTemperature, LeadSource } from '../types';
@@ -177,6 +178,17 @@ export const LeadsPage: React.FC = () => {
             >
               <Sliders className="w-4 h-4 text-purple-600" />
               <span>Distribution Engine</span>
+            </button>
+          )}
+
+          {(isSuperAdmin || hasPermission('bulk_email')) && (
+            <button
+              onClick={() => navigate('/communications')}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 shadow-2xs hover:shadow-xs transition-all"
+              title="Open Bulk Email & Course Outreach Engine"
+            >
+              <Mail className="w-4 h-4 text-indigo-600" />
+              <span>Bulk Email</span>
             </button>
           )}
 

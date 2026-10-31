@@ -89,6 +89,7 @@ export const api = {
 
   // Counselors
   getCounselors: () => fetchJson<any[]>('/counselors'),
+  getCounselor: (id: string) => fetchJson<any>(`/counselors/${id}`),
   createCounselor: (data: any) =>
     fetchJson<any>('/counselors', {
       method: 'POST',
@@ -512,4 +513,53 @@ export const api = {
     }),
   getUniversityCommissions: () =>
     fetchJson<any[]>('/finance/university-commissions'),
+
+  // Email Templates & Bulk Outreach
+  getEmailTemplates: (params: { course?: string; university?: string; category?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (params.course) query.append('course', params.course);
+    if (params.university) query.append('university', params.university);
+    if (params.category) query.append('category', params.category);
+    const qs = query.toString();
+    return fetchJson<any[]>(`/email/templates${qs ? `?${qs}` : ''}`);
+  },
+  createEmailTemplate: (data: any) =>
+    fetchJson<any>('/email/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateEmailTemplate: (id: string, data: any) =>
+    fetchJson<any>(`/email/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteEmailTemplate: (id: string, performedBy?: string) =>
+    fetchJson<any>(`/email/templates/${id}?performedBy=${encodeURIComponent(performedBy || 'Super Admin')}`, {
+      method: 'DELETE',
+    }),
+  previewEmailTemplate: (data: { subject: string; content: string; sampleData?: any }) =>
+    fetchJson<{ subject: string; content: string }>('/email/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getTargetEmailCount: (filters: {
+    filter_course?: string;
+    filter_university?: string;
+    filter_status?: string;
+    filter_temperature?: string;
+    filter_city?: string;
+    filter_counselor_id?: string;
+  }) =>
+    fetchJson<{ count: number; sample: any[] }>('/email/target-count', {
+      method: 'POST',
+      body: JSON.stringify(filters),
+    }),
+  sendBulkEmail: (data: any) =>
+    fetchJson<any>('/email/send-bulk', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getEmailCampaigns: () =>
+    fetchJson<any[]>('/email/campaigns'),
 };
+
