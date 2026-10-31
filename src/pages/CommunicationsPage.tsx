@@ -44,6 +44,22 @@ export const CommunicationsPage: React.FC = () => {
   const [targetCount, setTargetCount] = useState<number>(0);
   const [sampleLeads, setSampleLeads] = useState<any[]>([]);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+
+  // Live filter suggestions & distributions
+  const [filterOptions, setFilterOptions] = useState<{
+    courses: { name: string; count: number }[];
+    universities: { name: string; count: number }[];
+    statuses: { name: string; count: number }[];
+    temperatures: { name: string; count: number }[];
+    totalLeadsWithEmail: number;
+  }>({
+    courses: [],
+    universities: [],
+    statuses: [],
+    temperatures: [],
+    totalLeadsWithEmail: 0
+  });
 
   // Email Composer states
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -166,6 +182,20 @@ Education Sansar`);
     };
   }, [subject, content, sampleLeads]);
 
+  // Load filter options (courses, universities, counts)
+  const fetchFilterOptions = async () => {
+    try {
+      const opts = await api.getEmailFilterOptions();
+      if (opts) setFilterOptions(opts);
+    } catch (e) {
+      console.warn('Failed to load filter options:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchFilterOptions();
+  }, []);
+
   // Load templates
   const fetchTemplates = async () => {
     setLoadingTemplates(true);
@@ -212,6 +242,13 @@ Education Sansar`);
     if (found) {
       setSubject(found.subject);
       setContent(found.content);
+      // Auto-focus target course if present and current course filter is empty
+      if (found.target_courses && found.target_courses.length > 0 && !filterCourse) {
+        setFilterCourse(found.target_courses[0]);
+      }
+      if (found.target_universities && found.target_universities.length > 0 && !filterUniversity) {
+        setFilterUniversity(found.target_universities[0]);
+      }
       addToast(`Applied template: "${found.name}"`, 'info');
     }
   };
@@ -221,22 +258,21 @@ Education Sansar`);
     addToast(`Inserted ${tag}`, 'success');
   };
 
-  const handleSendBulkEmail = async () => {
+  const handleOpenSendConfirmation = () => {
     if (!subject.trim() || !content.trim()) {
       addToast('Please enter an email subject and content body', 'error');
       return;
     }
 
     if (targetCount === 0) {
-      addToast('No matching leads found with valid email addresses for the current filters', 'warning');
+      addToast('No matching leads found for current filters. Clear filters to send to all leads.', 'warning');
       return;
     }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to send this bulk email to ${targetCount} matching leads?\n\nTarget Course: ${filterCourse || 'All Courses'}\nTarget University: ${filterUniversity || 'All Universities'}\n\nEach student will receive a customized email with their personal name, course, and assigned counselor details.`
-    );
-    if (!confirmed) return;
+    setConfirmModalOpen(true);
+  };
 
+  const handleConfirmDispatch = async () => {
     setSending(true);
     setSendResult(null);
 
@@ -255,8 +291,10 @@ Education Sansar`);
       });
 
       setSendResult(res);
+      setConfirmModalOpen(false);
       addToast(`Successfully dispatched email to ${res.sent_count} students!`, 'success');
       fetchCampaigns();
+      fetchFilterOptions();
     } catch (err: any) {
       addToast(err.message || 'Failed to send bulk email', 'error');
     } finally {
@@ -445,9 +483,21 @@ Education Sansar`);
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                    <GraduationCap className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Target Academic Course</span>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <GraduationCap className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Target Academic Course</span>
+                    </span>
+                    {filterCourse && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterCourse('')}
+                        className="text-[10px] text-rose-600 hover:underline font-semibold flex items-center gap-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>Clear</span>
+                      </button>
+                    )}
                   </label>
                   <input
                     type="text"
@@ -456,37 +506,63 @@ Education Sansar`);
                     placeholder="e.g. B.Tech, MBBS, MBA, BCA, BBA..."
                     className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {['B.Tech', 'MBBS', 'MBA', 'BCA', 'BBA', 'B.Sc Nursing'].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setFilterCourse(c)}
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors ${
-                          filterCourse === c
-                            ? 'bg-purple-600 text-white border-purple-600'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-purple-50 hover:text-purple-700'
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                    {filterCourse && (
-                      <button
-                        type="button"
-                        onClick={() => setFilterCourse('')}
-                        className="text-[10px] px-1.5 py-0.5 text-rose-600 hover:underline"
-                      >
-                        Clear
-                      </button>
+                  {/* Dynamic course chips with real-time database counts */}
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {filterOptions.courses.length > 0 ? (
+                      filterOptions.courses.map((c) => (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => setFilterCourse(filterCourse === c.name ? '' : c.name)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border transition-all flex items-center gap-1 ${
+                            filterCourse === c.name
+                              ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-200'
+                          }`}
+                        >
+                          <span>{c.name}</span>
+                          <span className={`px-1 py-0.1 rounded-full text-[9px] font-black ${
+                            filterCourse === c.name ? 'bg-purple-700 text-purple-100' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {c.count}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      ['B.Tech', 'MBBS', 'MBA', 'BCA', 'BBA', 'B.Sc Nursing'].map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setFilterCourse(filterCourse === c ? '' : c)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors ${
+                            filterCourse === c
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-purple-50 hover:text-purple-700'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))
                     )}
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Target University</span>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Target University</span>
+                    </span>
+                    {filterUniversity && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterUniversity('')}
+                        className="text-[10px] text-rose-600 hover:underline font-semibold flex items-center gap-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>Clear</span>
+                      </button>
+                    )}
                   </label>
                   <input
                     type="text"
@@ -495,29 +571,43 @@ Education Sansar`);
                     placeholder="e.g. Sharda, Chandigarh, Parul, Graphic Era..."
                     className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500"
                   />
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {['Sharda University', 'Chandigarh University', 'Parul University'].map((u) => (
-                      <button
-                        key={u}
-                        type="button"
-                        onClick={() => setFilterUniversity(u)}
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors ${
-                          filterUniversity === u
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700'
-                        }`}
-                      >
-                        {u}
-                      </button>
-                    ))}
-                    {filterUniversity && (
-                      <button
-                        type="button"
-                        onClick={() => setFilterUniversity('')}
-                        className="text-[10px] px-1.5 py-0.5 text-rose-600 hover:underline"
-                      >
-                        Clear
-                      </button>
+                  {/* Dynamic university chips with real-time database counts */}
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {filterOptions.universities.length > 0 ? (
+                      filterOptions.universities.map((u) => (
+                        <button
+                          key={u.name}
+                          type="button"
+                          onClick={() => setFilterUniversity(filterUniversity === u.name ? '' : u.name)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border transition-all flex items-center gap-1 ${
+                            filterUniversity === u.name
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'
+                          }`}
+                        >
+                          <span>{u.name}</span>
+                          <span className={`px-1 py-0.1 rounded-full text-[9px] font-black ${
+                            filterUniversity === u.name ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {u.count}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      ['Sharda University', 'Chandigarh University', 'Parul University'].map((u) => (
+                        <button
+                          key={u}
+                          type="button"
+                          onClick={() => setFilterUniversity(filterUniversity === u ? '' : u)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors ${
+                            filterUniversity === u
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-700'
+                          }`}
+                        >
+                          {u}
+                        </button>
+                      ))
                     )}
                   </div>
                 </div>
@@ -566,6 +656,35 @@ Education Sansar`);
                   />
                 </div>
               </div>
+
+              {/* Zero matches fallback notice */}
+              {targetCount === 0 && !loadingCount && (
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-amber-800">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>No students match the current filter</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                    Zero leads found for {filterCourse ? `"${filterCourse}"` : ''} {filterUniversity ? `at "${filterUniversity}"` : ''}.
+                  </p>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterCourse('');
+                        setFilterUniversity('');
+                        setFilterStatus('');
+                        setFilterTemperature('');
+                        setFilterCity('');
+                      }}
+                      className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white rounded-xl font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Clear Filters &amp; Target All ({filterOptions.totalLeadsWithEmail || 'All'} Leads)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Sample Matching Students */}
               <div className="pt-2 border-t border-slate-100">
@@ -771,7 +890,7 @@ Education Sansar`);
 
                 <button
                   type="button"
-                  onClick={handleSendBulkEmail}
+                  onClick={handleOpenSendConfirmation}
                   disabled={sending || targetCount === 0 || !canSendBulk}
                   className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-black text-white shadow-lg transition-all ${
                     sending || targetCount === 0 || !canSendBulk
@@ -1214,6 +1333,107 @@ Education Sansar`);
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* IN-APP CONFIRMATION MODAL (Replaces browser window.confirm for Electron macOS reliability) */}
+      {confirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-900/20">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Confirm Bulk Outreach Dispatch</h3>
+                  <p className="text-[11px] text-slate-500">Review campaign and target recipient details</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmModalOpen(false)}
+                disabled={sending}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5 text-xs">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
+                <span className="text-slate-500 font-medium">Recipients Count:</span>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs">
+                  {targetCount} Students
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Target Course:</span>
+                <span className="font-bold text-slate-800">{filterCourse || 'All Courses'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Target University:</span>
+                <span className="font-bold text-slate-800">{filterUniversity || 'All Universities'}</span>
+              </div>
+              {filterTemperature && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Lead Temperature:</span>
+                  <span className="font-bold text-slate-800">{filterTemperature}</span>
+                </div>
+              )}
+              {filterStatus && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Lead Status:</span>
+                  <span className="font-bold text-slate-800">{filterStatus}</span>
+                </div>
+              )}
+              <div className="pt-2 border-t border-slate-200/60">
+                <span className="text-slate-400 font-medium block mb-1">Subject Preview:</span>
+                <span className="font-semibold text-slate-800 block text-[11px] truncate bg-white p-2 rounded-xl border border-slate-200">
+                  {previewSubject || subject}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-blue-50/70 rounded-2xl border border-blue-100/90 text-[11px] text-blue-900 space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-blue-800">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                <span>Dynamic Merge Tags Active</span>
+              </div>
+              <p className="text-blue-800/80 leading-relaxed">
+                Every recipient will receive an individualized email with their actual student name, chosen course, and counselor contact details.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmModalOpen(false)}
+                disabled={sending}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDispatch}
+                disabled={sending}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-900/20 active:scale-98 transition-all"
+              >
+                {sending ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Dispatching Emails...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Confirm &amp; Send Campaign</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

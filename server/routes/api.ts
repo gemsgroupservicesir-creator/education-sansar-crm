@@ -78,7 +78,8 @@ import {
   previewEmailResolution,
   getTargetLeadsForBulkEmail,
   sendBulkEmailCampaign,
-  getBulkEmailCampaigns
+  getBulkEmailCampaigns,
+  getBulkEmailFilterOptions
 } from '../services/emailService.ts';
 
 export const apiRouter = Router();
@@ -2862,6 +2863,15 @@ apiRouter.get('/email/templates', (req: Request, res: Response) => {
     res.json(templates);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch email templates' });
+  }
+});
+
+apiRouter.get('/email/filter-options', (req: Request, res: Response) => {
+  try {
+    const options = getBulkEmailFilterOptions();
+    res.json(options);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch email filter options' });
   }
 });
 

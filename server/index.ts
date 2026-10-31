@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import { apiRouter } from './routes/api.ts';
 import { initDatabase } from './db/database.ts';
 import { seedDatabase } from './db/seed.ts';
-import { ensureInitialCourseEmailTemplatesSeed } from './services/emailService.ts';
+import { ensureInitialCourseEmailTemplatesSeed, ensureDiverseCourseLeads } from './services/emailService.ts';
 
 dotenv.config();
 
@@ -22,8 +22,9 @@ initDatabase();
 seedDatabase();
 try {
   ensureInitialCourseEmailTemplatesSeed();
+  ensureDiverseCourseLeads();
 } catch (e) {
-  console.warn('Initial email template seed warning:', e);
+  console.warn('Initial email template & leads seed warning:', e);
 }
 
 // Middleware

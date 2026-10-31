@@ -518,7 +518,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Admin': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'leads_delete', 'lead_distribution',
     'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'staff_info_view',
-    'hr_management', 'finance_management', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'documents'
+    'hr_management', 'finance_management', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'documents',
+    'integrations', 'settings'
   ],
   'Counselor': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline',

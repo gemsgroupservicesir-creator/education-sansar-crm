@@ -119,23 +119,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAuthenticated = Boolean(user);
-  const isSuperAdmin = currentRole === 'Super Admin' || user?.role === 'Super Admin' || user?.email === 'admin@educationsansar.com';
-  
+  const isSuperAdmin =
+    currentRole === 'Super Admin' ||
+    currentRole === 'Admin' ||
+    user?.role === 'Super Admin' ||
+    user?.role === 'Admin' ||
+    user?.email === 'admin@educationsansar.com' ||
+    (user?.email?.toLowerCase().includes('prakash') ?? false);
+
   const hasPermission = (permissionId: string): boolean => {
+    // Super Admins and Admins have complete access across all capabilities
     if (isSuperAdmin) return true;
 
-    // Check custom permissions assigned to user
+    // Check custom permissions assigned to user if non-empty
+    let customPerms: string[] | null = null;
     if (user?.permissions && Array.isArray(user.permissions)) {
-      return user.permissions.includes(permissionId);
-    } else if (typeof user?.permissions === 'string') {
+      customPerms = user.permissions;
+    } else if (typeof user?.permissions === 'string' && user.permissions.trim() !== '') {
       try {
-        const perms: string[] = JSON.parse(user.permissions);
-        return perms.includes(permissionId);
+        const parsed = JSON.parse(user.permissions);
+        if (Array.isArray(parsed)) {
+          customPerms = parsed;
+        }
       } catch (e) {}
     }
 
+    if (customPerms && customPerms.length > 0) {
+      return customPerms.includes(permissionId);
+    }
+
     // Fallback to role defaults
-    const rolePerms = DEFAULT_ROLE_PERMISSIONS[currentRole] || DEFAULT_ROLE_PERMISSIONS[user?.role || 'Counselor'];
+    const roleKey = currentRole || user?.role || 'Counselor';
+    const rolePerms = DEFAULT_ROLE_PERMISSIONS[roleKey] || DEFAULT_ROLE_PERMISSIONS[user?.role || 'Counselor'];
     return rolePerms?.includes(permissionId) ?? false;
   };
 

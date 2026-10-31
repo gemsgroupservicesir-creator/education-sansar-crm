@@ -561,5 +561,13 @@ export const api = {
     }),
   getEmailCampaigns: () =>
     fetchJson<any[]>('/email/campaigns'),
+  getEmailFilterOptions: () =>
+    fetchJson<{
+      courses: { name: string; count: number }[];
+      universities: { name: string; count: number }[];
+      statuses: { name: string; count: number }[];
+      temperatures: { name: string; count: number }[];
+      totalLeadsWithEmail: number;
+    }>('/email/filter-options'),
 };
 
