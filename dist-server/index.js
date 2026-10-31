@@ -3126,7 +3126,7 @@ init_neon();
 var apiRouter = Router();
 apiRouter.post("/auth/login", async (req, res) => {
   try {
-    const { email, username, password, role } = req.body || {};
+    const { email, username, identifier: rawId, password, role } = req.body || {};
     if (role) {
       let user2 = db.prepare("SELECT * FROM users WHERE LOWER(role) = LOWER(?) AND is_active = 1 LIMIT 1").get(role);
       if (!user2) {
@@ -3137,7 +3137,7 @@ apiRouter.post("/auth/login", async (req, res) => {
         return res.json({ success: true, user: safeUser2, token: "demo-token-" + user2.id });
       }
     }
-    const identifier = (email || username || "").trim().toLowerCase();
+    const identifier = (rawId || email || username || "").trim().toLowerCase();
     if (!identifier) {
       return res.status(400).json({ error: "Email or Username is required" });
     }
@@ -3626,6 +3626,10 @@ apiRouter.post("/counselors", async (req, res) => {
     const uname = username ? username.trim() : cleanEmail.split("@")[0];
     const now = (/* @__PURE__ */ new Date()).toISOString();
     db.prepare(`
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
+    db.prepare(`
       INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, joining_date, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?)
     `).run(
@@ -3642,10 +3646,6 @@ apiRouter.post("/counselors", async (req, res) => {
       now,
       now
     );
-    db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
     if (isNeonEnabled()) {
       await persistUserToNeon({
         id: uId,

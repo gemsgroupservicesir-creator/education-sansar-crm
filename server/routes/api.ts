@@ -39,7 +39,7 @@ export const apiRouter = Router();
 // ==========================================
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const { email, username, password, role } = req.body || {};
+    const { email, username, identifier: rawId, password, role } = req.body || {};
 
     // 1. Role-based instant demo login
     if (role) {
@@ -53,7 +53,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       }
     }
 
-    const identifier = (email || username || '').trim().toLowerCase();
+    const identifier = (rawId || email || username || '').trim().toLowerCase();
     if (!identifier) {
       return res.status(400).json({ error: 'Email or Username is required' });
     }
@@ -643,7 +643,13 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const uname = username ? username.trim() : cleanEmail.split('@')[0];
     const now = new Date().toISOString();
 
-    // 1. Insert into counselors in SQLite
+    // 1. Insert into users in SQLite with selected role FIRST (satisfies foreign key constraint)
+    db.prepare(`
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
+
+    // 2. Insert into counselors in SQLite
     db.prepare(`
       INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, joining_date, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?)
@@ -661,12 +667,6 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       now,
       now
     );
-
-    // 2. Insert into users in SQLite with selected role
-    db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
 
     // 3. Persist to Neon PostgreSQL server-side
     if (isNeonEnabled()) {
