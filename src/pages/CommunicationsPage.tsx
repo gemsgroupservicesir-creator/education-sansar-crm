@@ -437,7 +437,7 @@ Education Sansar`);
                 </span>
               </h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                Target leads by specialized Course and University with dynamic merge tags ({{student_name}}, {{preferred_course}}, {{counselor_name}})
+                Target leads by specialized Course and University with dynamic merge tags ({"{{student_name}}"}, {"{{preferred_course}}"}, {"{{counselor_name}}"})
               </p>
             </div>
           </div>
