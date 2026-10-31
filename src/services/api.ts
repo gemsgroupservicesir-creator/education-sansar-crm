@@ -283,6 +283,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(sampleLead),
     }),
+  verifyMetaCredentials: (params: { pageAccessToken: string; pageId?: string }) =>
+    fetchJson<any>('/integrations/meta/verify-credentials', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
   sendWhatsApp: (data: any) =>
     fetchJson<any>('/integrations/whatsapp/send', {
       method: 'POST',

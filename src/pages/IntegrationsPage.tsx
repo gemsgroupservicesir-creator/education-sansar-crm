@@ -4,8 +4,8 @@ import {
   Send, RefreshCw, Key, ShieldCheck, Terminal, ExternalLink, 
   Play, Settings as SettingsIcon, Check, Info, Bell,
   FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare,
-  Link, Sparkles, Unlink, Eye, Table, Plus, Trash2, Edit3, Pause,
-  Layers, MapPin, Tag, X, CheckCircle
+  Link, Sparkles, Unlink, Eye, EyeOff, Table, Plus, Trash2, Edit3, Pause,
+  Layers, MapPin, Tag, X, CheckCircle, HelpCircle, Zap, Globe
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -18,6 +18,20 @@ export const IntegrationsPage: React.FC = () => {
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Meta Configuration & Instant Form States
+  const [metaFormConfig, setMetaFormConfig] = useState({
+    pageAccessToken: '',
+    pageId: '',
+    verifyToken: 'education_sansar_meta_verify_2026',
+    appSecret: '',
+    autoAssign: true,
+  });
+  const [showMetaToken, setShowMetaToken] = useState(false);
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [testingMetaToken, setTestingMetaToken] = useState(false);
+  const [metaTokenTestResult, setMetaTokenTestResult] = useState<any>(null);
+  const [activeMetaGuideTab, setActiveMetaGuideTab] = useState<'direct' | 'webhook' | 'mapping'>('direct');
 
   // Meta Simulation Form State
   const [metaSimData, setMetaSimData] = useState({
@@ -139,6 +153,22 @@ export const IntegrationsPage: React.FC = () => {
           if (parsed.sheetName) {
             setLiveSheetName(parsed.sheetName);
           }
+        } catch (e) {}
+      }
+
+      // Pre-fill Meta Lead Ads & Instant Form state if configured
+      const metaInt = integrationsRes.find((i: any) => i.name === 'Meta Lead Ads' || i.id === 'int-meta');
+      if (metaInt && metaInt.config) {
+        try {
+          const parsed = typeof metaInt.config === 'string' ? JSON.parse(metaInt.config) : metaInt.config;
+          setMetaFormConfig((prev) => ({
+            ...prev,
+            pageAccessToken: parsed.pageAccessToken || '',
+            pageId: parsed.pageId || '',
+            verifyToken: parsed.verifyToken || 'education_sansar_meta_verify_2026',
+            appSecret: parsed.appSecret || '',
+            autoAssign: parsed.autoAssign ?? true,
+          }));
         } catch (e) {}
       }
     } catch (err) {
@@ -315,6 +345,59 @@ export const IntegrationsPage: React.FC = () => {
       addToast(err.message || 'Meta simulation failed', 'error');
     } finally {
       setSimulatingMeta(false);
+    }
+  };
+
+  const handleSaveMetaConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSavingMeta(true);
+      const isConnected = Boolean(metaFormConfig.pageAccessToken.trim());
+      await api.updateIntegration('int-meta', {
+        status: isConnected ? 'CONNECTED' : 'NOT_CONNECTED',
+        is_enabled: isConnected ? 1 : 0,
+        config: metaFormConfig,
+        performedBy: 'Super Admin',
+      });
+      addToast(
+        isConnected
+          ? 'Meta Instant Form credentials saved & connection set to CONNECTED!'
+          : 'Meta Lead Ads settings updated successfully',
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to save Meta settings', 'error');
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const handleTestMetaCredentials = async () => {
+    if (!metaFormConfig.pageAccessToken.trim()) {
+      addToast('Please enter a Page Access Token first', 'error');
+      return;
+    }
+    try {
+      setTestingMetaToken(true);
+      setMetaTokenTestResult(null);
+      const res = await api.verifyMetaCredentials({
+        pageAccessToken: metaFormConfig.pageAccessToken,
+        pageId: metaFormConfig.pageId || undefined,
+      });
+      setMetaTokenTestResult(res);
+      if (res.valid) {
+        addToast(
+          `Verified! Connected to Facebook Page: "${res.pageName || res.pageId}" (${res.leadgenFormsCount || 0} Instant Forms found)`,
+          'success'
+        );
+      } else {
+        addToast(res.error || 'Token verification failed with Meta Graph API', 'error');
+      }
+    } catch (err: any) {
+      addToast(err.message || 'Verification failed', 'error');
+    } finally {
+      setTestingMetaToken(false);
     }
   };
 
@@ -540,10 +623,16 @@ export const IntegrationsPage: React.FC = () => {
               : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          <Share2 className="w-4 h-4" />
-          Meta Lead Ads
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-            {metaIntegration.status}
+          <Share2 className="w-4 h-4 text-blue-600" />
+          Meta Instant Forms &amp; Lead Ads
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              metaIntegration.status === 'CONNECTED'
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {metaIntegration.status === 'CONNECTED' ? 'CONNECTED' : 'SETUP'}
           </span>
         </button>
 
@@ -1424,213 +1513,679 @@ export const IntegrationsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab: Meta Lead Ads */}
+      {/* Tab: Meta Lead Ads & Instant Forms Hub */}
       {activeTab === 'meta' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Configuration Panel */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-            <div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-gray-900">Meta Webhook Endpoint</h3>
-                <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                  {metaIntegration.status}
-                </span>
+        <div className="space-y-6">
+          {/* Top Overview Banner */}
+          <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-lg space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-blue-400" />
+                  </div>
+                  <h2 className="text-lg font-black tracking-tight">
+                    Meta Instant Forms &amp; Lead Ads Direct Engine
+                  </h2>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                      metaIntegration.status === 'CONNECTED'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-400/30'
+                    }`}
+                  >
+                    {metaIntegration.status === 'CONNECTED' ? '● LIVE SYNC ACTIVE' : '○ SETUP REQUIRED'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 max-w-2xl">
+                  Connect Facebook &amp; Instagram Lead Ad Instant Forms directly to Education Sansar CRM—just like HubSpot. 
+                  Student inquiries captured in real time, checked for duplicates, and instantly routed to the best counselor by Course &amp; University.
+                </p>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Configure this URL and verification token in your Meta for Developers App Dashboard.
-              </p>
+
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://developers.facebook.com/tools/lead-ads-testing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 border border-white/20 transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Meta Lead Ads Testing Tool</span>
+                </a>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                  Callback URL (Webhook Endpoint)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${window.location.origin}/api/integrations/meta/webhook`}
-                    className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-800 select-all"
-                  />
-                  <button
-                    onClick={() => handleCopy(`${window.location.origin}/api/integrations/meta/webhook`, 'meta_url')}
-                    className="p-2 border border-gray-300 hover:bg-gray-100 rounded-lg text-gray-600 transition"
-                    title="Copy URL"
-                  >
-                    {copiedKey === 'meta_url' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
+            {/* Quick Metrics & Capabilities Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-white/10 text-xs">
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Live Webhook</div>
+                <div className="font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Subscribed (leadgen)</span>
                 </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                  Verify Token
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value="education_sansar_meta_verify_2026"
-                    className="w-full bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
-                  />
-                  <button
-                    onClick={() => handleCopy('education_sansar_meta_verify_2026', 'meta_token')}
-                    className="p-2 border border-gray-300 hover:bg-gray-100 rounded-lg text-gray-600 transition"
-                    title="Copy Token"
-                  >
-                    {copiedKey === 'meta_token' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
-                </div>
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Graph API Retrieval</div>
+                <div className="font-bold text-blue-300 mt-0.5">v21.0 LeadGen Token</div>
               </div>
-
-              <div className="border-t border-gray-200 pt-4 space-y-3">
-                <h4 className="text-xs font-bold text-gray-700 uppercase">Production Credentials (Encrypted)</h4>
-                
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Page Access Token</label>
-                  <input
-                    type="password"
-                    placeholder="EAA..."
-                    disabled
-                    className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 cursor-not-allowed"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Meta App Secret</label>
-                  <input
-                    type="password"
-                    placeholder="••••••••••••••••••••••••"
-                    disabled
-                    className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 cursor-not-allowed"
-                  />
-                </div>
-
-                <div className="text-[11px] text-gray-400 italic">
-                  * Live credentials can be saved via environment variables `META_PAGE_ACCESS_TOKEN` and `META_APP_SECRET`.
-                </div>
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Lead Routing</div>
+                <div className="font-bold text-purple-300 mt-0.5">Automated by Course &amp; Uni</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                <div className="text-[10px] text-slate-400 uppercase font-semibold">Duplicate Shield</div>
+                <div className="font-bold text-amber-300 mt-0.5">4-Point Phone/Email Match</div>
               </div>
             </div>
           </div>
 
-          {/* Live Simulator Panel */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <Play className="w-5 h-5 text-blue-600" />
-                  Meta Webhook Lead Inbound Simulator
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Simulate a student submitting a Facebook/Instagram Lead Ad form
-                </p>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column: Webhook URLs & Credentials Form (7 cols) */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* Webhook URLs Card */}
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-xs space-y-4">
+                <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-blue-600" />
+                      <span>Live Inbound Webhook Endpoints</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Copy these URLs to configure real-time Meta Lead Ads Webhook or direct form posts
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  {/* Meta Official Callback URL */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-gray-700 flex items-center gap-1.5">
+                        <Share2 className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Meta Webhook Callback URL (Page &gt; leadgen)</span>
+                      </label>
+                      <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">
+                        HubSpot / Meta Native
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/api/integrations/meta/webhook`}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-mono text-gray-800 text-[11px] select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(`${window.location.origin}/api/integrations/meta/webhook`, 'meta_url')}
+                        className="p-2 border border-gray-200 hover:bg-gray-100 rounded-xl text-gray-600 transition shrink-0"
+                        title="Copy URL"
+                      >
+                        {copiedKey === 'meta_url' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Verify Token */}
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Verification Token (hub.verify_token)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={metaFormConfig.verifyToken || 'education_sansar_meta_verify_2026'}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-mono text-gray-800 text-[11px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(metaFormConfig.verifyToken || 'education_sansar_meta_verify_2026', 'meta_token')}
+                        className="p-2 border border-gray-200 hover:bg-gray-100 rounded-xl text-gray-600 transition shrink-0"
+                        title="Copy Token"
+                      >
+                        {copiedKey === 'meta_token' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Universal Instant Form Ingest Webhook */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-gray-700 flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Universal Form Ingest Webhook (Zapier / Make / Landing Pages)</span>
+                      </label>
+                      <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded">
+                        Direct JSON Post
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/api/integrations/forms/instant-capture`}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-mono text-gray-800 text-[11px] select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(`${window.location.origin}/api/integrations/forms/instant-capture`, 'universal_url')}
+                        className="p-2 border border-gray-200 hover:bg-gray-100 rounded-xl text-gray-600 transition shrink-0"
+                        title="Copy URL"
+                      >
+                        {copiedKey === 'universal_url' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Accepts standard JSON: <code>{'{ "student_name", "phone", "email", "course", "university", "city" }'}</code>
+                    </p>
+                  </div>
+                </div>
               </div>
-              <span className="text-xs font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">
-                Interactive Test
-              </span>
+
+              {/* Meta Credentials Form */}
+              <form onSubmit={handleSaveMetaConfig} className="p-6 rounded-2xl bg-white border border-gray-200 shadow-xs space-y-4">
+                <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <Key className="w-4 h-4 text-indigo-600" />
+                      <span>Meta Graph API Credentials &amp; Page Setup</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Required for live automatic retrieval of student names, phones, and emails from Meta's secure servers
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                    Encrypted Storage
+                  </span>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1 flex items-center justify-between">
+                      <span>Meta Page Access Token (Permanent / System User Token) *</span>
+                      <a
+                        href="https://developers.facebook.com/tools/explorer"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-blue-600 hover:underline flex items-center gap-1 font-normal"
+                      >
+                        <span>Graph API Explorer</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showMetaToken ? 'text' : 'password'}
+                        value={metaFormConfig.pageAccessToken}
+                        onChange={(e) => setMetaFormConfig({ ...metaFormConfig, pageAccessToken: e.target.value })}
+                        placeholder="EAA..."
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2.5 font-mono text-xs pr-10 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowMetaToken(!showMetaToken)}
+                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                      >
+                        {showMetaToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Must have permissions: <code>leads_retrieval</code> and <code>pages_show_list</code>. Never expires if created via System User.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Facebook Page ID (Optional)</label>
+                      <input
+                        type="text"
+                        value={metaFormConfig.pageId}
+                        onChange={(e) => setMetaFormConfig({ ...metaFormConfig, pageId: e.target.value })}
+                        placeholder="e.g. 104928472918234"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Custom Verify Token</label>
+                      <input
+                        type="text"
+                        value={metaFormConfig.verifyToken}
+                        onChange={(e) => setMetaFormConfig({ ...metaFormConfig, verifyToken: e.target.value })}
+                        placeholder="education_sansar_meta_verify_2026"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Auto Lead Routing Toggle */}
+                  <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-100 flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-purple-950 text-xs">Automated Lead Distribution Engine</div>
+                      <p className="text-[11px] text-purple-800/80">
+                        Automatically assign incoming Instant Form leads to counselors specialized in student's course &amp; university
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={metaFormConfig.autoAssign}
+                      onChange={(e) => setMetaFormConfig({ ...metaFormConfig, autoAssign: e.target.checked })}
+                      className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Token Verification Result Banner */}
+                  {metaTokenTestResult && (
+                    <div
+                      className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                        metaTokenTestResult.valid
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-rose-50 border-rose-200 text-rose-950'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        {metaTokenTestResult.valid ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span>Token Valid &amp; Connected!</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-rose-600" />
+                            <span>Verification Check Failed</span>
+                          </>
+                        )}
+                      </div>
+                      {metaTokenTestResult.valid ? (
+                        <div className="text-[11px] space-y-1 text-emerald-800">
+                          <div>
+                            Facebook Page: <strong>{metaTokenTestResult.pageName}</strong> (ID: {metaTokenTestResult.pageId})
+                          </div>
+                          <div>
+                            Active Instant Forms: <strong>{metaTokenTestResult.leadgenFormsCount} forms detected</strong>
+                          </div>
+                          {Array.isArray(metaTokenTestResult.forms) && metaTokenTestResult.forms.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {metaTokenTestResult.forms.map((f: any) => (
+                                <span key={f.id} className="text-[9px] px-2 py-0.5 rounded-full bg-white border border-emerald-200 text-emerald-900 font-semibold">
+                                  {f.name} ({f.status})
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-rose-700 font-mono">
+                          {metaTokenTestResult.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-100 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleTestMetaCredentials}
+                      disabled={testingMetaToken || !metaFormConfig.pageAccessToken.trim()}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      {testingMetaToken ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                          <span>Connecting to Meta Graph API...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Test Token &amp; Inspect Forms</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={savingMeta}
+                      className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-blue-900/20 transition disabled:opacity-50"
+                    >
+                      {savingMeta ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving Settings...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Save Meta Configuration</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
 
-            <form onSubmit={handleSimulateMetaLead} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Student Full Name</label>
-                <input
-                  type="text"
-                  required
-                  value={metaSimData.student_name}
-                  onChange={(e) => setMetaSimData({ ...metaSimData, student_name: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Phone Number</label>
-                  <input
-                    type="text"
-                    required
-                    value={metaSimData.phone}
-                    onChange={(e) => setMetaSimData({ ...metaSimData, phone: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
+            {/* Right Column: Connection Guide & Live Inbound Simulator (5 cols) */}
+            <div className="lg:col-span-5 space-y-6">
+              {/* Step-by-Step Interactive Guide */}
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <HelpCircle className="w-4 h-4 text-blue-600" />
+                      <span>How to Connect Instant Form (HubSpot Style)</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Zero third-party subscriptions required
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={metaSimData.email}
-                    onChange={(e) => setMetaSimData({ ...metaSimData, email: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">City</label>
-                  <select
-                    value={metaSimData.city}
-                    onChange={(e) => setMetaSimData({ ...metaSimData, city: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                {/* Sub-tab navigation for guide */}
+                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setActiveMetaGuideTab('direct')}
+                    className={`flex-1 py-1.5 text-center font-bold rounded-lg transition ${
+                      activeMetaGuideTab === 'direct' ? 'bg-white text-blue-700 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                    }`}
                   >
-                    <option value="Kathmandu">Kathmandu (Nepal)</option>
-                    <option value="Birgunj">Birgunj (Nepal)</option>
-                    <option value="Janakpur">Janakpur (Nepal)</option>
-                    <option value="Biratnagar">Biratnagar (Nepal)</option>
-                    <option value="Delhi">Delhi (India)</option>
-                    <option value="Noida">Noida (India)</option>
-                  </select>
+                    Direct Meta Webhook
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveMetaGuideTab('mapping')}
+                    className={`flex-1 py-1.5 text-center font-bold rounded-lg transition ${
+                      activeMetaGuideTab === 'mapping' ? 'bg-white text-blue-700 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    Field Auto-Mapping
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveMetaGuideTab('webhook')}
+                    className={`flex-1 py-1.5 text-center font-bold rounded-lg transition ${
+                      activeMetaGuideTab === 'webhook' ? 'bg-white text-blue-700 shadow-xs' : 'text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    Zapier / No-Code
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Course Interest</label>
-                  <input
-                    type="text"
-                    value={metaSimData.preferred_course}
-                    onChange={(e) => setMetaSimData({ ...metaSimData, preferred_course: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Campaign Tag</label>
-                <input
-                  type="text"
-                  value={metaSimData.campaign}
-                  onChange={(e) => setMetaSimData({ ...metaSimData, campaign: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-              </div>
+                {/* Guide Tab 1: Direct Meta Webhook */}
+                {activeMetaGuideTab === 'direct' && (
+                  <div className="space-y-3 text-xs text-slate-700">
+                    <div className="flex gap-2.5 items-start">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                        1
+                      </span>
+                      <p>
+                        Open <strong>Meta for Developers</strong> (&gt; My Apps) or <strong>Meta Business Suite</strong> and add the <strong>Webhooks</strong> product.
+                      </p>
+                    </div>
 
-              <button
-                type="submit"
-                disabled={simulatingMeta}
-                className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50"
-              >
-                {simulatingMeta ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Triggering Webhook Pipeline...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    Simulate Inbound Meta Lead Now
-                  </>
+                    <div className="flex gap-2.5 items-start">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                        2
+                      </span>
+                      <p>
+                        Select <strong>Page</strong> object, enter your Callback URL and Verify Token, then click <strong>Verify and Save</strong>.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2.5 items-start">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                        3
+                      </span>
+                      <p>
+                        Under Page Subscriptions, subscribe to the <strong>leadgen</strong> event for your Education Sansar Facebook Page.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2.5 items-start">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                        4
+                      </span>
+                      <p>
+                        Generate a <strong>Page Access Token</strong> (with <code>leads_retrieval</code> permission) and paste it into the left box.
+                      </p>
+                    </div>
+
+                    <div className="pt-2">
+                      <a
+                        href="https://developers.facebook.com/tools/lead-ads-testing"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl flex items-center justify-center gap-1.5 border border-blue-200 transition"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open Official Meta Lead Ads Testing Tool</span>
+                      </a>
+                    </div>
+                  </div>
                 )}
-              </button>
-            </form>
 
-            {/* Result Display */}
-            {simulationResult && (
-              <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-x-auto">
-                <div className="text-emerald-400 font-bold mb-2">
-                  ✓ Pipeline Response ({simulationResult.success ? 'HTTP 200 OK' : 'FAILED'}):
-                </div>
-                <pre>{JSON.stringify(simulationResult, null, 2)}</pre>
+                {/* Guide Tab 2: Field Auto-Mapping */}
+                {activeMetaGuideTab === 'mapping' && (
+                  <div className="space-y-2 text-xs">
+                    <p className="text-[11px] text-gray-500">
+                      Our smart parser automatically maps any Meta Instant Form field names to the CRM:
+                    </p>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-[11px]">
+                        <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-bold text-[10px] uppercase">
+                          <tr>
+                            <th className="p-2 text-left">Meta Form Field</th>
+                            <th className="p-2 text-left">CRM Lead Field</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">full_name, name, first_name</td>
+                            <td className="p-2 font-bold text-slate-900">Student Full Name</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">phone_number, mobile, whatsapp</td>
+                            <td className="p-2 font-bold text-slate-900">Phone / WhatsApp</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">email, email_address</td>
+                            <td className="p-2 font-bold text-slate-900">Student Email</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">course, preferred_course, program</td>
+                            <td className="p-2 font-bold text-purple-700">Preferred Course</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">university, college, campus</td>
+                            <td className="p-2 font-bold text-indigo-700">Target University</td>
+                          </tr>
+                          <tr>
+                            <td className="p-2 font-mono text-gray-700">city, location, district</td>
+                            <td className="p-2 font-bold text-slate-900">City / Region</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Guide Tab 3: Zapier / No-Code Webhook */}
+                {activeMetaGuideTab === 'webhook' && (
+                  <div className="space-y-2.5 text-xs text-slate-700">
+                    <p>
+                      If you use <strong>Zapier, Make, LeadSync, or WordPress / Elementor Landing Pages</strong>:
+                    </p>
+                    <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px] space-y-1">
+                      <div className="text-slate-400">// POST JSON to:</div>
+                      <div className="text-emerald-400 break-all">{`${window.location.origin}/api/integrations/forms/instant-capture`}</div>
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      When triggered, the CRM immediately creates the lead, assigns the counselor, and triggers automated welcome workflows.
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* Live Inbound Lead Simulator Card */}
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <Play className="w-4 h-4 text-emerald-600" />
+                      <span>Live Inbound Lead Simulator</span>
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Test live lead capture and counselor assignment right now
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200">
+                    Interactive
+                  </span>
+                </div>
+
+                <form onSubmit={handleSimulateMetaLead} className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Student Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={metaSimData.student_name}
+                      onChange={(e) => setMetaSimData({ ...metaSimData, student_name: e.target.value })}
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Phone Number *</label>
+                      <input
+                        type="text"
+                        required
+                        value={metaSimData.phone}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, phone: e.target.value })}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Email *</label>
+                      <input
+                        type="email"
+                        required
+                        value={metaSimData.email}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, email: e.target.value })}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Target Course</label>
+                      <input
+                        type="text"
+                        value={metaSimData.preferred_course}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, preferred_course: e.target.value })}
+                        placeholder="e.g. B.Tech, MBBS, MBA"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Target University</label>
+                      <input
+                        type="text"
+                        value={metaSimData.preferred_university}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, preferred_university: e.target.value })}
+                        placeholder="e.g. Sharda, Chandigarh"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">City / Region</label>
+                      <input
+                        type="text"
+                        value={metaSimData.city}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, city: e.target.value })}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">Campaign Tag</label>
+                      <input
+                        type="text"
+                        value={metaSimData.campaign}
+                        onChange={(e) => setMetaSimData({ ...metaSimData, campaign: e.target.value })}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={simulatingMeta}
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-md shadow-blue-900/20 transition-all disabled:opacity-50"
+                  >
+                    {simulatingMeta ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Capturing Live Lead...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Simulate Live Instant Form Submission</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Simulation Result Card */}
+                {simulationResult && (
+                  <div
+                    className={`mt-3 p-3.5 rounded-xl border text-xs space-y-2 ${
+                      simulationResult.success
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                        : 'bg-rose-50 border-rose-200 text-rose-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Lead Pipeline Success</span>
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                        {simulationResult.lead?.lead_id}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div>
+                        <span className="text-gray-500">Student: </span>
+                        <strong>{simulationResult.lead?.student_name}</strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Assigned Counselor: </span>
+                        <strong className="text-purple-700">
+                          {simulationResult.lead?.assigned_counselor_name || 'Automated Pool'}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Course / Uni: </span>
+                        <span>{simulationResult.lead?.preferred_course}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Duplicate Status: </span>
+                        <span>{simulationResult.duplicate ? 'Duplicate (Updated)' : 'New Lead'}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

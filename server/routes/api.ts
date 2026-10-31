@@ -16,7 +16,8 @@ import {
   addOrConnectGoogleSheet,
   updateGoogleSheetConnection,
   deleteGoogleSheetConnection,
-  syncAllActiveGoogleSheets
+  syncAllActiveGoogleSheets,
+  verifyMetaCredentials
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -1943,17 +1944,38 @@ apiRouter.get('/integrations/meta/webhook', (req: Request, res: Response) => {
   res.status(403).send('Forbidden');
 });
 
-apiRouter.post('/integrations/meta/webhook', (req: Request, res: Response) => {
+apiRouter.post('/integrations/meta/webhook', async (req: Request, res: Response) => {
   try {
-    const result = handleMetaLeadWebhook(req.body);
+    const result = await handleMetaLeadWebhook(req.body);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Webhook processing failed' });
   }
 });
 
+// Universal Direct Instant Form Ingest Webhook (for Landing Pages, Zapier, Make, LeadSync, etc.)
+apiRouter.post('/integrations/forms/instant-capture', async (req: Request, res: Response) => {
+  try {
+    const result = await handleMetaLeadWebhook(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Instant form capture failed' });
+  }
+});
+
+// Meta Graph API Token Verifier & Form Inspector
+apiRouter.post('/integrations/meta/verify-credentials', async (req: Request, res: Response) => {
+  try {
+    const { pageAccessToken, pageId } = req.body;
+    const result = await verifyMetaCredentials({ pageAccessToken, pageId });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Verification check failed' });
+  }
+});
+
 // Simulator endpoint so user can test Meta Lead inflow right from UI!
-apiRouter.post('/integrations/meta/test-webhook', (req: Request, res: Response) => {
+apiRouter.post('/integrations/meta/test-webhook', async (req: Request, res: Response) => {
   try {
     const sampleLead = {
       simulatedLead: {
@@ -1966,7 +1988,7 @@ apiRouter.post('/integrations/meta/test-webhook', (req: Request, res: Response) 
         preferred_university: req.body.preferred_university || 'SRM Institute of Science and Technology',
         facebook_lead_id: 'meta-test-' + Date.now(),
         lead_source: 'Meta Ads',
-        campaign: 'Meta Nepal Admission Wave 2026',
+        campaign: req.body.campaign || 'Meta Nepal Admission Wave 2026',
         ad_set: 'Engineering Aspirants',
         ad: 'SRM Admissions 2026 Nepal',
         academic_qualification: '+2 Science',
@@ -1975,7 +1997,7 @@ apiRouter.post('/integrations/meta/test-webhook', (req: Request, res: Response) 
       }
     };
 
-    const result = handleMetaLeadWebhook(sampleLead);
+    const result = await handleMetaLeadWebhook(sampleLead);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

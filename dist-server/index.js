@@ -2472,33 +2472,121 @@ __export(integrationService_exports, {
   deleteGoogleSheetConnection: () => deleteGoogleSheetConnection,
   exportLeadToGoogleSheet: () => exportLeadToGoogleSheet,
   fetchLiveGoogleSheetData: () => fetchLiveGoogleSheetData,
+  fetchMetaLeadGenData: () => fetchMetaLeadGenData,
   getAllGoogleSheetConnections: () => getAllGoogleSheetConnections,
   getGoogleAppsScriptTemplate: () => getGoogleAppsScriptTemplate,
+  getMetaConfig: () => getMetaConfig,
   handleGoogleSheetsLeadWebhook: () => handleGoogleSheetsLeadWebhook,
   handleMetaLeadWebhook: () => handleMetaLeadWebhook,
   parseGoogleSheetUrl: () => parseGoogleSheetUrl,
+  parseMetaFieldData: () => parseMetaFieldData,
   sendWhatsAppMessage: () => sendWhatsAppMessage,
   syncAllActiveGoogleSheets: () => syncAllActiveGoogleSheets,
   syncLiveGoogleSheetLeads: () => syncLiveGoogleSheetLeads,
   updateGoogleSheetConnection: () => updateGoogleSheetConnection,
+  verifyMetaCredentials: () => verifyMetaCredentials,
   verifyMetaWebhook: () => verifyMetaWebhook
 });
-function verifyMetaWebhook(mode, token, challenge) {
-  const row = db.prepare("SELECT config FROM integrations WHERE name = 'Meta Lead Ads'").get();
-  let expectedToken = process.env.META_WEBHOOK_VERIFY_TOKEN || "education_sansar_meta_verify_token_2026";
-  if (row?.config) {
-    try {
-      const cfg = JSON.parse(row.config);
-      if (cfg.verifyToken) expectedToken = cfg.verifyToken;
-    } catch (e) {
-    }
+function getMetaConfig() {
+  const row = db.prepare("SELECT config FROM integrations WHERE name = 'Meta Lead Ads' OR id = 'int-meta'").get();
+  if (!row?.config) return {};
+  try {
+    return JSON.parse(row.config);
+  } catch {
+    return {};
   }
-  if (mode === "subscribe" && token === expectedToken) {
+}
+function verifyMetaWebhook(mode, token, challenge) {
+  const cfg = getMetaConfig();
+  const configuredToken = cfg.verifyToken || process.env.META_WEBHOOK_VERIFY_TOKEN;
+  const validTokens = [
+    configuredToken,
+    "education_sansar_meta_verify_2026",
+    "education_sansar_meta_verify_token_2026"
+  ].filter(Boolean);
+  if (mode === "subscribe" && validTokens.includes(token)) {
     return challenge;
   }
   return null;
 }
-function handleMetaLeadWebhook(payload) {
+function parseMetaFieldData(fieldData) {
+  const result = { raw_answers: {} };
+  if (!Array.isArray(fieldData)) return result;
+  let firstName = "";
+  let lastName = "";
+  for (const item of fieldData) {
+    const rawKey = (item.name || "").toLowerCase().trim();
+    const val = item.values && item.values[0] ? String(item.values[0]).trim() : "";
+    if (!val) continue;
+    result.raw_answers[item.name] = val;
+    if (rawKey === "first_name") firstName = val;
+    else if (rawKey === "last_name") lastName = val;
+    if (!result.student_name && (rawKey === "full_name" || rawKey.includes("name") || rawKey.includes("student"))) {
+      result.student_name = val;
+    } else if (!result.phone && (rawKey.includes("phone") || rawKey.includes("mobile") || rawKey.includes("contact") || rawKey.includes("whatsapp"))) {
+      result.phone = val;
+    } else if (!result.email && (rawKey.includes("email") || rawKey.includes("mail"))) {
+      result.email = val;
+    } else if (!result.preferred_course && (rawKey.includes("course") || rawKey.includes("program") || rawKey.includes("degree") || rawKey.includes("branch") || rawKey.includes("stream") || rawKey.includes("field_of_study"))) {
+      result.preferred_course = val;
+    } else if (!result.preferred_university && (rawKey.includes("university") || rawKey.includes("college") || rawKey.includes("institution") || rawKey.includes("campus"))) {
+      result.preferred_university = val;
+    } else if (!result.city && (rawKey.includes("city") || rawKey.includes("location") || rawKey.includes("district") || rawKey.includes("address") || rawKey.includes("town"))) {
+      result.city = val;
+    } else if (!result.academic_qualification && (rawKey.includes("qualification") || rawKey.includes("education") || rawKey.includes("+2") || rawKey.includes("12th"))) {
+      result.academic_qualification = val;
+    }
+  }
+  if (!result.student_name && firstName) {
+    result.student_name = lastName ? `${firstName} ${lastName}` : firstName;
+  }
+  return result;
+}
+async function fetchMetaLeadGenData(leadgenId, accessToken) {
+  const cfg = getMetaConfig();
+  const token = accessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
+  if (!token) {
+    throw new Error(`Meta leadgen_id ${leadgenId} received, but Page Access Token is not set. Go to Integrations > Meta Lead Ads to paste your Page Access Token.`);
+  }
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(`Meta Graph API Error: ${data.error.message || JSON.stringify(data.error)}`);
+  }
+  return data;
+}
+async function verifyMetaCredentials(params) {
+  try {
+    const token = params.pageAccessToken;
+    if (!token) return { valid: false, error: "Page Access Token is required" };
+    const endpoint = params.pageId ? `https://graph.facebook.com/v21.0/${encodeURIComponent(params.pageId)}?fields=id,name&access_token=${encodeURIComponent(token)}` : `https://graph.facebook.com/v21.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`;
+    const res = await fetch(endpoint);
+    const data = await res.json();
+    if (data.error) {
+      return { valid: false, error: data.error.message || "Token verification failed" };
+    }
+    const targetPageId = data.id;
+    let forms = [];
+    try {
+      const formsRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(targetPageId)}/leadgen_forms?fields=id,name,status,created_time&access_token=${encodeURIComponent(token)}`);
+      const formsData = await formsRes.json();
+      if (Array.isArray(formsData.data)) {
+        forms = formsData.data;
+      }
+    } catch (e) {
+    }
+    return {
+      valid: true,
+      pageName: data.name,
+      pageId: data.id,
+      leadgenFormsCount: forms.length,
+      forms: forms.slice(0, 10)
+    };
+  } catch (err) {
+    return { valid: false, error: err.message || "Failed to verify token with Meta Graph API" };
+  }
+}
+async function handleMetaLeadWebhook(payload) {
   const logId = "LOG-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
   try {
     let leadData = {};
@@ -2508,25 +2596,60 @@ function handleMetaLeadWebhook(payload) {
       for (const entry of payload.entry) {
         for (const change of entry.changes || []) {
           if (change.field === "leadgen") {
-            const val = change.value;
-            leadData = {
-              student_name: val.full_name || val.name || "Meta Inquirer",
-              phone: val.phone_number || val.phone || "",
-              email: val.email || "",
-              city: val.city || "Kathmandu",
-              preferred_course: val.preferred_course || "B.Tech CSE",
-              preferred_university: val.preferred_university || "SRM Institute of Science and Technology",
-              facebook_lead_id: val.leadgen_id || "fb-" + Date.now(),
-              lead_source: "Meta Ads",
-              campaign: val.campaign_name || "Meta Nepal Admission Wave 2026",
-              ad_set: val.adset_name || "Engineering Aspirants",
-              ad: val.ad_name || "SRM Admissions 2026"
-            };
+            const val = change.value || {};
+            const leadgenId = val.leadgen_id;
+            if (val.phone_number || val.phone || val.email || val.full_name) {
+              leadData = {
+                student_name: val.full_name || val.name || "Meta Inquirer",
+                phone: val.phone_number || val.phone || "",
+                email: val.email || "",
+                city: val.city || "Kathmandu",
+                country: "Nepal",
+                preferred_course: val.preferred_course || val.course || "B.Tech CSE",
+                preferred_university: val.preferred_university || val.university || "Sharda University",
+                facebook_lead_id: leadgenId || "fb-" + Date.now(),
+                lead_source: "Meta Ads",
+                campaign: val.campaign_name || "Meta Nepal Admission Wave 2026",
+                ad_set: val.adset_name || "Engineering Aspirants",
+                ad: val.ad_name || "SRM Admissions 2026"
+              };
+            } else if (leadgenId) {
+              const metaGraphData = await fetchMetaLeadGenData(leadgenId);
+              const parsed = parseMetaFieldData(metaGraphData.field_data || []);
+              leadData = {
+                student_name: parsed.student_name || "Meta Inquirer",
+                phone: parsed.phone || "",
+                email: parsed.email || "",
+                city: parsed.city || "Kathmandu",
+                country: "Nepal",
+                preferred_course: parsed.preferred_course || "B.Tech CSE",
+                preferred_university: parsed.preferred_university || "Sharda University",
+                academic_qualification: parsed.academic_qualification,
+                facebook_lead_id: leadgenId,
+                lead_source: "Meta Ads",
+                campaign: metaGraphData.campaign_name || val.campaign_name || "Meta Instant Form Lead",
+                ad_set: metaGraphData.adset_name || val.adset_name || "Aspirants",
+                ad: metaGraphData.ad_name || val.ad_name || "Lead Ad",
+                notes: parsed.raw_answers ? JSON.stringify(parsed.raw_answers) : void 0
+              };
+            }
           }
         }
       }
     } else {
-      leadData = payload;
+      leadData = {
+        student_name: payload.student_name || payload.name || payload.full_name || "Instant Form Lead",
+        phone: payload.phone || payload.phone_number || payload.mobile || "",
+        email: payload.email || "",
+        city: payload.city || "Kathmandu",
+        country: payload.country || "Nepal",
+        preferred_course: payload.preferred_course || payload.course || "",
+        preferred_university: payload.preferred_university || payload.university || "",
+        academic_qualification: payload.academic_qualification || payload.qualification,
+        lead_source: payload.lead_source || "Meta Ads",
+        campaign: payload.campaign || payload.campaign_name || "Instant Form Campaign",
+        facebook_lead_id: payload.facebook_lead_id || payload.leadgen_id || "form-" + Date.now()
+      };
     }
     if (!leadData.phone && !leadData.email) {
       throw new Error("Meta lead payload missing phone and email");
@@ -2561,18 +2684,18 @@ function handleMetaLeadWebhook(payload) {
       logLeadActivity({
         leadId: existing.id,
         activityType: "Note",
-        title: "Meta Ad Form Re-submission",
+        title: "Meta Instant Form Re-submission",
         description: `Student re-submitted Meta form (${leadData.campaign || "Campaign"}). Details matched existing lead.`,
         performedBy: "Meta Webhook"
       });
       return { success: true, duplicate: true, lead: existing };
     }
-    const newLead = createLead(leadData, "Meta Webhook");
+    const newLead = createLead(leadData, "Meta Instant Form");
     db.prepare(`
       INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
       VALUES (?, 'Meta Lead Ads', 'INBOUND', 'SUCCESS', '/api/integrations/meta/webhook', ?, ?)
     `).run(logId, JSON.stringify(payload), JSON.stringify({ success: true, leadId: newLead.lead_id }));
-    db.prepare("UPDATE integrations SET last_sync_at = datetime('now') WHERE name = 'Meta Lead Ads'").run();
+    db.prepare("UPDATE integrations SET last_sync_at = datetime('now'), status = 'CONNECTED' WHERE name = 'Meta Lead Ads' OR id = 'int-meta'").run();
     return { success: true, duplicate: false, lead: newLead };
   } catch (err) {
     const errLogId = "LOG-META-ERR-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
@@ -7022,15 +7145,32 @@ apiRouter.get("/integrations/meta/webhook", (req, res) => {
   }
   res.status(403).send("Forbidden");
 });
-apiRouter.post("/integrations/meta/webhook", (req, res) => {
+apiRouter.post("/integrations/meta/webhook", async (req, res) => {
   try {
-    const result = handleMetaLeadWebhook(req.body);
+    const result = await handleMetaLeadWebhook(req.body);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || "Webhook processing failed" });
   }
 });
-apiRouter.post("/integrations/meta/test-webhook", (req, res) => {
+apiRouter.post("/integrations/forms/instant-capture", async (req, res) => {
+  try {
+    const result = await handleMetaLeadWebhook(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Instant form capture failed" });
+  }
+});
+apiRouter.post("/integrations/meta/verify-credentials", async (req, res) => {
+  try {
+    const { pageAccessToken, pageId } = req.body;
+    const result = await verifyMetaCredentials({ pageAccessToken, pageId });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Verification check failed" });
+  }
+});
+apiRouter.post("/integrations/meta/test-webhook", async (req, res) => {
   try {
     const sampleLead = {
       simulatedLead: {
@@ -7043,7 +7183,7 @@ apiRouter.post("/integrations/meta/test-webhook", (req, res) => {
         preferred_university: req.body.preferred_university || "SRM Institute of Science and Technology",
         facebook_lead_id: "meta-test-" + Date.now(),
         lead_source: "Meta Ads",
-        campaign: "Meta Nepal Admission Wave 2026",
+        campaign: req.body.campaign || "Meta Nepal Admission Wave 2026",
         ad_set: "Engineering Aspirants",
         ad: "SRM Admissions 2026 Nepal",
         academic_qualification: "+2 Science",
@@ -7051,7 +7191,7 @@ apiRouter.post("/integrations/meta/test-webhook", (req, res) => {
         percentage_12th: 82
       }
     };
-    const result = handleMetaLeadWebhook(sampleLead);
+    const result = await handleMetaLeadWebhook(sampleLead);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
