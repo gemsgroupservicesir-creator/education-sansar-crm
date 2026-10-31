@@ -109,12 +109,29 @@ export function assignCounselor(lead: {
   return null;
 }
 
-// Generate new Lead ID ES-YYYY-XXXX
+// Generate new Lead ID ES-YYYY-XXXX ensuring true uniqueness
 export function generateLeadId(): string {
   const currentYear = new Date().getFullYear();
-  const countRow = db.prepare("SELECT count(*) as count FROM leads WHERE lead_id LIKE ?").get(`ES-${currentYear}-%`) as { count: number };
-  const nextSeq = (countRow.count + 1).toString().padStart(4, '0');
-  return `ES-${currentYear}-${nextSeq}`;
+  const rows = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE ?").all(`ES-${currentYear}-%`) as Array<{ lead_id: string }>;
+  let maxSeq = 0;
+  for (const r of rows) {
+    const parts = (r.lead_id || '').split('-');
+    if (parts.length === 3) {
+      const num = parseInt(parts[2], 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+  let candidateSeq = maxSeq + 1;
+  while (true) {
+    const candidateId = `ES-${currentYear}-${candidateSeq.toString().padStart(4, '0')}`;
+    const exists = db.prepare("SELECT id FROM leads WHERE lead_id = ?").get(candidateId);
+    if (!exists) {
+      return candidateId;
+    }
+    candidateSeq++;
+  }
 }
 
 // Create a new lead with all business workflow automations
@@ -419,10 +436,23 @@ export function convertLeadToStudent(leadId: string, performedBy: string = 'Syst
   const existingStudent = db.prepare('SELECT * FROM students WHERE lead_id = ?').get(leadId);
   if (existingStudent) return existingStudent;
 
-  // Generate Student ID STU-YYYY-XXXX
+  // Generate Student ID STU-YYYY-XXXX ensuring uniqueness
   const currentYear = new Date().getFullYear();
-  const countRow = db.prepare("SELECT count(*) as count FROM students WHERE student_id LIKE ?").get(`STU-${currentYear}-%`) as { count: number };
-  const studentId = `STU-${currentYear}-${(countRow.count + 1).toString().padStart(3, '0')}`;
+  const stuRows = db.prepare("SELECT student_id FROM students WHERE student_id LIKE ?").all(`STU-${currentYear}-%`) as Array<{ student_id: string }>;
+  let maxStuSeq = 0;
+  for (const r of stuRows) {
+    const parts = (r.student_id || '').split('-');
+    if (parts.length === 3) {
+      const num = parseInt(parts[2], 10);
+      if (!isNaN(num) && num > maxStuSeq) maxStuSeq = num;
+    }
+  }
+  let stuSeq = maxStuSeq + 1;
+  let studentId = `STU-${currentYear}-${stuSeq.toString().padStart(3, '0')}`;
+  while (db.prepare("SELECT id FROM students WHERE student_id = ?").get(studentId)) {
+    stuSeq++;
+    studentId = `STU-${currentYear}-${stuSeq.toString().padStart(3, '0')}`;
+  }
   const stuDbId = 'stu-' + Date.now();
 
   // Find linked application if any

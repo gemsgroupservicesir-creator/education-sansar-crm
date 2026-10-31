@@ -2070,9 +2070,26 @@ function assignCounselor(lead) {
 }
 function generateLeadId() {
   const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-  const countRow = db.prepare("SELECT count(*) as count FROM leads WHERE lead_id LIKE ?").get(`ES-${currentYear}-%`);
-  const nextSeq = (countRow.count + 1).toString().padStart(4, "0");
-  return `ES-${currentYear}-${nextSeq}`;
+  const rows = db.prepare("SELECT lead_id FROM leads WHERE lead_id LIKE ?").all(`ES-${currentYear}-%`);
+  let maxSeq = 0;
+  for (const r of rows) {
+    const parts = (r.lead_id || "").split("-");
+    if (parts.length === 3) {
+      const num = parseInt(parts[2], 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  }
+  let candidateSeq = maxSeq + 1;
+  while (true) {
+    const candidateId = `ES-${currentYear}-${candidateSeq.toString().padStart(4, "0")}`;
+    const exists = db.prepare("SELECT id FROM leads WHERE lead_id = ?").get(candidateId);
+    if (!exists) {
+      return candidateId;
+    }
+    candidateSeq++;
+  }
 }
 function createLead(data, performedBy = "System") {
   const id = "lead-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
@@ -2355,8 +2372,21 @@ function convertLeadToStudent(leadId, performedBy = "System") {
   const existingStudent = db.prepare("SELECT * FROM students WHERE lead_id = ?").get(leadId);
   if (existingStudent) return existingStudent;
   const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-  const countRow = db.prepare("SELECT count(*) as count FROM students WHERE student_id LIKE ?").get(`STU-${currentYear}-%`);
-  const studentId = `STU-${currentYear}-${(countRow.count + 1).toString().padStart(3, "0")}`;
+  const stuRows = db.prepare("SELECT student_id FROM students WHERE student_id LIKE ?").all(`STU-${currentYear}-%`);
+  let maxStuSeq = 0;
+  for (const r of stuRows) {
+    const parts = (r.student_id || "").split("-");
+    if (parts.length === 3) {
+      const num = parseInt(parts[2], 10);
+      if (!isNaN(num) && num > maxStuSeq) maxStuSeq = num;
+    }
+  }
+  let stuSeq = maxStuSeq + 1;
+  let studentId = `STU-${currentYear}-${stuSeq.toString().padStart(3, "0")}`;
+  while (db.prepare("SELECT id FROM students WHERE student_id = ?").get(studentId)) {
+    stuSeq++;
+    studentId = `STU-${currentYear}-${stuSeq.toString().padStart(3, "0")}`;
+  }
   const stuDbId = "stu-" + Date.now();
   const app2 = db.prepare("SELECT id FROM applications WHERE lead_id = ? ORDER BY created_at DESC LIMIT 1").get(leadId);
   db.prepare(`
