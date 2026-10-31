@@ -17,7 +17,8 @@ import {
   Snowflake,
   ChevronLeft,
   ChevronRight,
-  UserCheck
+  UserCheck,
+  Sliders
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Lead, LeadStatus, LeadTemperature, LeadSource } from '../types';
@@ -25,11 +26,12 @@ import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 import { CreateLeadModal } from '../components/common/CreateLeadModal';
 import { CSVImportModal } from '../components/common/CSVImportModal';
+import { LeadDistributionModal } from '../components/leads/LeadDistributionModal';
 
 export const LeadsPage: React.FC = () => {
   const navigate = useNavigate();
   const { showToast } = useNotifications();
-  const { canDeleteLeads, currentRole } = useAuth();
+  const { canDeleteLeads, currentRole, isSuperAdmin, hasPermission } = useAuth();
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [totalLeads, setTotalLeads] = useState(0);
@@ -49,6 +51,7 @@ export const LeadsPage: React.FC = () => {
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [distributionModalOpen, setDistributionModalOpen] = useState(false);
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -166,6 +169,17 @@ export const LeadsPage: React.FC = () => {
 
         {/* Actions Bar */}
         <div className="flex items-center gap-2.5">
+          {(isSuperAdmin || hasPermission('lead_distribution')) && (
+            <button
+              onClick={() => setDistributionModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold border border-purple-200 shadow-2xs hover:shadow-xs transition-all"
+              title="Configure course & university auto-routing rules and distribute unassigned leads"
+            >
+              <Sliders className="w-4 h-4 text-purple-600" />
+              <span>Distribution Engine</span>
+            </button>
+          )}
+
           <button
             onClick={() => setImportModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold border border-slate-200 shadow-2xs hover:shadow-xs transition-all"
@@ -551,6 +565,13 @@ export const LeadsPage: React.FC = () => {
         isOpen={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         onImportSuccess={() => fetchLeads()}
+      />
+
+      {/* Automated Lead Distribution Engine Modal */}
+      <LeadDistributionModal
+        isOpen={distributionModalOpen}
+        onClose={() => setDistributionModalOpen(false)}
+        onLeadsDistributed={() => fetchLeads()}
       />
     </div>
   );

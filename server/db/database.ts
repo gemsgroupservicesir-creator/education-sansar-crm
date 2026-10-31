@@ -96,6 +96,7 @@ function runSafeMigrations() {
   addColumnIfNotExists('counselors', 'username', 'TEXT');
   addColumnIfNotExists('counselors', 'joining_date', 'TEXT');
   addColumnIfNotExists('counselors', 'status', "TEXT NOT NULL DEFAULT 'Active'");
+  addColumnIfNotExists('counselors', 'role', "TEXT NOT NULL DEFAULT 'Counselor'");
 
   // Universities fields
   addColumnIfNotExists('universities', 'short_name', 'TEXT');
@@ -132,6 +133,17 @@ function runSafeMigrations() {
   addColumnIfNotExists('university_courses', 'admission_process', "TEXT DEFAULT 'Direct Merit / Counseling'");
   addColumnIfNotExists('university_courses', 'remarks', 'TEXT');
   addColumnIfNotExists('university_courses', 'is_active', 'INTEGER DEFAULT 1');
+
+  // RBAC & Feature Permissions
+  addColumnIfNotExists('users', 'permissions', "TEXT DEFAULT '[]'");
+  addColumnIfNotExists('roles', 'permissions', "TEXT DEFAULT '[]'");
+
+  // Lead Distribution Counselor fields
+  addColumnIfNotExists('counselors', 'specialization_courses', "TEXT DEFAULT '[]'");
+  addColumnIfNotExists('counselors', 'specialization_universities', "TEXT DEFAULT '[]'");
+  addColumnIfNotExists('counselors', 'daily_lead_quota', 'INTEGER DEFAULT 25');
+  addColumnIfNotExists('counselors', 'leads_assigned_today', 'INTEGER DEFAULT 0');
+  addColumnIfNotExists('counselors', 'last_assigned_date', 'TEXT');
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

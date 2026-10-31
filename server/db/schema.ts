@@ -486,6 +486,145 @@ CREATE TABLE IF NOT EXISTS deleted_records (
 CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
 CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
 
+-- 26. Automated Lead Distribution Rules (Course & University)
+CREATE TABLE IF NOT EXISTS lead_routing_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  course_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["B.Tech", "Engineering", "CSE"]
+  university_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["SRM", "VIT", "Chandigarh"]
+  target_cities TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Kathmandu", "Birgunj"]
+  counselor_id TEXT NOT NULL REFERENCES counselors(id) ON DELETE CASCADE,
+  counselor_name TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 1,
+  max_daily_leads INTEGER NOT NULL DEFAULT 20,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  description TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 27. HR Employees Directory
+CREATE TABLE IF NOT EXISTS hr_employees (
+  id TEXT PRIMARY KEY,
+  employee_code TEXT UNIQUE NOT NULL, -- e.g. EMP-001
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+  full_name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT NOT NULL,
+  department TEXT NOT NULL DEFAULT 'Counseling', -- 'Counseling', 'Marketing', 'Admissions', 'Finance', 'HR', 'Administration'
+  designation TEXT NOT NULL DEFAULT 'Education Counselor',
+  employment_type TEXT NOT NULL DEFAULT 'Full-Time', -- 'Full-Time', 'Part-Time', 'Contract', 'Intern'
+  joining_date TEXT NOT NULL DEFAULT (date('now')),
+  monthly_salary REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  bank_name TEXT,
+  account_number TEXT,
+  pan_number TEXT,
+  emergency_contact TEXT,
+  status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'On Leave', 'Resigned', 'Terminated'
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 28. HR Daily Attendance Register
+CREATE TABLE IF NOT EXISTS hr_attendance (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  date TEXT NOT NULL, -- YYYY-MM-DD
+  status TEXT NOT NULL DEFAULT 'Present', -- 'Present', 'Absent', 'Half Day', 'On Leave', 'Holiday'
+  check_in_time TEXT, -- HH:MM
+  check_out_time TEXT, -- HH:MM
+  work_mode TEXT NOT NULL DEFAULT 'Office', -- 'Office', 'Remote', 'Field Work'
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_attendance_date ON hr_attendance(employee_id, date);
+
+-- 29. HR Leave Applications & Approvals
+CREATE TABLE IF NOT EXISTS hr_leaves (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  leave_type TEXT NOT NULL DEFAULT 'Casual Leave', -- 'Casual Leave', 'Sick Leave', 'Paid Leave', 'Unpaid Leave'
+  start_date TEXT NOT NULL, -- YYYY-MM-DD
+  end_date TEXT NOT NULL, -- YYYY-MM-DD
+  days_count REAL NOT NULL DEFAULT 1.0,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Pending', -- 'Pending', 'Approved', 'Rejected'
+  approved_by TEXT,
+  approval_remarks TEXT,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 30. HR Monthly Payroll & Salary Slips
+CREATE TABLE IF NOT EXISTS hr_payroll (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  month_year TEXT NOT NULL, -- YYYY-MM
+  base_salary REAL NOT NULL DEFAULT 0.0,
+  incentives_bonus REAL NOT NULL DEFAULT 0.0, -- e.g. admission performance commission
+  deductions REAL NOT NULL DEFAULT 0.0,
+  net_salary REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  payment_status TEXT NOT NULL DEFAULT 'Pending', -- 'Pending', 'Paid'
+  payment_date TEXT,
+  payment_method TEXT DEFAULT 'Bank Transfer', -- 'Bank Transfer', 'Cash', 'Cheque'
+  remarks TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_payroll_month ON hr_payroll(employee_id, month_year);
+
+-- 31. Finance Transactions & General Ledger
+CREATE TABLE IF NOT EXISTS finance_transactions (
+  id TEXT PRIMARY KEY,
+  transaction_id TEXT UNIQUE NOT NULL, -- TXN-2026-XXXX
+  type TEXT NOT NULL, -- 'INCOME', 'EXPENSE'
+  category TEXT NOT NULL, -- Income: 'Student Fee', 'University Commission', 'Consultancy Fee', 'Processing Fee'
+                          -- Expense: 'Digital Ads (Meta/Google)', 'Office Rent', 'Salaries & Payroll', 'Event & Fair Expenses', 'Software & Tech', 'Utilities', 'Travel', 'Other'
+  title TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  transaction_date TEXT NOT NULL DEFAULT (date('now')),
+  payment_method TEXT NOT NULL DEFAULT 'Bank Transfer', -- 'Bank Transfer', 'eSewa', 'Khalti', 'ConnectIPS', 'Cash', 'Cheque'
+  reference_number TEXT,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  student_name TEXT,
+  university_id TEXT REFERENCES universities(id) ON DELETE SET NULL,
+  university_name TEXT,
+  status TEXT NOT NULL DEFAULT 'Completed', -- 'Completed', 'Pending', 'Failed'
+  notes TEXT,
+  recorded_by TEXT DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 32. Student & University Invoices
+CREATE TABLE IF NOT EXISTS finance_invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT UNIQUE NOT NULL, -- INV-2026-XXXX
+  invoice_type TEXT NOT NULL DEFAULT 'STUDENT_FEE', -- 'STUDENT_FEE', 'UNIVERSITY_COMMISSION'
+  recipient_name TEXT NOT NULL,
+  recipient_email TEXT,
+  recipient_phone TEXT,
+  total_amount REAL NOT NULL DEFAULT 0.0,
+  paid_amount REAL NOT NULL DEFAULT 0.0,
+  due_amount REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  due_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Pending', -- 'Draft', 'Sent', 'Partial', 'Paid', 'Overdue', 'Cancelled'
+  items TEXT NOT NULL DEFAULT '[]', -- JSON array of items: [{ description, qty, unit_price, amount }]
+  notes TEXT,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  university_id TEXT REFERENCES universities(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);

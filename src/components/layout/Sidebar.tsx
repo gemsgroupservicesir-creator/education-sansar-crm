@@ -21,6 +21,8 @@ import {
   ShieldCheck,
   MapPin,
   Landmark,
+  UserCog,
+  Wallet,
   LogOut,
   X,
   PanelLeftClose,
@@ -42,30 +44,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed = false,
   onToggleCollapse
 }) => {
-  const { currentRole, logout } = useAuth();
+  const { currentRole, hasPermission, logout } = useAuth();
   const { unreadCount } = useNotifications();
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Leads', path: '/leads', icon: Users },
-    { name: 'My Leads', path: '/my-leads', icon: UserCheck, roles: ['Super Admin', 'Admin', 'Counselor', 'Telecaller'] },
-    { name: 'Admission Pipeline', path: '/pipeline', icon: Kanban },
-    { name: 'Follow-ups', path: '/followups', icon: CalendarClock },
-    { name: 'Applications', path: '/applications', icon: GraduationCap },
-    { name: 'Students', path: '/students', icon: Award },
-    { name: 'Universities', path: '/universities', icon: Building2 },
-    { name: 'Courses', path: '/courses', icon: BookOpen },
-    { name: 'University Fees', path: '/university-fees', icon: Landmark },
-    { name: 'Counselors', path: '/counselors', icon: Briefcase, roles: ['Super Admin', 'Admin', 'Management'] },
-    { name: 'Campaigns', path: '/campaigns', icon: Megaphone, roles: ['Super Admin', 'Admin', 'Marketing Manager', 'Management'] },
-    { name: 'Reports', path: '/reports', icon: BarChart3 },
-    { name: 'Documents', path: '/documents', icon: FileText },
+    { name: 'Dashboard', path: '/', icon: LayoutDashboard, permission: 'dashboard' },
+    { name: 'Leads', path: '/leads', icon: Users, permission: 'leads_view' },
+    { name: 'My Leads', path: '/my-leads', icon: UserCheck, permission: 'leads_view', roles: ['Super Admin', 'Admin', 'Counselor', 'Telecaller'] },
+    { name: 'Admission Pipeline', path: '/pipeline', icon: Kanban, permission: 'pipeline' },
+    { name: 'Follow-ups', path: '/followups', icon: CalendarClock, permission: 'leads_view' },
+    { name: 'Applications', path: '/applications', icon: GraduationCap, permission: 'applications' },
+    { name: 'Students', path: '/students', icon: Award, permission: 'students' },
+    { name: 'Universities', path: '/universities', icon: Building2, permission: 'universities' },
+    { name: 'Courses', path: '/courses', icon: BookOpen, permission: 'universities' },
+    { name: 'University Fees', path: '/university-fees', icon: Landmark, permission: 'universities' },
+    { name: 'Counselors', path: '/counselors', icon: Briefcase, permission: 'counselors_manage' },
+    { name: 'HR Solution', path: '/hr', icon: UserCog, permission: 'hr_management' },
+    { name: 'Finance & Accounts', path: '/finance', icon: Wallet, permission: 'finance_management' },
+    { name: 'Campaigns', path: '/campaigns', icon: Megaphone, permission: 'campaigns' },
+    { name: 'Reports', path: '/reports', icon: BarChart3, permission: 'reports' },
+    { name: 'Documents', path: '/documents', icon: FileText, permission: 'documents' },
     { name: 'Notifications', path: '/notifications', icon: Bell, badge: unreadCount },
-    { name: 'Integrations', path: '/integrations', icon: Sliders, roles: ['Super Admin'] },
-    { name: 'Settings', path: '/settings', icon: SettingsIcon, roles: ['Super Admin', 'Admin'] },
+    { name: 'Integrations', path: '/integrations', icon: Sliders, permission: 'integrations' },
+    { name: 'Settings', path: '/settings', icon: SettingsIcon, permission: 'settings' },
   ];
 
-  const filteredNav = navItems.filter(item => !item.roles || item.roles.includes(currentRole));
+  const filteredNav = navItems.filter(item => {
+    if (item.permission && !hasPermission(item.permission)) return false;
+    if (item.roles && !item.roles.includes(currentRole)) return false;
+    return true;
+  });
 
   return (
     <>

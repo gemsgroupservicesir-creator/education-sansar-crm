@@ -25,6 +25,8 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { HRPage } from './pages/HRPage';
+import { FinancePage } from './pages/FinancePage';
 import { useNotifications } from './context/NotificationContext';
 import { useAuth } from './context/AuthContext';
 
@@ -118,6 +120,8 @@ export const App: React.FC = () => {
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/hr" element={<HRPage />} />
+              <Route path="/finance" element={<FinancePage />} />
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

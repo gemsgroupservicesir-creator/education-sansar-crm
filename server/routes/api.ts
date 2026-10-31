@@ -34,6 +34,43 @@ import {
   getAllGoogleSheetsFromNeon 
 } from '../db/neon.ts';
 
+import {
+  getRoutingRules,
+  createRoutingRule,
+  updateRoutingRule,
+  deleteRoutingRule,
+  distributeUnassignedLeads,
+  simulateLeadRouting
+} from '../services/leadDistributionEngine.ts';
+
+import {
+  getEmployees,
+  getEmployee,
+  createEmployee,
+  updateEmployee,
+  deleteEmployee,
+  getAttendance,
+  recordAttendance,
+  getLeaves,
+  applyLeave,
+  updateLeaveStatus,
+  getPayroll,
+  generateMonthlyPayroll,
+  markPayrollPaid
+} from '../services/hrService.ts';
+
+import {
+  getTransactions,
+  createTransaction,
+  updateTransaction,
+  deleteTransaction,
+  getInvoices,
+  createInvoice,
+  recordInvoicePayment,
+  getFinanceOverview,
+  getUniversityCommissionsSummary
+} from '../services/financeService.ts';
+
 export const apiRouter = Router();
 
 // ==========================================
@@ -585,6 +622,7 @@ apiRouter.get('/counselors', (req: Request, res: Response) => {
   const counselors = db.prepare(`
     SELECT c.*,
       COALESCE(u.role, 'Counselor') as role,
+      u.permissions as permissions,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.is_deleted = 0) as total_leads_count,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Interested', 'Application Started', 'Documents Pending') AND l.is_deleted = 0) as active_leads_count
     FROM counselors c
@@ -620,7 +658,11 @@ apiRouter.put('/counselors/:id/toggle-active', async (req: Request, res: Respons
 
 apiRouter.post('/counselors', async (req: Request, res: Response) => {
   try {
-    const { name, email, phone, specialization_country, assigned_cities, max_capacity, password, username, role } = req.body;
+    const { 
+      name, email, phone, specialization_country, assigned_cities, 
+      max_capacity, password, username, role, permissions,
+      specialization_courses, specialization_universities, daily_lead_quota 
+    } = req.body;
     if (!name || !email || !phone) {
       return res.status(400).json({ error: 'Name, email, and phone number are required' });
     }
@@ -629,6 +671,9 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
     const userRole = role || 'Counselor';
+    const permsJson = JSON.stringify(permissions || []);
+    const specCoursesJson = JSON.stringify(specialization_courses || []);
+    const specUnisJson = JSON.stringify(specialization_universities || []);
 
     // Check duplicate in SQLite or Neon
     let existingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
@@ -645,16 +690,20 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const uname = username ? username.trim() : cleanEmail.split('@')[0];
     const now = new Date().toISOString();
 
-    // 1. Insert into users in SQLite with selected role FIRST (satisfies foreign key constraint)
+    // 1. Insert into users in SQLite with selected role & permissions FIRST
     db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
 
     // 2. Insert into counselors in SQLite
     db.prepare(`
-      INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, joining_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?)
+      INSERT INTO counselors (
+        id, user_id, name, username, email, phone, specialization_country, assigned_cities,
+        max_capacity, is_active, status, joining_date, specialization_courses,
+        specialization_universities, daily_lead_quota, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -666,6 +715,9 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       JSON.stringify(assigned_cities || []),
       max_capacity || 100,
       now,
+      specCoursesJson,
+      specUnisJson,
+      daily_lead_quota || 25,
       now,
       now
     );
@@ -703,7 +755,7 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       action: 'COUNSELOR_CREATED',
       entity: 'counselor',
       entityId: cId,
-      newValue: { name: cleanName, email: cleanEmail, phone: cleanPhone, role: userRole }
+      newValue: { name: cleanName, email: cleanEmail, phone: cleanPhone, role: userRole, permissions }
     });
 
     res.status(201).json({ success: true, id: cId, user_id: uId, role: userRole });
@@ -715,7 +767,11 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
 
 apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
   try {
-    const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, role } = req.body;
+    const { 
+      name, email, phone, specialization_country, assigned_cities, max_capacity, 
+      is_active, status, role, permissions, specialization_courses, 
+      specialization_universities, daily_lead_quota 
+    } = req.body;
     const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
     if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
 
@@ -732,21 +788,47 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
           max_capacity = COALESCE(?, max_capacity),
           is_active = COALESCE(?, is_active),
           status = COALESCE(?, status),
+          specialization_courses = COALESCE(?, specialization_courses),
+          specialization_universities = COALESCE(?, specialization_universities),
+          daily_lead_quota = COALESCE(?, daily_lead_quota),
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, activeVal, statusVal, req.params.id);
+    `).run(
+      name, 
+      email, 
+      phone, 
+      specialization_country, 
+      assigned_cities ? JSON.stringify(assigned_cities) : null, 
+      max_capacity, 
+      activeVal, 
+      statusVal,
+      specialization_courses ? JSON.stringify(specialization_courses) : null,
+      specialization_universities ? JSON.stringify(specialization_universities) : null,
+      daily_lead_quota || null,
+      req.params.id
+    );
 
-    if (email || name || phone || is_active !== undefined || role) {
+    if (email || name || phone || is_active !== undefined || role || permissions !== undefined) {
       db.prepare(`
         UPDATE users
         SET name = COALESCE(?, name),
             email = COALESCE(?, email),
             phone = COALESCE(?, phone),
             role = COALESCE(?, role),
+            permissions = COALESCE(?, permissions),
             is_active = COALESCE(?, is_active),
             updated_at = datetime('now')
         WHERE email = ? OR id = ?
-      `).run(name, email, phone, role || null, activeVal, counselor.email, counselor.user_id);
+      `).run(
+        name, 
+        email, 
+        phone, 
+        role || null, 
+        permissions !== undefined ? JSON.stringify(permissions) : null,
+        activeVal, 
+        counselor.email, 
+        counselor.user_id
+      );
     }
 
     if (isNeonEnabled()) {
@@ -765,7 +847,7 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
       action: 'COUNSELOR_UPDATED',
       entity: 'counselor',
       entityId: req.params.id,
-      newValue: { name, email, phone, status: statusVal, role }
+      newValue: { name, email, phone, status: statusVal, role, permissions }
     });
 
     res.json({ success: true });
@@ -2360,4 +2442,334 @@ apiRouter.post('/import/leads', (req: Request, res: Response) => {
     duplicateCount,
     errorCount
   });
+});
+
+// ==========================================
+// 12. AUTOMATED LEAD DISTRIBUTION ENGINE
+// ==========================================
+apiRouter.get('/lead-routing/rules', (req: Request, res: Response) => {
+  try {
+    const rules = getRoutingRules();
+    res.json(rules);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch routing rules' });
+  }
+});
+
+apiRouter.post('/lead-routing/rules', (req: Request, res: Response) => {
+  try {
+    const { name, counselor_id, course_keywords, university_keywords, target_cities, priority, max_daily_leads, is_active, description, performedBy } = req.body;
+    if (!name || !counselor_id) {
+      return res.status(400).json({ error: 'Rule name and assigned counselor are required' });
+    }
+    const rule = createRoutingRule({
+      name,
+      counselor_id,
+      course_keywords,
+      university_keywords,
+      target_cities,
+      priority,
+      max_daily_leads,
+      is_active,
+      description
+    }, performedBy || 'Super Admin');
+    res.status(201).json(rule);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create routing rule' });
+  }
+});
+
+apiRouter.put('/lead-routing/rules/:id', (req: Request, res: Response) => {
+  try {
+    const success = updateRoutingRule(req.params.id, req.body, req.body.performedBy || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Routing rule not found' });
+    res.json({ success: true, message: 'Routing rule updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update routing rule' });
+  }
+});
+
+apiRouter.delete('/lead-routing/rules/:id', (req: Request, res: Response) => {
+  try {
+    const success = deleteRoutingRule(req.params.id, (req.query.performedBy as string) || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Routing rule not found' });
+    res.json({ success: true, message: 'Routing rule deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete routing rule' });
+  }
+});
+
+apiRouter.post('/lead-routing/distribute-unassigned', async (req: Request, res: Response) => {
+  try {
+    const report = await distributeUnassignedLeads(req.body.performedBy || 'Super Admin');
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to distribute unassigned leads' });
+  }
+});
+
+apiRouter.post('/lead-routing/simulate', (req: Request, res: Response) => {
+  try {
+    const simulation = simulateLeadRouting(req.body);
+    res.json(simulation);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Routing simulation failed' });
+  }
+});
+
+// ==========================================
+// 13. HR SOLUTION (Employees, Attendance, Leaves, Payroll)
+// ==========================================
+apiRouter.get('/hr/employees', (req: Request, res: Response) => {
+  try {
+    const employees = getEmployees();
+    res.json(employees);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch employees' });
+  }
+});
+
+apiRouter.post('/hr/employees', (req: Request, res: Response) => {
+  try {
+    const { full_name, email, phone } = req.body;
+    if (!full_name || !email || !phone) {
+      return res.status(400).json({ error: 'Full name, email, and phone number are required' });
+    }
+    const employee = createEmployee(req.body, req.body.performedBy || 'Super Admin');
+    res.status(201).json(employee);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create employee' });
+  }
+});
+
+apiRouter.put('/hr/employees/:id', (req: Request, res: Response) => {
+  try {
+    const success = updateEmployee(req.params.id, req.body, req.body.performedBy || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ success: true, message: 'Employee updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update employee' });
+  }
+});
+
+apiRouter.delete('/hr/employees/:id', (req: Request, res: Response) => {
+  try {
+    const success = deleteEmployee(req.params.id, (req.query.performedBy as string) || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ success: true, message: 'Employee deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete employee' });
+  }
+});
+
+apiRouter.get('/hr/attendance', (req: Request, res: Response) => {
+  try {
+    const records = getAttendance({
+      date: req.query.date as string,
+      employee_id: req.query.employee_id as string,
+      month: req.query.month as string
+    });
+    res.json(records);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch attendance' });
+  }
+});
+
+apiRouter.post('/hr/attendance', (req: Request, res: Response) => {
+  try {
+    const { employee_id, date, status } = req.body;
+    if (!employee_id || !date) {
+      return res.status(400).json({ error: 'Employee ID and date are required' });
+    }
+    const result = recordAttendance(req.body, req.body.performedBy || 'Super Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to record attendance' });
+  }
+});
+
+apiRouter.get('/hr/leaves', (req: Request, res: Response) => {
+  try {
+    const leaves = getLeaves({
+      employee_id: req.query.employee_id as string,
+      status: req.query.status as string
+    });
+    res.json(leaves);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch leaves' });
+  }
+});
+
+apiRouter.post('/hr/leaves', (req: Request, res: Response) => {
+  try {
+    const { employee_id, start_date, end_date, reason } = req.body;
+    if (!employee_id || !start_date || !end_date || !reason) {
+      return res.status(400).json({ error: 'Employee, start date, end date, and reason are required' });
+    }
+    const result = applyLeave(req.body, req.body.performedBy || 'Employee');
+    res.status(201).json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to apply leave' });
+  }
+});
+
+apiRouter.put('/hr/leaves/:id/status', (req: Request, res: Response) => {
+  try {
+    const { status, remarks, approvedBy } = req.body;
+    if (!status || !['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Valid status (Approved or Rejected) is required' });
+    }
+    const result = updateLeaveStatus(req.params.id, status, remarks, approvedBy || 'Super Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update leave status' });
+  }
+});
+
+apiRouter.get('/hr/payroll', (req: Request, res: Response) => {
+  try {
+    const payroll = getPayroll({
+      month_year: req.query.month_year as string,
+      employee_id: req.query.employee_id as string
+    });
+    res.json(payroll);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch payroll' });
+  }
+});
+
+apiRouter.post('/hr/payroll/generate', (req: Request, res: Response) => {
+  try {
+    const { monthYear, performedBy } = req.body;
+    if (!monthYear) {
+      return res.status(400).json({ error: 'Month & Year (YYYY-MM) is required' });
+    }
+    const result = generateMonthlyPayroll(monthYear, performedBy || 'Super Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate payroll' });
+  }
+});
+
+apiRouter.put('/hr/payroll/:id/pay', (req: Request, res: Response) => {
+  try {
+    const { paymentMethod, remarks, performedBy } = req.body;
+    const result = markPayrollPaid(req.params.id, paymentMethod || 'Bank Transfer', remarks, performedBy || 'Super Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to mark payroll paid' });
+  }
+});
+
+// ==========================================
+// 14. FINANCE & ACCOUNTING MANAGEMENT
+// ==========================================
+apiRouter.get('/finance/overview', (req: Request, res: Response) => {
+  try {
+    const overview = getFinanceOverview({
+      month: req.query.month as string,
+      year: req.query.year as string
+    });
+    res.json(overview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch financial overview' });
+  }
+});
+
+apiRouter.get('/finance/transactions', (req: Request, res: Response) => {
+  try {
+    const transactions = getTransactions({
+      type: req.query.type as string,
+      category: req.query.category as string,
+      startDate: req.query.startDate as string,
+      endDate: req.query.endDate as string,
+      paymentMethod: req.query.paymentMethod as string,
+      limit: req.query.limit ? Number(req.query.limit) : undefined
+    });
+    res.json(transactions);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch transactions' });
+  }
+});
+
+apiRouter.post('/finance/transactions', (req: Request, res: Response) => {
+  try {
+    const { title, amount, type } = req.body;
+    if (!title || amount === undefined || !type) {
+      return res.status(400).json({ error: 'Title, amount, and type (INCOME/EXPENSE) are required' });
+    }
+    const txn = createTransaction(req.body, req.body.performedBy || 'Super Admin');
+    res.status(201).json(txn);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create transaction' });
+  }
+});
+
+apiRouter.put('/finance/transactions/:id', (req: Request, res: Response) => {
+  try {
+    const success = updateTransaction(req.params.id, req.body, req.body.performedBy || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Transaction not found' });
+    res.json({ success: true, message: 'Transaction updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update transaction' });
+  }
+});
+
+apiRouter.delete('/finance/transactions/:id', (req: Request, res: Response) => {
+  try {
+    const success = deleteTransaction(req.params.id, (req.query.performedBy as string) || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Transaction not found' });
+    res.json({ success: true, message: 'Transaction deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete transaction' });
+  }
+});
+
+apiRouter.get('/finance/invoices', (req: Request, res: Response) => {
+  try {
+    const invoices = getInvoices({
+      invoice_type: req.query.invoice_type as string,
+      status: req.query.status as string,
+      student_id: req.query.student_id as string,
+      university_id: req.query.university_id as string
+    });
+    res.json(invoices);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch invoices' });
+  }
+});
+
+apiRouter.post('/finance/invoices', (req: Request, res: Response) => {
+  try {
+    const { recipient_name, total_amount } = req.body;
+    if (!recipient_name || total_amount === undefined) {
+      return res.status(400).json({ error: 'Recipient name and total amount are required' });
+    }
+    const invoice = createInvoice(req.body, req.body.performedBy || 'Super Admin');
+    res.status(201).json(invoice);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create invoice' });
+  }
+});
+
+apiRouter.post('/finance/invoices/:id/pay', (req: Request, res: Response) => {
+  try {
+    const { amount, paymentMethod, referenceNumber, performedBy } = req.body;
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'Payment amount must be greater than 0' });
+    }
+    const result = recordInvoicePayment(req.params.id, Number(amount), paymentMethod || 'Bank Transfer', referenceNumber, performedBy || 'Super Admin');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to record invoice payment' });
+  }
+});
+
+apiRouter.get('/finance/university-commissions', (req: Request, res: Response) => {
+  try {
+    const commissions = getUniversityCommissionsSummary();
+    res.json(commissions);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch university commissions' });
+  }
 });

@@ -373,4 +373,143 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ leads, previewOnly, performedBy }),
     }),
+
+  // Lead Routing Rules & Distribution Engine
+  getRoutingRules: () => fetchJson<any[]>('/lead-routing/rules'),
+  createRoutingRule: (data: any) =>
+    fetchJson<any>('/lead-routing/rules', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateRoutingRule: (id: string, data: any) =>
+    fetchJson<any>(`/lead-routing/rules/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteRoutingRule: (id: string) =>
+    fetchJson<any>(`/lead-routing/rules/${id}`, {
+      method: 'DELETE',
+    }),
+  distributeUnassignedLeads: (performedBy?: string) =>
+    fetchJson<any>('/lead-routing/distribute-unassigned', {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
+  simulateLeadRouting: (data: { preferred_course?: string; preferred_university?: string; city?: string }) =>
+    fetchJson<any>('/lead-routing/simulate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // HR Solution
+  getEmployees: () => fetchJson<any[]>('/hr/employees'),
+  createEmployee: (data: any) =>
+    fetchJson<any>('/hr/employees', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateEmployee: (id: string, data: any) =>
+    fetchJson<any>(`/hr/employees/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteEmployee: (id: string) =>
+    fetchJson<any>(`/hr/employees/${id}`, {
+      method: 'DELETE',
+    }),
+  getAttendance: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any[]>(`/hr/attendance?${query.toString()}`);
+  },
+  recordAttendance: (data: any) =>
+    fetchJson<any>('/hr/attendance', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getLeaves: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any[]>(`/hr/leaves?${query.toString()}`);
+  },
+  applyLeave: (data: any) =>
+    fetchJson<any>('/hr/leaves', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateLeaveStatus: (id: string, status: 'Approved' | 'Rejected', remarks?: string) =>
+    fetchJson<any>(`/hr/leaves/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, remarks }),
+    }),
+  getPayroll: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any[]>(`/hr/payroll?${query.toString()}`);
+  },
+  generatePayroll: (monthYear: string) =>
+    fetchJson<any>('/hr/payroll/generate', {
+      method: 'POST',
+      body: JSON.stringify({ monthYear }),
+    }),
+  payPayroll: (id: string, data: any) =>
+    fetchJson<any>(`/hr/payroll/${id}/pay`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // Finance Management
+  getFinanceOverview: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any>(`/finance/overview?${query.toString()}`);
+  },
+  getFinanceTransactions: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any[]>(`/finance/transactions?${query.toString()}`);
+  },
+  createFinanceTransaction: (data: any) =>
+    fetchJson<any>('/finance/transactions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateFinanceTransaction: (id: string, data: any) =>
+    fetchJson<any>(`/finance/transactions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteFinanceTransaction: (id: string) =>
+    fetchJson<any>(`/finance/transactions/${id}`, {
+      method: 'DELETE',
+    }),
+  getFinanceInvoices: (params: Record<string, any> = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    return fetchJson<any[]>(`/finance/invoices?${query.toString()}`);
+  },
+  createFinanceInvoice: (data: any) =>
+    fetchJson<any>('/finance/invoices', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  recordInvoicePayment: (invoiceId: string, data: { amount: number; paymentMethod?: string; referenceNumber?: string }) =>
+    fetchJson<any>(`/finance/invoices/${invoiceId}/pay`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getUniversityCommissions: () =>
+    fetchJson<any[]>('/finance/university-commissions'),
 };

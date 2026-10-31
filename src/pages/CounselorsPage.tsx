@@ -17,17 +17,24 @@ import {
   UserCheck,
   ShieldCheck,
   TrendingUp,
-  Percent
+  Percent,
+  CheckSquare,
+  Square,
+  Sliders,
+  GraduationCap,
+  Building2,
+  Sparkles,
+  Lock
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Counselor } from '../types';
+import { Counselor, FEATURE_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, FeaturePermission } from '../types';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 
 export const CounselorsPage: React.FC = () => {
   const { addToast } = useNotifications();
-  const { currentRole } = useAuth();
-  const isAdmin = currentRole === 'Super Admin' || currentRole === 'Admin';
+  const { currentRole, isSuperAdmin } = useAuth();
+  const isAdmin = isSuperAdmin || currentRole === 'Super Admin' || currentRole === 'Admin';
 
   const [counselors, setCounselors] = useState<Counselor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,6 +59,14 @@ export const CounselorsPage: React.FC = () => {
   const [formCities, setFormCities] = useState('Kathmandu, Janakpur');
   const [formStatus, setFormStatus] = useState('Active');
 
+  // Lead Routing & Specialization Form States
+  const [formCourses, setFormCourses] = useState('B.Tech, MBBS, MBA, BCA, BBA');
+  const [formUniversities, setFormUniversities] = useState('');
+  const [formDailyQuota, setFormDailyQuota] = useState('25');
+
+  // Granular Feature Permissions Matrix State
+  const [formPermissions, setFormPermissions] = useState<string[]>(DEFAULT_ROLE_PERMISSIONS['Counselor'] || []);
+
   // Password Reset state
   const [newPassword, setNewPassword] = useState('');
 
@@ -74,6 +89,28 @@ export const CounselorsPage: React.FC = () => {
     fetchCounselors();
   }, []);
 
+  const handleRoleChange = (newRole: any) => {
+    setFormRole(newRole);
+    // Auto-populate default permissions for this role, superadmin can customize further
+    const defaultPerms = DEFAULT_ROLE_PERMISSIONS[newRole] || DEFAULT_ROLE_PERMISSIONS['Counselor'] || [];
+    setFormPermissions(defaultPerms);
+  };
+
+  const togglePermission = (permId: string) => {
+    setFormPermissions(prev =>
+      prev.includes(permId) ? prev.filter(p => p !== permId) : [...prev, permId]
+    );
+  };
+
+  const selectAllPermissions = () => {
+    setFormPermissions(FEATURE_PERMISSIONS.map(p => p.id));
+  };
+
+  const resetPermissionsToRoleDefault = () => {
+    const defaultPerms = DEFAULT_ROLE_PERMISSIONS[formRole] || [];
+    setFormPermissions(defaultPerms);
+  };
+
   const handleToggleActive = async (id: string, currentStatus: number, cName: string) => {
     try {
       await api.toggleCounselorActive(id, 'Admin');
@@ -93,6 +130,10 @@ export const CounselorsPage: React.FC = () => {
     setFormCapacity('100');
     setFormPassword('counselor123');
     setFormCities('Kathmandu, Birgunj');
+    setFormCourses('B.Tech, MBBS, MBA, BCA, BBA');
+    setFormUniversities('Sharda University, Chandigarh University');
+    setFormDailyQuota('25');
+    setFormPermissions(DEFAULT_ROLE_PERMISSIONS['Counselor'] || []);
     setAddModalOpen(true);
   };
 
@@ -101,6 +142,9 @@ export const CounselorsPage: React.FC = () => {
     if (!formName || !formEmail || !formPhone) return;
     try {
       const citiesArray = formCities.split(',').map((c) => c.trim()).filter(Boolean);
+      const coursesArray = formCourses.split(',').map((c) => c.trim()).filter(Boolean);
+      const unisArray = formUniversities.split(',').map((u) => u.trim()).filter(Boolean);
+
       await api.createCounselor({
         name: formName,
         email: formEmail,
@@ -110,8 +154,12 @@ export const CounselorsPage: React.FC = () => {
         assigned_cities: citiesArray,
         max_capacity: parseInt(formCapacity, 10) || 100,
         password: formPassword || 'counselor123',
+        permissions: formPermissions,
+        specialization_courses: coursesArray,
+        specialization_universities: unisArray,
+        daily_lead_quota: parseInt(formDailyQuota, 10) || 25,
       });
-      addToast(`${formRole} ${formName} added with login credentials!`, 'success');
+      addToast(`${formRole} ${formName} created with ${formPermissions.length} feature permissions!`, 'success');
       setAddModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
@@ -124,16 +172,63 @@ export const CounselorsPage: React.FC = () => {
     setFormName(c.name);
     setFormEmail(c.email);
     setFormPhone(c.phone);
-    setFormRole((c.role as any) || 'Counselor');
+    const roleVal = (c.role as any) || 'Counselor';
+    setFormRole(roleVal);
     setFormSpec(c.specialization_country || 'Nepal & India');
     setFormCapacity(String(c.max_capacity || 100));
     setFormStatus(c.is_active === 1 ? 'Active' : 'Inactive');
+
     try {
-      const cities = JSON.parse(c.assigned_cities || '[]');
-      setFormCities(cities.join(', '));
+      const cities = typeof c.assigned_cities === 'string' ? JSON.parse(c.assigned_cities || '[]') : (c.assigned_cities || []);
+      setFormCities(Array.isArray(cities) ? cities.join(', ') : '');
     } catch {
       setFormCities('');
     }
+
+    // Parse Course Specializations
+    let coursesStr = '';
+    if (Array.isArray(c.specialization_courses)) {
+      coursesStr = c.specialization_courses.join(', ');
+    } else if (typeof c.specialization_courses === 'string') {
+      try {
+        const parsed = JSON.parse(c.specialization_courses);
+        coursesStr = Array.isArray(parsed) ? parsed.join(', ') : c.specialization_courses;
+      } catch {
+        coursesStr = c.specialization_courses || '';
+      }
+    }
+    setFormCourses(coursesStr);
+
+    // Parse University Specializations
+    let unisStr = '';
+    if (Array.isArray(c.specialization_universities)) {
+      unisStr = c.specialization_universities.join(', ');
+    } else if (typeof c.specialization_universities === 'string') {
+      try {
+        const parsed = JSON.parse(c.specialization_universities);
+        unisStr = Array.isArray(parsed) ? parsed.join(', ') : c.specialization_universities;
+      } catch {
+        unisStr = c.specialization_universities || '';
+      }
+    }
+    setFormUniversities(unisStr);
+    setFormDailyQuota(String(c.daily_lead_quota || 25));
+
+    // Parse Feature Permissions
+    let perms: string[] = [];
+    if (Array.isArray(c.permissions)) {
+      perms = c.permissions;
+    } else if (typeof c.permissions === 'string') {
+      try {
+        const parsed = JSON.parse(c.permissions);
+        perms = Array.isArray(parsed) ? parsed : [];
+      } catch {}
+    }
+    if (perms.length === 0) {
+      perms = DEFAULT_ROLE_PERMISSIONS[roleVal] || DEFAULT_ROLE_PERMISSIONS['Counselor'] || [];
+    }
+    setFormPermissions(perms);
+
     setEditModalOpen(true);
   };
 
@@ -142,6 +237,9 @@ export const CounselorsPage: React.FC = () => {
     if (!selectedCounselor) return;
     try {
       const citiesArray = formCities.split(',').map((c) => c.trim()).filter(Boolean);
+      const coursesArray = formCourses.split(',').map((c) => c.trim()).filter(Boolean);
+      const unisArray = formUniversities.split(',').map((u) => u.trim()).filter(Boolean);
+
       await api.updateCounselor(selectedCounselor.id, {
         name: formName,
         email: formEmail,
@@ -152,8 +250,12 @@ export const CounselorsPage: React.FC = () => {
         max_capacity: parseInt(formCapacity, 10) || 100,
         is_active: formStatus === 'Active' ? 1 : 0,
         status: formStatus,
+        permissions: formPermissions,
+        specialization_courses: coursesArray,
+        specialization_universities: unisArray,
+        daily_lead_quota: parseInt(formDailyQuota, 10) || 25,
       });
-      addToast(`Staff member ${formName} updated successfully`, 'success');
+      addToast(`Staff member ${formName} updated with ${formPermissions.length} permissions!`, 'success');
       setEditModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
@@ -337,8 +439,63 @@ export const CounselorsPage: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Specialization Courses & Daily Lead Quota */}
+                  {c.specialization_courses && (
+                    <div className="pt-1">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <GraduationCap className="w-3 h-3 text-purple-600" />
+                          <span>Course Focus</span>
+                        </span>
+                        {c.daily_lead_quota && (
+                          <span className="text-[10px] text-purple-700 font-bold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                            Quota: {c.daily_lead_quota}/day
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {(() => {
+                          let courses: string[] = [];
+                          if (Array.isArray(c.specialization_courses)) courses = c.specialization_courses;
+                          else {
+                            try {
+                              const parsed = JSON.parse(c.specialization_courses);
+                              courses = Array.isArray(parsed) ? parsed : [c.specialization_courses];
+                            } catch {
+                              courses = (c.specialization_courses || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+                            }
+                          }
+                          return courses.slice(0, 4).map((crs: string, i: number) => (
+                            <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100 font-medium">
+                              {crs}
+                            </span>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Feature Permissions Summary */}
+                  <div className="flex items-center justify-between text-[11px] pt-1 text-slate-500 border-t border-slate-100/60">
+                    <span className="flex items-center gap-1 text-slate-600 font-medium">
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                      <span>CRM Features:</span>
+                    </span>
+                    <span className="font-semibold text-slate-800 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                      {(() => {
+                        let count = 0;
+                        if (Array.isArray(c.permissions)) count = c.permissions.length;
+                        else if (typeof c.permissions === 'string') {
+                          try { count = JSON.parse(c.permissions).length; } catch {}
+                        }
+                        if (count === 0) count = (DEFAULT_ROLE_PERMISSIONS[c.role || 'Counselor'] || []).length;
+                        return `${count} of ${FEATURE_PERMISSIONS.length} Enabled`;
+                      })()}
+                    </span>
+                  </div>
+
                   {/* Performance Indicators */}
-                  <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="pt-2 border-t border-slate-100 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
                       <div className="text-[10px] text-slate-400 uppercase font-semibold">Leads</div>
                       <div className="font-bold text-slate-900 mt-0.5">
@@ -400,136 +557,276 @@ export const CounselorsPage: React.FC = () => {
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
           <form
             onSubmit={handleCreate}
-            className="w-full max-w-md bg-white rounded-2xl p-6 space-y-4 shadow-xl border border-slate-200"
+            className="w-full max-w-2xl bg-white rounded-2xl p-6 space-y-5 shadow-2xl border border-slate-200 my-8 max-h-[90vh] overflow-y-auto"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <UserPlus className="w-4 h-4 text-blue-600" />
-                Add New Staff Member / Login Account
-              </h3>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-blue-600" />
+                  Add New Staff Account &amp; Configure Permissions
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Super Admin has complete control over feature access, quotas, and specializations
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
-              <input
-                required
-                type="text"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="e.g. Suman Sharma"
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address (Login Username)</label>
-              <input
-                required
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="staff@educationsansar.com"
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Staff Role &amp; Access <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="Counselor">Counselor</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Marketing Manager">Marketing Manager</option>
-                  <option value="Telecaller">Telecaller</option>
-                  <option value="Management">Management</option>
-                </select>
+            {/* Section A: Basic Account & Credentials */}
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50/70 px-2.5 py-1 rounded-lg">
+                1. Account Credentials &amp; Basic Info
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Initial Password</label>
-                <input
-                  required
-                  type="text"
-                  value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
-                  placeholder="Min 4 chars"
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name *</label>
+                  <input
+                    required
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder="e.g. Suman Sharma"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Email / Username *</label>
+                  <input
+                    required
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="staff@educationsansar.com"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    System Role <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={formRole}
+                    onChange={(e) => handleRoleChange(e.target.value as any)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="Counselor">Counselor</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Marketing Manager">Marketing Manager</option>
+                    <option value="Telecaller">Telecaller</option>
+                    <option value="Management">Management</option>
+                    <option value="Accountant">Accountant</option>
+                    <option value="HR Manager">HR Manager</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Initial Password *</label>
+                  <input
+                    required
+                    type="text"
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                    placeholder="Min 4 chars"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Phone / WhatsApp *</label>
+                  <input
+                    required
+                    type="tel"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder="+977 9801..."
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Cities (Territory)</label>
+                  <input
+                    type="text"
+                    value={formCities}
+                    onChange={(e) => setFormCities(e.target.value)}
+                    placeholder="e.g. Kathmandu, Pokhara, Birgunj"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Country Specialization</label>
+                  <input
+                    type="text"
+                    value={formSpec}
+                    onChange={(e) => setFormSpec(e.target.value)}
+                    placeholder="Nepal & North India"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Phone / WhatsApp</label>
-                <input
-                  required
-                  type="tel"
-                  value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  placeholder="+977 9801..."
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
+            {/* Section B: Automated Lead Routing & Quotas */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50/70 px-2.5 py-1 rounded-lg flex items-center justify-between">
+                <span>2. Automated Lead Distribution Specializations</span>
+                <Sliders className="w-3.5 h-3.5 text-purple-600" />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Target Specialization</label>
-                <input
-                  type="text"
-                  value={formSpec}
-                  onChange={(e) => setFormSpec(e.target.value)}
-                  placeholder="Nepal & North India"
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Specialized Courses (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={formCourses}
+                    onChange={(e) => setFormCourses(e.target.value)}
+                    placeholder="e.g. B.Tech, MBBS, MBA, BCA, BBA, B.Sc Nursing"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Leads matching these courses auto-route to this counselor</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Partner Universities (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={formUniversities}
+                    onChange={(e) => setFormUniversities(e.target.value)}
+                    placeholder="e.g. Sharda, Chandigarh, Parul, Graphic Era"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Preferred universities for lead assignment</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Daily Lead Quota (Limit/day)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={formDailyQuota}
+                    onChange={(e) => setFormDailyQuota(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-0.5">Stops auto-routing new leads once reached today</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Max Total Active Capacity</label>
+                  <input
+                    type="number"
+                    value={formCapacity}
+                    onChange={(e) => setFormCapacity(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Cities (Comma-separated)</label>
-              <input
-                type="text"
-                value={formCities}
-                onChange={(e) => setFormCities(e.target.value)}
-                placeholder="e.g. Kathmandu, Pokhara, Birgunj"
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
+            {/* Section C: Granular Role & Feature Permissions Matrix */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>3. Granular Feature Permissions (Super Admin Control)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Super Admin can check or uncheck individual features to customize access for this staff member
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                    {formPermissions.length} / {FEATURE_PERMISSIONS.length} Granted
+                  </span>
+                  <button
+                    type="button"
+                    onClick={selectAllPermissions}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={resetPermissionsToRoleDefault}
+                    className="text-[11px] text-slate-600 hover:text-slate-800 font-semibold underline"
+                  >
+                    Reset to {formRole} Default
+                  </button>
+                </div>
+              </div>
+
+              {/* Categorized Permissions Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1 bg-slate-50/60 rounded-xl border border-slate-200/80">
+                {FEATURE_PERMISSIONS.map((perm) => {
+                  const isChecked = formPermissions.includes(perm.id);
+                  return (
+                    <div
+                      key={perm.id}
+                      onClick={() => togglePermission(perm.id)}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        isChecked
+                          ? 'bg-blue-50/70 border-blue-300 shadow-2xs'
+                          : 'bg-white border-slate-200 hover:border-slate-300 opacity-70'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="mt-0.5 h-4 w-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={`text-xs font-bold leading-tight ${isChecked ? 'text-blue-900' : 'text-slate-700'}`}>
+                            {perm.name}
+                          </span>
+                          <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 bg-white px-1.5 py-0.5 rounded border border-slate-100">
+                            {perm.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{perm.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Max Lead Capacity</label>
-              <input
-                type="number"
-                value={formCapacity}
-                onChange={(e) => setFormCapacity(e.target.value)}
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setAddModalOpen(false)}
-                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-md shadow-blue-900/20"
               >
-                Create Staff Account
+                Create Staff Account with Permissions
               </button>
             </div>
           </form>
@@ -541,132 +838,265 @@ export const CounselorsPage: React.FC = () => {
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
           <form
             onSubmit={handleSaveEdit}
-            className="w-full max-w-md bg-white rounded-2xl p-6 space-y-4 shadow-xl border border-slate-200"
+            className="w-full max-w-2xl bg-white rounded-2xl p-6 space-y-5 shadow-2xl border border-slate-200 my-8 max-h-[90vh] overflow-y-auto"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-blue-600" />
-                Edit Staff Profile &amp; Role
-              </h3>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Edit2 className="w-5 h-5 text-blue-600" />
+                  Edit Staff Profile &amp; Granular Permissions
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Update role, assign specializations, and customize feature permissions for {selectedCounselor.name}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setEditModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
-              <input
-                required
-                type="text"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
-                <input
-                  required
-                  type="email"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Phone</label>
-                <input
-                  required
-                  type="tel"
-                  value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Account Role <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as any)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800"
-                >
-                  <option value="Counselor">Counselor</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Marketing Manager">Marketing Manager</option>
-                  <option value="Telecaller">Telecaller</option>
-                  <option value="Management">Management</option>
-                </select>
+            {/* Section A: Basic Info */}
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50/70 px-2.5 py-1 rounded-lg">
+                1. Account Details &amp; Status
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Workload Status</label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
-                >
-                  <option value="Active">Active (Accepting Leads)</option>
-                  <option value="Inactive">Inactive (Paused)</option>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Email (Login ID)</label>
+                  <input
+                    required
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Cities</label>
-              <input
-                type="text"
-                value={formCities}
-                onChange={(e) => setFormCities(e.target.value)}
-                placeholder="Comma separated"
-                className="w-full p-2 text-xs rounded-xl border border-slate-300"
-              />
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Account Role *</label>
+                  <select
+                    value={formRole}
+                    onChange={(e) => handleRoleChange(e.target.value as any)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800"
+                  >
+                    <option value="Counselor">Counselor</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Marketing Manager">Marketing Manager</option>
+                    <option value="Telecaller">Telecaller</option>
+                    <option value="Management">Management</option>
+                    <option value="Accountant">Accountant</option>
+                    <option value="HR Manager">HR Manager</option>
+                  </select>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Specialization</label>
-                <input
-                  type="text"
-                  value={formSpec}
-                  onChange={(e) => setFormSpec(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Lead Workload Status</label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
+                  >
+                    <option value="Active">Active (Accepting Leads)</option>
+                    <option value="Inactive">Inactive (Paused)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Phone</label>
+                  <input
+                    required
+                    type="tel"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Max Capacity</label>
-                <input
-                  type="number"
-                  value={formCapacity}
-                  onChange={(e) => setFormCapacity(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Cities</label>
+                  <input
+                    type="text"
+                    value={formCities}
+                    onChange={(e) => setFormCities(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Country Focus</label>
+                  <input
+                    type="text"
+                    value={formSpec}
+                    onChange={(e) => setFormSpec(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            {/* Section B: Automated Lead Routing & Quotas */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50/70 px-2.5 py-1 rounded-lg flex items-center justify-between">
+                <span>2. Automated Lead Distribution Specializations</span>
+                <Sliders className="w-3.5 h-3.5 text-purple-600" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Specialized Courses (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={formCourses}
+                    onChange={(e) => setFormCourses(e.target.value)}
+                    placeholder="e.g. B.Tech, MBBS, MBA, BCA, BBA, B.Sc Nursing"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Partner Universities (Comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={formUniversities}
+                    onChange={(e) => setFormUniversities(e.target.value)}
+                    placeholder="e.g. Sharda, Chandigarh, Parul, Graphic Era"
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Daily Lead Quota (Limit/day)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={formDailyQuota}
+                    onChange={(e) => setFormDailyQuota(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Max Active Capacity</label>
+                  <input
+                    type="number"
+                    value={formCapacity}
+                    onChange={(e) => setFormCapacity(e.target.value)}
+                    className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section C: Granular Role & Feature Permissions Matrix */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>3. Granular Feature Permissions (Super Admin Control)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Check or uncheck individual features to grant or deny access to this user
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                    {formPermissions.length} / {FEATURE_PERMISSIONS.length} Granted
+                  </span>
+                  <button
+                    type="button"
+                    onClick={selectAllPermissions}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold underline"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={resetPermissionsToRoleDefault}
+                    className="text-[11px] text-slate-600 hover:text-slate-800 font-semibold underline"
+                  >
+                    Reset to {formRole} Default
+                  </button>
+                </div>
+              </div>
+
+              {/* Categorized Permissions Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1 bg-slate-50/60 rounded-xl border border-slate-200/80">
+                {FEATURE_PERMISSIONS.map((perm) => {
+                  const isChecked = formPermissions.includes(perm.id);
+                  return (
+                    <div
+                      key={perm.id}
+                      onClick={() => togglePermission(perm.id)}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                        isChecked
+                          ? 'bg-blue-50/70 border-blue-300 shadow-2xs'
+                          : 'bg-white border-slate-200 hover:border-slate-300 opacity-70'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}}
+                        className="mt-0.5 h-4 w-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={`text-xs font-bold leading-tight ${isChecked ? 'text-blue-900' : 'text-slate-700'}`}>
+                            {perm.name}
+                          </span>
+                          <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 bg-white px-1.5 py-0.5 rounded border border-slate-100">
+                            {perm.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{perm.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setEditModalOpen(false)}
-                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-md shadow-blue-900/20"
               >
-                Update Profile &amp; Role
+                Save Profile &amp; Permissions
               </button>
             </div>
           </form>

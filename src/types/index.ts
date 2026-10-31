@@ -90,6 +90,7 @@ export interface User {
   phone?: string;
   avatar_url?: string;
   is_active: number;
+  permissions?: string[];
 }
 
 export interface Counselor {
@@ -110,6 +111,11 @@ export interface Counselor {
   total_assigned_leads: number;
   total_admissions: number;
   conversion_rate: number;
+  permissions?: string[];
+  specialization_courses?: string[] | string;
+  specialization_universities?: string[] | string;
+  daily_lead_quota?: number;
+  leads_assigned_today?: number;
   created_at: string;
   updated_at: string;
 }
@@ -466,3 +472,244 @@ export interface DashboardKPIData {
     conversion_rate: number;
   }[];
 }
+
+// ==========================================
+// FEATURE PERMISSIONS CATALOG
+// ==========================================
+export interface FeaturePermission {
+  id: string;
+  name: string;
+  category: 'Core' | 'Leads' | 'Admissions' | 'Academics' | 'Marketing' | 'Team & Operations' | 'Admin';
+  description: string;
+}
+
+export const FEATURE_PERMISSIONS: FeaturePermission[] = [
+  { id: 'dashboard', name: 'Dashboard Analytics', category: 'Core', description: 'View KPIs, conversion rates, and performance charts' },
+  { id: 'leads_view', name: 'View Leads', category: 'Leads', description: 'Access leads directory and student contact cards' },
+  { id: 'leads_create', name: 'Add & Import Leads', category: 'Leads', description: 'Create leads manually, upload CSV, or sync Google Sheets' },
+  { id: 'leads_edit', name: 'Edit & Follow-up', category: 'Leads', description: 'Update status, schedule follow-ups, and log calls' },
+  { id: 'leads_delete', name: 'Delete Leads', category: 'Leads', description: 'Remove or archive student inquiries' },
+  { id: 'lead_distribution', name: 'Lead Distribution Engine', category: 'Leads', description: 'Configure course/university routing rules and batch distribute' },
+  { id: 'pipeline', name: 'Admission Pipeline', category: 'Admissions', description: 'Manage Kanban stages from inquiry to enrolled' },
+  { id: 'applications', name: 'Applications Management', category: 'Admissions', description: 'Submit and track university admissions' },
+  { id: 'students', name: 'Enrolled Students', category: 'Admissions', description: 'Manage converted students and tuition fee records' },
+  { id: 'universities', name: 'Universities & Courses', category: 'Academics', description: 'Browse partner universities, courses, and fee structures' },
+  { id: 'counselors_manage', name: 'Counselors & Staff Logins', category: 'Team & Operations', description: 'Add/edit staff accounts, roles, and feature permissions' },
+  { id: 'hr_management', name: 'HR & Staff Directory', category: 'Team & Operations', description: 'Employee records, daily attendance, leaves, and payroll' },
+  { id: 'finance_management', name: 'Finance & Accounts', category: 'Team & Operations', description: 'Student fee invoicing, university commissions, and expenses' },
+  { id: 'campaigns', name: 'Marketing Campaigns', category: 'Marketing', description: 'Track Meta ads, Google ads, and lead acquisition costs' },
+  { id: 'reports', name: 'Reports & Export', category: 'Marketing', description: 'Export Excel reports, counselor KPIs, and ROI metrics' },
+  { id: 'documents', name: 'Document Vault', category: 'Operations' as any, description: 'Upload, inspect, and verify student marksheets and passports' },
+  { id: 'integrations', name: 'Integrations', category: 'Admin', description: 'Google Sheets live sync, Meta Ads webhook, WhatsApp API' },
+  { id: 'settings', name: 'System Settings', category: 'Admin', description: 'Configure global CRM settings and view audit trails' },
+];
+
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  'Super Admin': FEATURE_PERMISSIONS.map(p => p.id),
+  'Admin': [
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'leads_delete', 'lead_distribution',
+    'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'hr_management',
+    'finance_management', 'campaigns', 'reports', 'documents'
+  ],
+  'Counselor': [
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline',
+    'applications', 'students', 'universities', 'documents'
+  ],
+  'Telecaller': [
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'documents'
+  ],
+  'Marketing Manager': [
+    'dashboard', 'leads_view', 'leads_create', 'campaigns', 'reports', 'integrations'
+  ],
+  'Management': [
+    'dashboard', 'leads_view', 'pipeline', 'applications', 'students',
+    'universities', 'reports', 'finance_management', 'hr_management'
+  ],
+  'Accountant': [
+    'dashboard', 'students', 'finance_management', 'hr_management', 'reports'
+  ],
+  'HR Manager': [
+    'dashboard', 'counselors_manage', 'hr_management'
+  ],
+};
+
+// ==========================================
+// LEAD DISTRIBUTION ENGINE TYPES
+// ==========================================
+export interface LeadRoutingRule {
+  id: string;
+  name: string;
+  course_keywords: string[];
+  university_keywords: string[];
+  target_cities: string[];
+  counselor_id: string;
+  counselor_name: string;
+  priority: number;
+  max_daily_leads: number;
+  is_active: number;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ==========================================
+// HR SOLUTION TYPES
+// ==========================================
+export interface Employee {
+  id: string;
+  employee_code: string;
+  user_id?: string | null;
+  counselor_id?: string | null;
+  full_name: string;
+  email: string;
+  phone: string;
+  department: string;
+  designation: string;
+  employment_type: string;
+  joining_date: string;
+  monthly_salary: number;
+  currency: string;
+  bank_name?: string | null;
+  account_number?: string | null;
+  pan_number?: string | null;
+  emergency_contact?: string | null;
+  status: string;
+  linked_counselor_name?: string;
+  linked_user_role?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string;
+  department?: string;
+  designation?: string;
+  date: string;
+  status: 'Present' | 'Absent' | 'Half Day' | 'On Leave' | 'Holiday';
+  check_in_time?: string;
+  check_out_time?: string;
+  work_mode: 'Office' | 'Remote' | 'Field Work';
+  notes?: string;
+  created_at?: string;
+}
+
+export interface LeaveRequest {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string;
+  department?: string;
+  leave_type: 'Casual Leave' | 'Sick Leave' | 'Paid Leave' | 'Unpaid Leave';
+  start_date: string;
+  end_date: string;
+  days_count: number;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  approved_by?: string;
+  approval_remarks?: string;
+  applied_at: string;
+  updated_at?: string;
+}
+
+export interface PayrollRecord {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string;
+  department?: string;
+  designation?: string;
+  bank_name?: string;
+  account_number?: string;
+  month_year: string;
+  base_salary: number;
+  incentives_bonus: number;
+  deductions: number;
+  net_salary: number;
+  currency: string;
+  payment_status: 'Pending' | 'Paid';
+  payment_date?: string;
+  payment_method?: string;
+  remarks?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ==========================================
+// FINANCE MANAGEMENT TYPES
+// ==========================================
+export interface FinanceTransaction {
+  id: string;
+  transaction_id: string;
+  type: 'INCOME' | 'EXPENSE';
+  category: string;
+  title: string;
+  amount: number;
+  currency: string;
+  transaction_date: string;
+  payment_method: string;
+  reference_number?: string | null;
+  student_id?: string | null;
+  student_name?: string | null;
+  university_id?: string | null;
+  university_name?: string | null;
+  status: string;
+  notes?: string | null;
+  recorded_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FinanceInvoiceItem {
+  description: string;
+  qty: number;
+  unit_price: number;
+  amount: number;
+}
+
+export interface FinanceInvoice {
+  id: string;
+  invoice_number: string;
+  invoice_type: 'STUDENT_FEE' | 'UNIVERSITY_COMMISSION';
+  recipient_name: string;
+  recipient_email?: string | null;
+  recipient_phone?: string | null;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  currency: string;
+  due_date: string;
+  status: 'Draft' | 'Sent' | 'Partial' | 'Paid' | 'Overdue' | 'Cancelled';
+  items: FinanceInvoiceItem[];
+  notes?: string | null;
+  student_id?: string | null;
+  university_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FinanceOverviewData {
+  totalIncome: number;
+  totalExpense: number;
+  netProfit: number;
+  profitMargin: number;
+  totalStudentFeeDue: number;
+  totalUniCommissionDue: number;
+  incomeBreakdown: { category: string; amount: number; count: number }[];
+  expenseBreakdown: { category: string; amount: number; count: number }[];
+  currency: string;
+}
+
+export interface UniversityCommissionSummary {
+  university_id: string;
+  university_name: string;
+  total_enrolled_students: number;
+  estimated_commission: number;
+  invoiced_amount: number;
+  received_amount: number;
+  pending_amount: number;
+  settlement_status: 'SETTLED' | 'PARTIAL' | 'PENDING';
+}
+

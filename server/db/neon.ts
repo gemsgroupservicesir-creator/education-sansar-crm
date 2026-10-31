@@ -53,12 +53,16 @@ export async function persistUserToNeon(user: {
   phone?: string | null;
   avatar_url?: string | null;
   is_active?: number;
+  permissions?: string | string[] | null;
 }): Promise<boolean> {
   if (!sql) return false;
   try {
+    const permsJson = typeof user.permissions === 'string' 
+      ? user.permissions 
+      : JSON.stringify(user.permissions || []);
     await sql.query(`
-      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         email = EXCLUDED.email,
@@ -67,6 +71,7 @@ export async function persistUserToNeon(user: {
         phone = EXCLUDED.phone,
         avatar_url = EXCLUDED.avatar_url,
         is_active = EXCLUDED.is_active,
+        permissions = EXCLUDED.permissions,
         updated_at = NOW()
     `, [
       user.id,
@@ -76,7 +81,8 @@ export async function persistUserToNeon(user: {
       user.role,
       user.phone || null,
       user.avatar_url || null,
-      user.is_active !== undefined ? user.is_active : 1
+      user.is_active !== undefined ? user.is_active : 1,
+      permsJson
     ]);
     return true;
   } catch (err: any) {
@@ -91,13 +97,21 @@ export async function persistUserToNeon(user: {
 export async function persistCounselorToNeon(counselor: any): Promise<boolean> {
   if (!sql) return false;
   try {
+    const specCourses = typeof counselor.specialization_courses === 'string'
+      ? counselor.specialization_courses
+      : JSON.stringify(counselor.specialization_courses || []);
+    const specUnis = typeof counselor.specialization_universities === 'string'
+      ? counselor.specialization_universities
+      : JSON.stringify(counselor.specialization_universities || []);
+
     await sql.query(`
       INSERT INTO counselors (
         id, user_id, name, email, phone, specialization_country, assigned_cities,
         is_active, max_capacity, current_active_leads, total_assigned_leads,
-        total_admissions, conversion_rate, username, joining_date, status, updated_at
+        total_admissions, conversion_rate, username, joining_date, status,
+        specialization_courses, specialization_universities, daily_lead_quota, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
@@ -113,6 +127,9 @@ export async function persistCounselorToNeon(counselor: any): Promise<boolean> {
         conversion_rate = EXCLUDED.conversion_rate,
         username = EXCLUDED.username,
         status = EXCLUDED.status,
+        specialization_courses = EXCLUDED.specialization_courses,
+        specialization_universities = EXCLUDED.specialization_universities,
+        daily_lead_quota = EXCLUDED.daily_lead_quota,
         updated_at = NOW()
     `, [
       counselor.id,
@@ -121,7 +138,7 @@ export async function persistCounselorToNeon(counselor: any): Promise<boolean> {
       counselor.email,
       counselor.phone,
       counselor.specialization_country || 'Nepal & India',
-      counselor.assigned_cities || '[]',
+      typeof counselor.assigned_cities === 'string' ? counselor.assigned_cities : JSON.stringify(counselor.assigned_cities || []),
       counselor.is_active !== undefined ? counselor.is_active : 1,
       counselor.max_capacity || 100,
       counselor.current_active_leads || 0,
@@ -130,7 +147,10 @@ export async function persistCounselorToNeon(counselor: any): Promise<boolean> {
       counselor.conversion_rate || 0.0,
       counselor.username || counselor.email.split('@')[0],
       counselor.joining_date || new Date().toISOString(),
-      counselor.status || 'Active'
+      counselor.status || 'Active',
+      specCourses,
+      specUnis,
+      counselor.daily_lead_quota || 25
     ]);
     return true;
   } catch (err: any) {
@@ -496,12 +516,26 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
   try {
     console.log('🔄 [Neon Sync] Synchronizing server-side data from Neon PostgreSQL to SQLite cache...');
 
+    // Ensure Neon PostgreSQL schema columns exist
+    try {
+      await sql.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS specialization_courses TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS specialization_universities TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS daily_lead_quota INTEGER DEFAULT 25;
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS leads_assigned_today INTEGER DEFAULT 0;
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS last_assigned_date TEXT;
+      `);
+    } catch (migrErr: any) {
+      // Columns may already exist
+    }
+
     // 1. Sync Users
     const users = await sql.query('SELECT * FROM users');
     if (users && users.length > 0) {
       const upsertUser = db.prepare(`
-        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
           name = excluded.name,
           email = excluded.email,
@@ -510,12 +544,14 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           phone = excluded.phone,
           avatar_url = excluded.avatar_url,
           is_active = excluded.is_active,
+          permissions = COALESCE(excluded.permissions, users.permissions),
           updated_at = excluded.updated_at
       `);
       for (const u of users) {
         upsertUser.run(
           u.id, u.name, u.email, u.password_hash, u.role, u.phone, u.avatar_url,
-          u.is_active, String(u.created_at), String(u.updated_at)
+          u.is_active, u.permissions ? (typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions)) : '[]',
+          String(u.created_at), String(u.updated_at)
         );
       }
       console.log(`[Neon Sync] Synced ${users.length} users from Neon.`);
@@ -528,9 +564,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
         INSERT INTO counselors (
           id, user_id, name, email, phone, specialization_country, assigned_cities,
           is_active, max_capacity, current_active_leads, total_assigned_leads,
-          total_admissions, conversion_rate, username, joining_date, status, created_at, updated_at
+          total_admissions, conversion_rate, username, joining_date, status,
+          specialization_courses, specialization_universities, daily_lead_quota, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
           name = excluded.name,
           email = excluded.email,
@@ -538,6 +575,9 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           is_active = excluded.is_active,
           username = excluded.username,
           status = excluded.status,
+          specialization_courses = COALESCE(excluded.specialization_courses, counselors.specialization_courses),
+          specialization_universities = COALESCE(excluded.specialization_universities, counselors.specialization_universities),
+          daily_lead_quota = COALESCE(excluded.daily_lead_quota, counselors.daily_lead_quota),
           updated_at = excluded.updated_at
       `);
       for (const c of counselors) {
@@ -546,6 +586,9 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           typeof c.assigned_cities === 'string' ? c.assigned_cities : JSON.stringify(c.assigned_cities || []),
           c.is_active, c.max_capacity, c.current_active_leads, c.total_assigned_leads,
           c.total_admissions, Number(c.conversion_rate) || 0, c.username, c.joining_date, c.status,
+          c.specialization_courses ? (typeof c.specialization_courses === 'string' ? c.specialization_courses : JSON.stringify(c.specialization_courses)) : '[]',
+          c.specialization_universities ? (typeof c.specialization_universities === 'string' ? c.specialization_universities : JSON.stringify(c.specialization_universities)) : '[]',
+          c.daily_lead_quota || 25,
           String(c.created_at), String(c.updated_at)
         );
       }

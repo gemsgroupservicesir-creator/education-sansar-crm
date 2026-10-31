@@ -82,87 +82,31 @@ export function checkDuplicate(params: {
   };
 }
 
-// Automatic counselor assignment engine
+import { distributeLead } from './leadDistributionEngine.ts';
+
+// Automatic counselor assignment engine powered by Course & University Distribution Engine
 export function assignCounselor(lead: {
   city?: string;
   preferred_university?: string;
   preferred_course?: string;
   country?: string;
 }): { counselorId: string; counselorName: string; method: string } | null {
-  // Check assignment mode from settings
-  const modeSetting = db.prepare("SELECT value FROM settings WHERE key = 'assignment_mode'").get() as { value: string } | undefined;
-  const assignmentMode = modeSetting?.value || 'Round Robin';
+  const route = distributeLead({
+    city: lead.city,
+    preferred_university: lead.preferred_university,
+    preferred_course: lead.preferred_course,
+    country: lead.country
+  });
 
-  // Fetch active counselors
-  const activeCounselors = db.prepare(`
-    SELECT * FROM counselors 
-    WHERE is_active = 1 AND current_active_leads < max_capacity
-    ORDER BY current_active_leads ASC, total_assigned_leads ASC
-  `).all() as Counselor[];
-
-  if (activeCounselors.length === 0) {
-    return null;
+  if (route) {
+    return {
+      counselorId: route.counselorId,
+      counselorName: route.counselorName,
+      method: route.method
+    };
   }
 
-  // 1. City Based Matching
-  if (assignmentMode === 'City Based' && lead.city) {
-    for (const c of activeCounselors) {
-      try {
-        const cities: string[] = JSON.parse(c.assigned_cities || '[]');
-        if (cities.some(city => city.toLowerCase() === lead.city?.toLowerCase())) {
-          return { counselorId: c.id, counselorName: c.name, method: 'City Based' };
-        }
-      } catch (e) {
-        // fallback
-      }
-    }
-  }
-
-  // 2. University Based Matching
-  if (assignmentMode === 'University Based' && lead.preferred_university) {
-    // Specific counselor specializations
-    if (lead.preferred_university.includes('SRM')) {
-      const match = activeCounselors.find(c => c.name.includes('Aarav') || c.name.includes('Ananya'));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: 'University Based' };
-    }
-    if (lead.preferred_university.includes('VIT')) {
-      const match = activeCounselors.find(c => c.name.includes('Priya') || c.name.includes('Ananya'));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: 'University Based' };
-    }
-    if (lead.preferred_university.includes('Symbiosis') || lead.preferred_university.includes('NMIMS')) {
-      const match = activeCounselors.find(c => c.name.includes('Sneha') || c.name.includes('Priya'));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: 'University Based' };
-    }
-  }
-
-  // 3. Course Based Matching
-  if (assignmentMode === 'Course Based' && lead.preferred_course) {
-    if (lead.preferred_course.includes('Nursing') || lead.preferred_course.includes('MBBS') || lead.preferred_course.includes('BDS')) {
-      const match = activeCounselors.find(c => c.name.includes('Bibek') || c.name.includes('Roshan'));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: 'Course Based' };
-    }
-    if (lead.preferred_course.includes('MBA') || lead.preferred_course.includes('BBA')) {
-      const match = activeCounselors.find(c => c.name.includes('Sneha') || c.name.includes('Priya'));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: 'Course Based' };
-    }
-  }
-
-  // 4. Default / Round Robin
-  const pointerSetting = db.prepare("SELECT value FROM settings WHERE key = 'round_robin_pointer'").get() as { value: string } | undefined;
-  let pointer = parseInt(pointerSetting?.value || '0', 10);
-  if (isNaN(pointer) || pointer >= activeCounselors.length) {
-    pointer = 0;
-  }
-
-  const selected = activeCounselors[pointer];
-  const nextPointer = (pointer + 1) % activeCounselors.length;
-  db.prepare("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'round_robin_pointer'").run(nextPointer.toString());
-
-  return {
-    counselorId: selected.id,
-    counselorName: selected.name,
-    method: 'Round Robin'
-  };
+  return null;
 }
 
 // Generate new Lead ID ES-YYYY-XXXX

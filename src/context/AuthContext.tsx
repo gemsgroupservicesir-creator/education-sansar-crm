@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, UserRole } from '../types';
+import { User, UserRole, DEFAULT_ROLE_PERMISSIONS } from '../types';
 import { api } from '../services/api';
 
 interface AuthContextType {
@@ -11,6 +11,7 @@ interface AuthContextType {
   register: (data: { name: string; email: string; password: string; role?: UserRole; phone?: string }) => Promise<User>;
   loginWithRole: (role: UserRole) => Promise<User>;
   logout: () => void;
+  hasPermission: (permissionId: string) => boolean;
   canManageUsers: boolean;
   canManageIntegrations: boolean;
   canDeleteLeads: boolean;
@@ -119,12 +120,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isAuthenticated = Boolean(user);
   const isSuperAdmin = currentRole === 'Super Admin' || user?.role === 'Super Admin' || user?.email === 'admin@educationsansar.com';
-  const canManageUsers = isSuperAdmin;
-  const canManageIntegrations = isSuperAdmin;
-  const canDeleteLeads = isSuperAdmin || currentRole === 'Admin';
-  const canAssignCounselor = isSuperAdmin || currentRole === 'Admin';
-  const canManageCampaigns = isSuperAdmin || currentRole === 'Admin' || currentRole === 'Marketing Manager';
-  const canEditSettings = isSuperAdmin;
+  
+  const hasPermission = (permissionId: string): boolean => {
+    if (isSuperAdmin) return true;
+
+    // Check custom permissions assigned to user
+    if (user?.permissions && Array.isArray(user.permissions)) {
+      return user.permissions.includes(permissionId);
+    } else if (typeof user?.permissions === 'string') {
+      try {
+        const perms: string[] = JSON.parse(user.permissions);
+        return perms.includes(permissionId);
+      } catch (e) {}
+    }
+
+    // Fallback to role defaults
+    const rolePerms = DEFAULT_ROLE_PERMISSIONS[currentRole] || DEFAULT_ROLE_PERMISSIONS[user?.role || 'Counselor'];
+    return rolePerms?.includes(permissionId) ?? false;
+  };
+
+  const canManageUsers = isSuperAdmin || hasPermission('counselors_manage');
+  const canManageIntegrations = isSuperAdmin || hasPermission('integrations');
+  const canDeleteLeads = isSuperAdmin || hasPermission('leads_delete');
+  const canAssignCounselor = isSuperAdmin || hasPermission('lead_distribution');
+  const canManageCampaigns = isSuperAdmin || hasPermission('campaigns');
+  const canEditSettings = isSuperAdmin || hasPermission('settings');
   const isReadOnly = currentRole === 'Management';
 
   return (
@@ -138,6 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         loginWithRole,
         logout,
+        hasPermission,
         canManageUsers,
         canManageIntegrations,
         canDeleteLeads,

@@ -517,6 +517,145 @@ CREATE TABLE IF NOT EXISTS deleted_records (
 CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
 CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
 
+-- 26. Automated Lead Distribution Rules (Course & University)
+CREATE TABLE IF NOT EXISTS lead_routing_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  course_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["B.Tech", "Engineering", "CSE"]
+  university_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["SRM", "VIT", "Chandigarh"]
+  target_cities TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Kathmandu", "Birgunj"]
+  counselor_id TEXT NOT NULL REFERENCES counselors(id) ON DELETE CASCADE,
+  counselor_name TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 1,
+  max_daily_leads INTEGER NOT NULL DEFAULT 20,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  description TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 27. HR Employees Directory
+CREATE TABLE IF NOT EXISTS hr_employees (
+  id TEXT PRIMARY KEY,
+  employee_code TEXT UNIQUE NOT NULL, -- e.g. EMP-001
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+  full_name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  phone TEXT NOT NULL,
+  department TEXT NOT NULL DEFAULT 'Counseling', -- 'Counseling', 'Marketing', 'Admissions', 'Finance', 'HR', 'Administration'
+  designation TEXT NOT NULL DEFAULT 'Education Counselor',
+  employment_type TEXT NOT NULL DEFAULT 'Full-Time', -- 'Full-Time', 'Part-Time', 'Contract', 'Intern'
+  joining_date TEXT NOT NULL DEFAULT (date('now')),
+  monthly_salary REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  bank_name TEXT,
+  account_number TEXT,
+  pan_number TEXT,
+  emergency_contact TEXT,
+  status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'On Leave', 'Resigned', 'Terminated'
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 28. HR Daily Attendance Register
+CREATE TABLE IF NOT EXISTS hr_attendance (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  date TEXT NOT NULL, -- YYYY-MM-DD
+  status TEXT NOT NULL DEFAULT 'Present', -- 'Present', 'Absent', 'Half Day', 'On Leave', 'Holiday'
+  check_in_time TEXT, -- HH:MM
+  check_out_time TEXT, -- HH:MM
+  work_mode TEXT NOT NULL DEFAULT 'Office', -- 'Office', 'Remote', 'Field Work'
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_attendance_date ON hr_attendance(employee_id, date);
+
+-- 29. HR Leave Applications & Approvals
+CREATE TABLE IF NOT EXISTS hr_leaves (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  leave_type TEXT NOT NULL DEFAULT 'Casual Leave', -- 'Casual Leave', 'Sick Leave', 'Paid Leave', 'Unpaid Leave'
+  start_date TEXT NOT NULL, -- YYYY-MM-DD
+  end_date TEXT NOT NULL, -- YYYY-MM-DD
+  days_count REAL NOT NULL DEFAULT 1.0,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Pending', -- 'Pending', 'Approved', 'Rejected'
+  approved_by TEXT,
+  approval_remarks TEXT,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 30. HR Monthly Payroll & Salary Slips
+CREATE TABLE IF NOT EXISTS hr_payroll (
+  id TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+  employee_name TEXT NOT NULL,
+  month_year TEXT NOT NULL, -- YYYY-MM
+  base_salary REAL NOT NULL DEFAULT 0.0,
+  incentives_bonus REAL NOT NULL DEFAULT 0.0, -- e.g. admission performance commission
+  deductions REAL NOT NULL DEFAULT 0.0,
+  net_salary REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  payment_status TEXT NOT NULL DEFAULT 'Pending', -- 'Pending', 'Paid'
+  payment_date TEXT,
+  payment_method TEXT DEFAULT 'Bank Transfer', -- 'Bank Transfer', 'Cash', 'Cheque'
+  remarks TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emp_payroll_month ON hr_payroll(employee_id, month_year);
+
+-- 31. Finance Transactions & General Ledger
+CREATE TABLE IF NOT EXISTS finance_transactions (
+  id TEXT PRIMARY KEY,
+  transaction_id TEXT UNIQUE NOT NULL, -- TXN-2026-XXXX
+  type TEXT NOT NULL, -- 'INCOME', 'EXPENSE'
+  category TEXT NOT NULL, -- Income: 'Student Fee', 'University Commission', 'Consultancy Fee', 'Processing Fee'
+                          -- Expense: 'Digital Ads (Meta/Google)', 'Office Rent', 'Salaries & Payroll', 'Event & Fair Expenses', 'Software & Tech', 'Utilities', 'Travel', 'Other'
+  title TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  transaction_date TEXT NOT NULL DEFAULT (date('now')),
+  payment_method TEXT NOT NULL DEFAULT 'Bank Transfer', -- 'Bank Transfer', 'eSewa', 'Khalti', 'ConnectIPS', 'Cash', 'Cheque'
+  reference_number TEXT,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  student_name TEXT,
+  university_id TEXT REFERENCES universities(id) ON DELETE SET NULL,
+  university_name TEXT,
+  status TEXT NOT NULL DEFAULT 'Completed', -- 'Completed', 'Pending', 'Failed'
+  notes TEXT,
+  recorded_by TEXT DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 32. Student & University Invoices
+CREATE TABLE IF NOT EXISTS finance_invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT UNIQUE NOT NULL, -- INV-2026-XXXX
+  invoice_type TEXT NOT NULL DEFAULT 'STUDENT_FEE', -- 'STUDENT_FEE', 'UNIVERSITY_COMMISSION'
+  recipient_name TEXT NOT NULL,
+  recipient_email TEXT,
+  recipient_phone TEXT,
+  total_amount REAL NOT NULL DEFAULT 0.0,
+  paid_amount REAL NOT NULL DEFAULT 0.0,
+  due_amount REAL NOT NULL DEFAULT 0.0,
+  currency TEXT NOT NULL DEFAULT 'NPR',
+  due_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Pending', -- 'Draft', 'Sent', 'Partial', 'Paid', 'Overdue', 'Cancelled'
+  items TEXT NOT NULL DEFAULT '[]', -- JSON array of items: [{ description, qty, unit_price, amount }]
+  notes TEXT,
+  student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
+  university_id TEXT REFERENCES universities(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);
@@ -570,9 +709,10 @@ async function findUserInNeon(identifier) {
 async function persistUserToNeon(user) {
   if (!sql) return false;
   try {
+    const permsJson = typeof user.permissions === "string" ? user.permissions : JSON.stringify(user.permissions || []);
     await sql.query(`
-      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         email = EXCLUDED.email,
@@ -581,6 +721,7 @@ async function persistUserToNeon(user) {
         phone = EXCLUDED.phone,
         avatar_url = EXCLUDED.avatar_url,
         is_active = EXCLUDED.is_active,
+        permissions = EXCLUDED.permissions,
         updated_at = NOW()
     `, [
       user.id,
@@ -590,7 +731,8 @@ async function persistUserToNeon(user) {
       user.role,
       user.phone || null,
       user.avatar_url || null,
-      user.is_active !== void 0 ? user.is_active : 1
+      user.is_active !== void 0 ? user.is_active : 1,
+      permsJson
     ]);
     return true;
   } catch (err) {
@@ -601,13 +743,16 @@ async function persistUserToNeon(user) {
 async function persistCounselorToNeon(counselor) {
   if (!sql) return false;
   try {
+    const specCourses = typeof counselor.specialization_courses === "string" ? counselor.specialization_courses : JSON.stringify(counselor.specialization_courses || []);
+    const specUnis = typeof counselor.specialization_universities === "string" ? counselor.specialization_universities : JSON.stringify(counselor.specialization_universities || []);
     await sql.query(`
       INSERT INTO counselors (
         id, user_id, name, email, phone, specialization_country, assigned_cities,
         is_active, max_capacity, current_active_leads, total_assigned_leads,
-        total_admissions, conversion_rate, username, joining_date, status, updated_at
+        total_admissions, conversion_rate, username, joining_date, status,
+        specialization_courses, specialization_universities, daily_lead_quota, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
       ON CONFLICT (id) DO UPDATE SET
         user_id = EXCLUDED.user_id,
         name = EXCLUDED.name,
@@ -623,6 +768,9 @@ async function persistCounselorToNeon(counselor) {
         conversion_rate = EXCLUDED.conversion_rate,
         username = EXCLUDED.username,
         status = EXCLUDED.status,
+        specialization_courses = EXCLUDED.specialization_courses,
+        specialization_universities = EXCLUDED.specialization_universities,
+        daily_lead_quota = EXCLUDED.daily_lead_quota,
         updated_at = NOW()
     `, [
       counselor.id,
@@ -631,7 +779,7 @@ async function persistCounselorToNeon(counselor) {
       counselor.email,
       counselor.phone,
       counselor.specialization_country || "Nepal & India",
-      counselor.assigned_cities || "[]",
+      typeof counselor.assigned_cities === "string" ? counselor.assigned_cities : JSON.stringify(counselor.assigned_cities || []),
       counselor.is_active !== void 0 ? counselor.is_active : 1,
       counselor.max_capacity || 100,
       counselor.current_active_leads || 0,
@@ -640,7 +788,10 @@ async function persistCounselorToNeon(counselor) {
       counselor.conversion_rate || 0,
       counselor.username || counselor.email.split("@")[0],
       counselor.joining_date || (/* @__PURE__ */ new Date()).toISOString(),
-      counselor.status || "Active"
+      counselor.status || "Active",
+      specCourses,
+      specUnis,
+      counselor.daily_lead_quota || 25
     ]);
     return true;
   } catch (err) {
@@ -903,11 +1054,22 @@ async function syncFromNeonToSQLite(db2) {
   if (!sql) return;
   try {
     console.log("\u{1F504} [Neon Sync] Synchronizing server-side data from Neon PostgreSQL to SQLite cache...");
+    try {
+      await sql.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS specialization_courses TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS specialization_universities TEXT DEFAULT '[]';
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS daily_lead_quota INTEGER DEFAULT 25;
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS leads_assigned_today INTEGER DEFAULT 0;
+        ALTER TABLE counselors ADD COLUMN IF NOT EXISTS last_assigned_date TEXT;
+      `);
+    } catch (migrErr) {
+    }
     const users = await sql.query("SELECT * FROM users");
     if (users && users.length > 0) {
       const upsertUser = db2.prepare(`
-        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
           name = excluded.name,
           email = excluded.email,
@@ -916,6 +1078,7 @@ async function syncFromNeonToSQLite(db2) {
           phone = excluded.phone,
           avatar_url = excluded.avatar_url,
           is_active = excluded.is_active,
+          permissions = COALESCE(excluded.permissions, users.permissions),
           updated_at = excluded.updated_at
       `);
       for (const u of users) {
@@ -928,6 +1091,7 @@ async function syncFromNeonToSQLite(db2) {
           u.phone,
           u.avatar_url,
           u.is_active,
+          u.permissions ? typeof u.permissions === "string" ? u.permissions : JSON.stringify(u.permissions) : "[]",
           String(u.created_at),
           String(u.updated_at)
         );
@@ -940,9 +1104,10 @@ async function syncFromNeonToSQLite(db2) {
         INSERT INTO counselors (
           id, user_id, name, email, phone, specialization_country, assigned_cities,
           is_active, max_capacity, current_active_leads, total_assigned_leads,
-          total_admissions, conversion_rate, username, joining_date, status, created_at, updated_at
+          total_admissions, conversion_rate, username, joining_date, status,
+          specialization_courses, specialization_universities, daily_lead_quota, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
           name = excluded.name,
           email = excluded.email,
@@ -950,6 +1115,9 @@ async function syncFromNeonToSQLite(db2) {
           is_active = excluded.is_active,
           username = excluded.username,
           status = excluded.status,
+          specialization_courses = COALESCE(excluded.specialization_courses, counselors.specialization_courses),
+          specialization_universities = COALESCE(excluded.specialization_universities, counselors.specialization_universities),
+          daily_lead_quota = COALESCE(excluded.daily_lead_quota, counselors.daily_lead_quota),
           updated_at = excluded.updated_at
       `);
       for (const c of counselors) {
@@ -970,6 +1138,9 @@ async function syncFromNeonToSQLite(db2) {
           c.username,
           c.joining_date,
           c.status,
+          c.specialization_courses ? typeof c.specialization_courses === "string" ? c.specialization_courses : JSON.stringify(c.specialization_courses) : "[]",
+          c.specialization_universities ? typeof c.specialization_universities === "string" ? c.specialization_universities : JSON.stringify(c.specialization_universities) : "[]",
+          c.daily_lead_quota || 25,
           String(c.created_at),
           String(c.updated_at)
         );
@@ -1221,6 +1392,7 @@ function runSafeMigrations() {
   addColumnIfNotExists("counselors", "username", "TEXT");
   addColumnIfNotExists("counselors", "joining_date", "TEXT");
   addColumnIfNotExists("counselors", "status", "TEXT NOT NULL DEFAULT 'Active'");
+  addColumnIfNotExists("counselors", "role", "TEXT NOT NULL DEFAULT 'Counselor'");
   addColumnIfNotExists("universities", "short_name", "TEXT");
   addColumnIfNotExists("universities", "description", "TEXT");
   addColumnIfNotExists("universities", "status", "TEXT NOT NULL DEFAULT 'Active'");
@@ -1247,6 +1419,13 @@ function runSafeMigrations() {
   addColumnIfNotExists("university_courses", "admission_process", "TEXT DEFAULT 'Direct Merit / Counseling'");
   addColumnIfNotExists("university_courses", "remarks", "TEXT");
   addColumnIfNotExists("university_courses", "is_active", "INTEGER DEFAULT 1");
+  addColumnIfNotExists("users", "permissions", "TEXT DEFAULT '[]'");
+  addColumnIfNotExists("roles", "permissions", "TEXT DEFAULT '[]'");
+  addColumnIfNotExists("counselors", "specialization_courses", "TEXT DEFAULT '[]'");
+  addColumnIfNotExists("counselors", "specialization_universities", "TEXT DEFAULT '[]'");
+  addColumnIfNotExists("counselors", "daily_lead_quota", "INTEGER DEFAULT 25");
+  addColumnIfNotExists("counselors", "leads_assigned_today", "INTEGER DEFAULT 0");
+  addColumnIfNotExists("counselors", "last_assigned_date", "TEXT");
 }
 function initDatabase() {
   try {
@@ -1370,6 +1549,391 @@ var init_database = __esm({
   }
 });
 
+// server/services/leadDistributionEngine.ts
+function parseKeywords(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map((k) => String(k).trim()).filter(Boolean);
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed.map((k) => String(k).trim()).filter(Boolean);
+    } catch {
+      return val.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+function getRoutingRules() {
+  try {
+    const rows = db.prepare(`
+      SELECT r.*, c.name as current_counselor_name, c.is_active as counselor_active, c.email as counselor_email
+      FROM lead_routing_rules r
+      LEFT JOIN counselors c ON r.counselor_id = c.id
+      ORDER BY r.priority DESC, r.created_at ASC
+    `).all();
+    return rows.map((r) => ({
+      ...r,
+      counselor_name: r.current_counselor_name || r.counselor_name || "Counselor",
+      course_keywords: parseKeywords(r.course_keywords),
+      university_keywords: parseKeywords(r.university_keywords),
+      target_cities: parseKeywords(r.target_cities)
+    }));
+  } catch (err) {
+    console.warn("[Routing Rules] Query failed:", err.message);
+    return [];
+  }
+}
+function createRoutingRule(data, performedBy = "Super Admin") {
+  const id = "RULE-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  let counselorName = data.counselor_name || "";
+  if (data.counselor_id && !counselorName) {
+    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
+    if (c) counselorName = c.name;
+  }
+  const courseKw = JSON.stringify(parseKeywords(data.course_keywords));
+  const uniKw = JSON.stringify(parseKeywords(data.university_keywords));
+  const cities = JSON.stringify(parseKeywords(data.target_cities));
+  db.prepare(`
+    INSERT INTO lead_routing_rules (
+      id, name, course_keywords, university_keywords, target_cities,
+      counselor_id, counselor_name, priority, max_daily_leads, is_active, description
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.name || "Custom Routing Rule",
+    courseKw,
+    uniKw,
+    cities,
+    data.counselor_id,
+    counselorName,
+    data.priority !== void 0 ? Number(data.priority) : 1,
+    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
+    data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
+    data.description || null
+  );
+  logAudit({
+    userName: performedBy,
+    action: "CREATE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    newValue: { name: data.name, counselor_name: counselorName, priority: data.priority }
+  });
+  return {
+    id,
+    name: data.name || "Custom Routing Rule",
+    course_keywords: parseKeywords(data.course_keywords),
+    university_keywords: parseKeywords(data.university_keywords),
+    target_cities: parseKeywords(data.target_cities),
+    counselor_id: data.counselor_id,
+    counselor_name: counselorName,
+    priority: data.priority || 1,
+    max_daily_leads: data.max_daily_leads || 20,
+    is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
+    description: data.description
+  };
+}
+function updateRoutingRule(id, data, performedBy = "Super Admin") {
+  const existing = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
+  if (!existing) return false;
+  let counselorName = existing.counselor_name;
+  if (data.counselor_id && data.counselor_id !== existing.counselor_id) {
+    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
+    if (c) counselorName = c.name;
+  }
+  const courseKw = data.course_keywords !== void 0 ? JSON.stringify(parseKeywords(data.course_keywords)) : existing.course_keywords;
+  const uniKw = data.university_keywords !== void 0 ? JSON.stringify(parseKeywords(data.university_keywords)) : existing.university_keywords;
+  const cities = data.target_cities !== void 0 ? JSON.stringify(parseKeywords(data.target_cities)) : existing.target_cities;
+  db.prepare(`
+    UPDATE lead_routing_rules
+    SET name = ?,
+        course_keywords = ?,
+        university_keywords = ?,
+        target_cities = ?,
+        counselor_id = ?,
+        counselor_name = ?,
+        priority = ?,
+        max_daily_leads = ?,
+        is_active = ?,
+        description = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    data.name !== void 0 ? data.name : existing.name,
+    courseKw,
+    uniKw,
+    cities,
+    data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
+    counselorName,
+    data.priority !== void 0 ? Number(data.priority) : existing.priority,
+    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
+    data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
+    data.description !== void 0 ? data.description : existing.description,
+    id
+  );
+  logAudit({
+    userName: performedBy,
+    action: "UPDATE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    oldValue: existing,
+    newValue: data
+  });
+  return true;
+}
+function deleteRoutingRule(id, performedBy = "Super Admin") {
+  const rule = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
+  if (!rule) return false;
+  db.prepare("DELETE FROM lead_routing_rules WHERE id = ?").run(id);
+  logAudit({
+    userName: performedBy,
+    action: "DELETE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    oldValue: rule
+  });
+  return true;
+}
+function checkAndResetDailyQuotas(counselors) {
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  for (const c of counselors) {
+    if (c.last_assigned_date !== today) {
+      db.prepare(`
+        UPDATE counselors
+        SET leads_assigned_today = 0, last_assigned_date = ?
+        WHERE id = ?
+      `).run(today, c.id);
+      c.leads_assigned_today = 0;
+      c.last_assigned_date = today;
+    }
+  }
+}
+function matchesKeywords(text, keywords) {
+  if (!keywords || keywords.length === 0) return true;
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return keywords.some((k) => lower.includes(k.toLowerCase().trim()));
+}
+function distributeLead(lead) {
+  const activeCounselors = db.prepare(`
+    SELECT * FROM counselors
+    WHERE is_active = 1 AND current_active_leads < max_capacity
+    ORDER BY current_active_leads ASC
+  `).all();
+  if (activeCounselors.length === 0) {
+    const fallbackCounselors = db.prepare(`
+      SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1
+    `).all();
+    if (fallbackCounselors.length === 0) return null;
+    const fallback = fallbackCounselors[0];
+    return {
+      counselorId: fallback.id,
+      counselorName: fallback.name,
+      method: "Fallback (Capacity Exceeded)",
+      reasons: ["All counselors at capacity, routed to lowest load active counselor"]
+    };
+  }
+  checkAndResetDailyQuotas(activeCounselors);
+  const counselorMap = /* @__PURE__ */ new Map();
+  for (const c of activeCounselors) counselorMap.set(c.id, c);
+  const rules = getRoutingRules().filter((r) => r.is_active === 1);
+  for (const rule of rules) {
+    const counselor = counselorMap.get(rule.counselor_id);
+    if (!counselor) continue;
+    const dailyQuota = rule.max_daily_leads || counselor.daily_lead_quota || 25;
+    if ((counselor.leads_assigned_today || 0) >= dailyQuota) {
+      continue;
+    }
+    const hasCourseFilter = rule.course_keywords && rule.course_keywords.length > 0;
+    const hasUniFilter = rule.university_keywords && rule.university_keywords.length > 0;
+    const hasCityFilter = rule.target_cities && rule.target_cities.length > 0;
+    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter) continue;
+    const courseMatches = matchesKeywords(lead.preferred_course, rule.course_keywords);
+    const uniMatches = matchesKeywords(lead.preferred_university, rule.university_keywords);
+    const cityMatches = matchesKeywords(lead.city, rule.target_cities);
+    let isMatch = false;
+    const matchReasons = [];
+    if (hasCourseFilter && hasUniFilter) {
+      if (courseMatches && uniMatches) {
+        isMatch = !hasCityFilter || cityMatches;
+        if (isMatch) {
+          matchReasons.push(`Matched Course [${lead.preferred_course}]`);
+          matchReasons.push(`Matched University [${lead.preferred_university}]`);
+          if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
+        }
+      }
+    } else if (hasCourseFilter && courseMatches) {
+      isMatch = !hasCityFilter || cityMatches;
+      if (isMatch) {
+        matchReasons.push(`Matched Course [${lead.preferred_course}]`);
+        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
+      }
+    } else if (hasUniFilter && uniMatches) {
+      isMatch = !hasCityFilter || cityMatches;
+      if (isMatch) {
+        matchReasons.push(`Matched University [${lead.preferred_university}]`);
+        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
+      }
+    } else if (hasCityFilter && cityMatches && !hasCourseFilter && !hasUniFilter) {
+      isMatch = true;
+      matchReasons.push(`Matched City [${lead.city}]`);
+    }
+    if (isMatch) {
+      return {
+        counselorId: counselor.id,
+        counselorName: counselor.name,
+        method: `Automated Rule (${rule.name})`,
+        matchedRule: rule.name,
+        reasons: matchReasons
+      };
+    }
+  }
+  for (const c of activeCounselors) {
+    const specCourses = parseKeywords(c.specialization_courses);
+    const specUnis = parseKeywords(c.specialization_universities);
+    const courseMatches = matchesKeywords(lead.preferred_course, specCourses);
+    const uniMatches = matchesKeywords(lead.preferred_university, specUnis);
+    if (specCourses.length > 0 && courseMatches) {
+      return {
+        counselorId: c.id,
+        counselorName: c.name,
+        method: "Counselor Course Specialization",
+        reasons: [`Counselor specializes in ${lead.preferred_course}`]
+      };
+    }
+    if (specUnis.length > 0 && uniMatches) {
+      return {
+        counselorId: c.id,
+        counselorName: c.name,
+        method: "Counselor University Specialization",
+        reasons: [`Counselor specializes in ${lead.preferred_university}`]
+      };
+    }
+  }
+  activeCounselors.sort((a, b) => {
+    const ratioA = (a.current_active_leads || 0) / (a.max_capacity || 100);
+    const ratioB = (b.current_active_leads || 0) / (b.max_capacity || 100);
+    if (ratioA !== ratioB) return ratioA - ratioB;
+    return (a.total_assigned_leads || 0) - (b.total_assigned_leads || 0);
+  });
+  const selected = activeCounselors[0];
+  return {
+    counselorId: selected.id,
+    counselorName: selected.name,
+    method: "Capacity-Balanced Round Robin",
+    reasons: [`Selected counselor with lowest workload ratio (${selected.current_active_leads}/${selected.max_capacity})`]
+  };
+}
+async function distributeUnassignedLeads(performedBy = "Super Admin") {
+  const unassigned = db.prepare(`
+    SELECT * FROM leads 
+    WHERE is_deleted = 0 AND (assigned_counselor_id IS NULL OR assigned_counselor_id = '')
+    ORDER BY created_at ASC
+  `).all();
+  let totalAssigned = 0;
+  const details = [];
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  for (const lead of unassigned) {
+    const route = distributeLead({
+      city: lead.city,
+      preferred_course: lead.preferred_course,
+      preferred_university: lead.preferred_university,
+      country: lead.country
+    });
+    if (route) {
+      db.prepare(`
+        UPDATE leads 
+        SET assigned_counselor_id = ?,
+            assigned_counselor_name = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(route.counselorId, route.counselorName, lead.id);
+      db.prepare(`
+        UPDATE counselors 
+        SET current_active_leads = current_active_leads + 1,
+            total_assigned_leads = total_assigned_leads + 1,
+            leads_assigned_today = leads_assigned_today + 1,
+            last_assigned_date = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(today, route.counselorId);
+      const assignId = "ASGN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+      db.prepare(`
+        INSERT INTO lead_assignments (id, lead_id, previous_counselor_id, previous_counselor_name, new_counselor_id, new_counselor_name, assignment_method, assigned_by)
+        VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)
+      `).run(assignId, lead.id, route.counselorId, route.counselorName, route.method, performedBy);
+      logLeadActivity({
+        leadId: lead.id,
+        activityType: "COUNSELOR_ASSIGNED",
+        title: "Assigned via Lead Distribution Engine",
+        description: `Assigned to ${route.counselorName} via ${route.method}. Reason: ${route.reasons.join(", ")}`,
+        performedBy
+      });
+      createNotification({
+        counselorId: route.counselorId,
+        title: "New Student Lead Assigned",
+        message: `${lead.student_name} interested in ${lead.preferred_course} at ${lead.preferred_university} was assigned to you via ${route.method}.`,
+        type: "LEAD_ASSIGNED",
+        entityType: "lead",
+        entityId: lead.id
+      });
+      if (isNeonEnabled()) {
+        const updatedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+        if (updatedLead) {
+          persistLeadToNeon(updatedLead).catch(() => {
+          });
+        }
+      }
+      totalAssigned++;
+      details.push({
+        leadId: lead.id,
+        leadNumber: lead.lead_id,
+        studentName: lead.student_name,
+        preferredCourse: lead.preferred_course,
+        preferredUniversity: lead.preferred_university,
+        assignedTo: route.counselorName,
+        method: route.method,
+        matchedRule: route.matchedRule
+      });
+    }
+  }
+  logAudit({
+    userName: performedBy,
+    action: "BATCH_LEAD_DISTRIBUTION",
+    entity: "lead_distribution_engine",
+    newValue: { totalProcessed: unassigned.length, totalAssigned }
+  });
+  return {
+    totalProcessed: unassigned.length,
+    totalAssigned,
+    details
+  };
+}
+function simulateLeadRouting(params) {
+  const result = distributeLead(params);
+  if (!result) {
+    return {
+      success: false,
+      message: "No eligible active counselors found to take this lead."
+    };
+  }
+  return {
+    success: true,
+    counselorId: result.counselorId,
+    counselorName: result.counselorName,
+    method: result.method,
+    matchedRule: result.matchedRule,
+    reasons: result.reasons
+  };
+}
+var init_leadDistributionEngine = __esm({
+  "server/services/leadDistributionEngine.ts"() {
+    "use strict";
+    init_database();
+    init_neon();
+  }
+});
+
 // server/services/leadService.ts
 function normalizePhoneNumber(phone) {
   if (!phone) return "";
@@ -1435,64 +1999,20 @@ function checkDuplicate(params) {
   };
 }
 function assignCounselor(lead) {
-  const modeSetting = db.prepare("SELECT value FROM settings WHERE key = 'assignment_mode'").get();
-  const assignmentMode = modeSetting?.value || "Round Robin";
-  const activeCounselors = db.prepare(`
-    SELECT * FROM counselors 
-    WHERE is_active = 1 AND current_active_leads < max_capacity
-    ORDER BY current_active_leads ASC, total_assigned_leads ASC
-  `).all();
-  if (activeCounselors.length === 0) {
-    return null;
+  const route = distributeLead({
+    city: lead.city,
+    preferred_university: lead.preferred_university,
+    preferred_course: lead.preferred_course,
+    country: lead.country
+  });
+  if (route) {
+    return {
+      counselorId: route.counselorId,
+      counselorName: route.counselorName,
+      method: route.method
+    };
   }
-  if (assignmentMode === "City Based" && lead.city) {
-    for (const c of activeCounselors) {
-      try {
-        const cities = JSON.parse(c.assigned_cities || "[]");
-        if (cities.some((city) => city.toLowerCase() === lead.city?.toLowerCase())) {
-          return { counselorId: c.id, counselorName: c.name, method: "City Based" };
-        }
-      } catch (e) {
-      }
-    }
-  }
-  if (assignmentMode === "University Based" && lead.preferred_university) {
-    if (lead.preferred_university.includes("SRM")) {
-      const match = activeCounselors.find((c) => c.name.includes("Aarav") || c.name.includes("Ananya"));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: "University Based" };
-    }
-    if (lead.preferred_university.includes("VIT")) {
-      const match = activeCounselors.find((c) => c.name.includes("Priya") || c.name.includes("Ananya"));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: "University Based" };
-    }
-    if (lead.preferred_university.includes("Symbiosis") || lead.preferred_university.includes("NMIMS")) {
-      const match = activeCounselors.find((c) => c.name.includes("Sneha") || c.name.includes("Priya"));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: "University Based" };
-    }
-  }
-  if (assignmentMode === "Course Based" && lead.preferred_course) {
-    if (lead.preferred_course.includes("Nursing") || lead.preferred_course.includes("MBBS") || lead.preferred_course.includes("BDS")) {
-      const match = activeCounselors.find((c) => c.name.includes("Bibek") || c.name.includes("Roshan"));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: "Course Based" };
-    }
-    if (lead.preferred_course.includes("MBA") || lead.preferred_course.includes("BBA")) {
-      const match = activeCounselors.find((c) => c.name.includes("Sneha") || c.name.includes("Priya"));
-      if (match) return { counselorId: match.id, counselorName: match.name, method: "Course Based" };
-    }
-  }
-  const pointerSetting = db.prepare("SELECT value FROM settings WHERE key = 'round_robin_pointer'").get();
-  let pointer = parseInt(pointerSetting?.value || "0", 10);
-  if (isNaN(pointer) || pointer >= activeCounselors.length) {
-    pointer = 0;
-  }
-  const selected = activeCounselors[pointer];
-  const nextPointer = (pointer + 1) % activeCounselors.length;
-  db.prepare("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'round_robin_pointer'").run(nextPointer.toString());
-  return {
-    counselorId: selected.id,
-    counselorName: selected.name,
-    method: "Round Robin"
-  };
+  return null;
 }
 function generateLeadId() {
   const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
@@ -1887,6 +2407,7 @@ var init_leadService = __esm({
     "use strict";
     init_database();
     init_neon();
+    init_leadDistributionEngine();
   }
 });
 
@@ -3409,6 +3930,728 @@ function getCampaignROIReport() {
 // server/routes/api.ts
 init_integrationService();
 init_neon();
+init_leadDistributionEngine();
+
+// server/services/hrService.ts
+init_database();
+function getEmployees() {
+  try {
+    return db.prepare(`
+      SELECT e.*, c.name as linked_counselor_name, u.role as linked_user_role
+      FROM hr_employees e
+      LEFT JOIN counselors c ON e.counselor_id = c.id
+      LEFT JOIN users u ON e.user_id = u.id
+      ORDER BY e.created_at DESC
+    `).all();
+  } catch (err) {
+    console.warn("[HR Employees] Query failed:", err.message);
+    return [];
+  }
+}
+function getEmployee(id) {
+  return db.prepare("SELECT * FROM hr_employees WHERE id = ?").get(id) || null;
+}
+function createEmployee(data, performedBy = "Super Admin") {
+  const id = "EMP-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  let employeeCode = data.employee_code;
+  if (!employeeCode) {
+    const count = db.prepare("SELECT count(*) as count FROM hr_employees").get().count || 0;
+    employeeCode = `ES-EMP-${(count + 1).toString().padStart(3, "0")}`;
+  }
+  let counselorId = data.counselor_id || null;
+  let userId = data.user_id || null;
+  if (!counselorId && data.email) {
+    const counselor = db.prepare("SELECT id, user_id FROM counselors WHERE LOWER(email) = LOWER(?)").get(data.email);
+    if (counselor) {
+      counselorId = counselor.id;
+      if (!userId) userId = counselor.user_id;
+    }
+  }
+  db.prepare(`
+    INSERT INTO hr_employees (
+      id, employee_code, user_id, counselor_id, full_name, email, phone,
+      department, designation, employment_type, joining_date, monthly_salary,
+      currency, bank_name, account_number, pan_number, emergency_contact, status
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    employeeCode,
+    userId,
+    counselorId,
+    data.full_name,
+    data.email?.toLowerCase().trim(),
+    data.phone,
+    data.department || "Counseling",
+    data.designation || "Education Counselor",
+    data.employment_type || "Full-Time",
+    data.joining_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+    data.monthly_salary ? Number(data.monthly_salary) : 35e3,
+    data.currency || "NPR",
+    data.bank_name || null,
+    data.account_number || null,
+    data.pan_number || null,
+    data.emergency_contact || null,
+    data.status || "Active"
+  );
+  logAudit({
+    userName: performedBy,
+    action: "CREATE_EMPLOYEE",
+    entity: "hr_employee",
+    entityId: id,
+    newValue: { code: employeeCode, name: data.full_name, department: data.department }
+  });
+  return getEmployee(id);
+}
+function updateEmployee(id, data, performedBy = "Super Admin") {
+  const existing = getEmployee(id);
+  if (!existing) return false;
+  db.prepare(`
+    UPDATE hr_employees
+    SET full_name = ?,
+        email = ?,
+        phone = ?,
+        department = ?,
+        designation = ?,
+        employment_type = ?,
+        joining_date = ?,
+        monthly_salary = ?,
+        currency = ?,
+        bank_name = ?,
+        account_number = ?,
+        pan_number = ?,
+        emergency_contact = ?,
+        status = ?,
+        counselor_id = ?,
+        user_id = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    data.full_name !== void 0 ? data.full_name : existing.full_name,
+    data.email !== void 0 ? data.email.toLowerCase().trim() : existing.email,
+    data.phone !== void 0 ? data.phone : existing.phone,
+    data.department !== void 0 ? data.department : existing.department,
+    data.designation !== void 0 ? data.designation : existing.designation,
+    data.employment_type !== void 0 ? data.employment_type : existing.employment_type,
+    data.joining_date !== void 0 ? data.joining_date : existing.joining_date,
+    data.monthly_salary !== void 0 ? Number(data.monthly_salary) : existing.monthly_salary,
+    data.currency !== void 0 ? data.currency : existing.currency,
+    data.bank_name !== void 0 ? data.bank_name : existing.bank_name,
+    data.account_number !== void 0 ? data.account_number : existing.account_number,
+    data.pan_number !== void 0 ? data.pan_number : existing.pan_number,
+    data.emergency_contact !== void 0 ? data.emergency_contact : existing.emergency_contact,
+    data.status !== void 0 ? data.status : existing.status,
+    data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
+    data.user_id !== void 0 ? data.user_id : existing.user_id,
+    id
+  );
+  logAudit({
+    userName: performedBy,
+    action: "UPDATE_EMPLOYEE",
+    entity: "hr_employee",
+    entityId: id,
+    oldValue: existing,
+    newValue: data
+  });
+  return true;
+}
+function deleteEmployee(id, performedBy = "Super Admin") {
+  const existing = getEmployee(id);
+  if (!existing) return false;
+  db.prepare("DELETE FROM hr_attendance WHERE employee_id = ?").run(id);
+  db.prepare("DELETE FROM hr_leaves WHERE employee_id = ?").run(id);
+  db.prepare("DELETE FROM hr_payroll WHERE employee_id = ?").run(id);
+  db.prepare("DELETE FROM hr_employees WHERE id = ?").run(id);
+  logAudit({
+    userName: performedBy,
+    action: "DELETE_EMPLOYEE",
+    entity: "hr_employee",
+    entityId: id,
+    oldValue: existing
+  });
+  return true;
+}
+function getAttendance(params = {}) {
+  let sql2 = `
+    SELECT a.*, e.employee_code, e.department, e.designation
+    FROM hr_attendance a
+    JOIN hr_employees e ON a.employee_id = e.id
+    WHERE 1=1
+  `;
+  const queryParams = [];
+  if (params.date) {
+    sql2 += " AND a.date = ?";
+    queryParams.push(params.date);
+  }
+  if (params.employee_id) {
+    sql2 += " AND a.employee_id = ?";
+    queryParams.push(params.employee_id);
+  }
+  if (params.month) {
+    sql2 += " AND a.date LIKE ?";
+    queryParams.push(`${params.month}%`);
+  }
+  sql2 += " ORDER BY a.date DESC, e.full_name ASC";
+  return db.prepare(sql2).all(...queryParams);
+}
+function recordAttendance(data, performedBy = "Super Admin") {
+  const emp = getEmployee(data.employee_id);
+  if (!emp) throw new Error("Employee not found");
+  const id = "ATT-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  db.prepare(`
+    INSERT INTO hr_attendance (id, employee_id, employee_name, date, status, check_in_time, check_out_time, work_mode, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (employee_id, date) DO UPDATE SET
+      status = excluded.status,
+      check_in_time = excluded.check_in_time,
+      check_out_time = excluded.check_out_time,
+      work_mode = excluded.work_mode,
+      notes = excluded.notes
+  `).run(
+    id,
+    data.employee_id,
+    emp.full_name,
+    data.date,
+    data.status || "Present",
+    data.check_in_time || "09:30",
+    data.check_out_time || "18:00",
+    data.work_mode || "Office",
+    data.notes || null
+  );
+  return { success: true, employee_id: data.employee_id, date: data.date, status: data.status };
+}
+function getLeaves(params = {}) {
+  let sql2 = `
+    SELECT l.*, e.employee_code, e.department, e.designation
+    FROM hr_leaves l
+    JOIN hr_employees e ON l.employee_id = e.id
+    WHERE 1=1
+  `;
+  const queryParams = [];
+  if (params.employee_id) {
+    sql2 += " AND l.employee_id = ?";
+    queryParams.push(params.employee_id);
+  }
+  if (params.status) {
+    sql2 += " AND l.status = ?";
+    queryParams.push(params.status);
+  }
+  sql2 += " ORDER BY l.applied_at DESC";
+  return db.prepare(sql2).all(...queryParams);
+}
+function applyLeave(data, performedBy = "Employee") {
+  const emp = getEmployee(data.employee_id);
+  if (!emp) throw new Error("Employee not found");
+  const id = "LV-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const days = data.days_count || 1;
+  db.prepare(`
+    INSERT INTO hr_leaves (id, employee_id, employee_name, leave_type, start_date, end_date, days_count, reason, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending')
+  `).run(
+    id,
+    data.employee_id,
+    emp.full_name,
+    data.leave_type || "Casual Leave",
+    data.start_date,
+    data.end_date,
+    days,
+    data.reason
+  );
+  return { id, success: true, message: "Leave application submitted successfully" };
+}
+function updateLeaveStatus(id, status, remarks, approvedBy = "Super Admin") {
+  const leave = db.prepare("SELECT * FROM hr_leaves WHERE id = ?").get(id);
+  if (!leave) throw new Error("Leave application not found");
+  db.prepare(`
+    UPDATE hr_leaves
+    SET status = ?,
+        approved_by = ?,
+        approval_remarks = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(status, approvedBy, remarks || null, id);
+  return { success: true, id, status };
+}
+function getPayroll(params = {}) {
+  let sql2 = `
+    SELECT p.*, e.employee_code, e.department, e.designation, e.bank_name, e.account_number, e.pan_number
+    FROM hr_payroll p
+    JOIN hr_employees e ON p.employee_id = e.id
+    WHERE 1=1
+  `;
+  const queryParams = [];
+  if (params.month_year) {
+    sql2 += " AND p.month_year = ?";
+    queryParams.push(params.month_year);
+  }
+  if (params.employee_id) {
+    sql2 += " AND p.employee_id = ?";
+    queryParams.push(params.employee_id);
+  }
+  sql2 += " ORDER BY p.month_year DESC, p.created_at DESC";
+  return db.prepare(sql2).all(...queryParams);
+}
+function generateMonthlyPayroll(monthYear, performedBy = "Super Admin") {
+  const employees = getEmployees().filter((e) => e.status === "Active");
+  const results = [];
+  for (const emp of employees) {
+    const id = "PAY-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    const baseSalary = emp.monthly_salary || 35e3;
+    let admissionIncentive = 0;
+    if (emp.counselor_id) {
+      const enrollments = db.prepare(`
+        SELECT count(*) as count 
+        FROM students 
+        WHERE counselor_id = ? AND admission_date LIKE ?
+      `).get(emp.counselor_id, `${monthYear}%`);
+      const count = enrollments?.count || 0;
+      admissionIncentive = count * 2500;
+    }
+    const deductions = 0;
+    const netSalary = baseSalary + admissionIncentive - deductions;
+    db.prepare(`
+      INSERT INTO hr_payroll (
+        id, employee_id, employee_name, month_year, base_salary,
+        incentives_bonus, deductions, net_salary, currency, payment_status, remarks
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+      ON CONFLICT (employee_id, month_year) DO UPDATE SET
+        base_salary = excluded.base_salary,
+        incentives_bonus = excluded.incentives_bonus,
+        deductions = excluded.deductions,
+        net_salary = excluded.net_salary,
+        updated_at = datetime('now')
+    `).run(
+      id,
+      emp.id,
+      emp.full_name,
+      monthYear,
+      baseSalary,
+      admissionIncentive,
+      deductions,
+      netSalary,
+      emp.currency || "NPR",
+      admissionIncentive > 0 ? `Includes admission incentive for ${admissionIncentive / 2500} students` : "Standard monthly salary"
+    );
+    results.push({
+      employee_id: emp.id,
+      name: emp.full_name,
+      baseSalary,
+      admissionIncentive,
+      netSalary
+    });
+  }
+  return { success: true, monthYear, totalEmployees: employees.length, results };
+}
+function markPayrollPaid(id, paymentMethod = "Bank Transfer", remarks, performedBy = "Super Admin") {
+  const pay = db.prepare(`
+    SELECT p.*, e.full_name 
+    FROM hr_payroll p 
+    JOIN hr_employees e ON p.employee_id = e.id 
+    WHERE p.id = ?
+  `).get(id);
+  if (!pay) throw new Error("Payroll record not found");
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  db.prepare(`
+    UPDATE hr_payroll
+    SET payment_status = 'Paid',
+        payment_date = ?,
+        payment_method = ?,
+        remarks = COALESCE(?, remarks),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(today, paymentMethod, remarks || null, id);
+  try {
+    const txnId = "TXN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    db.prepare(`
+      INSERT INTO finance_transactions (
+        id, transaction_id, type, category, title, amount, currency,
+        transaction_date, payment_method, reference_number, status, notes, recorded_by
+      )
+      VALUES (?, ?, 'EXPENSE', 'Salaries & Payroll', ?, ?, ?, ?, ?, ?, 'Completed', ?, ?)
+    `).run(
+      txnId,
+      "TXN-" + Date.now().toString().slice(-6),
+      `Salary Payment: ${pay.full_name} (${pay.month_year})`,
+      pay.net_salary,
+      pay.currency || "NPR",
+      today,
+      paymentMethod,
+      "PAYROLL-" + pay.id,
+      `Salary disbursed for ${pay.month_year} via ${paymentMethod}`,
+      performedBy
+    );
+  } catch (err) {
+    console.warn("[Finance Cross-link] Failed to auto-record salary expense:", err.message);
+  }
+  return { success: true, id, status: "Paid", paymentDate: today };
+}
+
+// server/services/financeService.ts
+init_database();
+function getTransactions(filters = {}) {
+  try {
+    let sql2 = "SELECT * FROM finance_transactions WHERE 1=1";
+    const params = [];
+    if (filters.type && filters.type !== "ALL") {
+      sql2 += " AND type = ?";
+      params.push(filters.type);
+    }
+    if (filters.category && filters.category !== "ALL") {
+      sql2 += " AND category = ?";
+      params.push(filters.category);
+    }
+    if (filters.paymentMethod && filters.paymentMethod !== "ALL") {
+      sql2 += " AND payment_method = ?";
+      params.push(filters.paymentMethod);
+    }
+    if (filters.startDate) {
+      sql2 += " AND transaction_date >= ?";
+      params.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      sql2 += " AND transaction_date <= ?";
+      params.push(filters.endDate);
+    }
+    sql2 += " ORDER BY transaction_date DESC, created_at DESC";
+    if (filters.limit) {
+      sql2 += " LIMIT ?";
+      params.push(filters.limit);
+    }
+    return db.prepare(sql2).all(...params);
+  } catch (err) {
+    console.warn("[Finance Transactions] Query failed:", err.message);
+    return [];
+  }
+}
+function createTransaction(data, performedBy = "Super Admin") {
+  const id = "FTXN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const txnId = data.transaction_id || `TXN-${(/* @__PURE__ */ new Date()).getFullYear()}-${Math.floor(1e3 + Math.random() * 9e3)}`;
+  db.prepare(`
+    INSERT INTO finance_transactions (
+      id, transaction_id, type, category, title, amount, currency,
+      transaction_date, payment_method, reference_number, student_id, student_name,
+      university_id, university_name, status, notes, recorded_by
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    txnId,
+    data.type || "INCOME",
+    data.category || "Student Fee",
+    data.title || "General Transaction",
+    data.amount ? Number(data.amount) : 0,
+    data.currency || "NPR",
+    data.transaction_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+    data.payment_method || "Bank Transfer",
+    data.reference_number || null,
+    data.student_id || null,
+    data.student_name || null,
+    data.university_id || null,
+    data.university_name || null,
+    data.status || "Completed",
+    data.notes || null,
+    performedBy
+  );
+  logAudit({
+    userName: performedBy,
+    action: "CREATE_FINANCE_TRANSACTION",
+    entity: "finance_transaction",
+    entityId: id,
+    newValue: { type: data.type, title: data.title, amount: data.amount }
+  });
+  return db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+}
+function updateTransaction(id, data, performedBy = "Super Admin") {
+  const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  if (!existing) return false;
+  db.prepare(`
+    UPDATE finance_transactions
+    SET type = ?,
+        category = ?,
+        title = ?,
+        amount = ?,
+        currency = ?,
+        transaction_date = ?,
+        payment_method = ?,
+        reference_number = ?,
+        student_id = ?,
+        student_name = ?,
+        university_id = ?,
+        university_name = ?,
+        status = ?,
+        notes = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    data.type !== void 0 ? data.type : existing.type,
+    data.category !== void 0 ? data.category : existing.category,
+    data.title !== void 0 ? data.title : existing.title,
+    data.amount !== void 0 ? Number(data.amount) : existing.amount,
+    data.currency !== void 0 ? data.currency : existing.currency,
+    data.transaction_date !== void 0 ? data.transaction_date : existing.transaction_date,
+    data.payment_method !== void 0 ? data.payment_method : existing.payment_method,
+    data.reference_number !== void 0 ? data.reference_number : existing.reference_number,
+    data.student_id !== void 0 ? data.student_id : existing.student_id,
+    data.student_name !== void 0 ? data.student_name : existing.student_name,
+    data.university_id !== void 0 ? data.university_id : existing.university_id,
+    data.university_name !== void 0 ? data.university_name : existing.university_name,
+    data.status !== void 0 ? data.status : existing.status,
+    data.notes !== void 0 ? data.notes : existing.notes,
+    id
+  );
+  return true;
+}
+function deleteTransaction(id, performedBy = "Super Admin") {
+  const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  if (!existing) return false;
+  db.prepare("DELETE FROM finance_transactions WHERE id = ?").run(id);
+  return true;
+}
+function getInvoices(filters = {}) {
+  try {
+    let sql2 = "SELECT * FROM finance_invoices WHERE 1=1";
+    const params = [];
+    if (filters.invoice_type && filters.invoice_type !== "ALL") {
+      sql2 += " AND invoice_type = ?";
+      params.push(filters.invoice_type);
+    }
+    if (filters.status && filters.status !== "ALL") {
+      sql2 += " AND status = ?";
+      params.push(filters.status);
+    }
+    if (filters.student_id) {
+      sql2 += " AND student_id = ?";
+      params.push(filters.student_id);
+    }
+    if (filters.university_id) {
+      sql2 += " AND university_id = ?";
+      params.push(filters.university_id);
+    }
+    sql2 += " ORDER BY created_at DESC";
+    const rows = db.prepare(sql2).all(...params);
+    return rows.map((r) => ({
+      ...r,
+      items: typeof r.items === "string" ? JSON.parse(r.items || "[]") : r.items || []
+    }));
+  } catch (err) {
+    console.warn("[Finance Invoices] Query failed:", err.message);
+    return [];
+  }
+}
+function createInvoice(data, performedBy = "Super Admin") {
+  const id = "INV-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const count = db.prepare("SELECT count(*) as count FROM finance_invoices").get().count || 0;
+  const invoiceNumber = data.invoice_number || `INV-${(/* @__PURE__ */ new Date()).getFullYear()}-${(count + 1).toString().padStart(4, "0")}`;
+  const total = Number(data.total_amount) || 0;
+  const paid = Number(data.paid_amount) || 0;
+  const due = Math.max(0, total - paid);
+  let initialStatus = data.status || "Sent";
+  if (paid >= total && total > 0) initialStatus = "Paid";
+  else if (paid > 0) initialStatus = "Partial";
+  const itemsJson = JSON.stringify(data.items || [
+    { description: "Admission Processing & Consultancy Service", qty: 1, unit_price: total, amount: total }
+  ]);
+  db.prepare(`
+    INSERT INTO finance_invoices (
+      id, invoice_number, invoice_type, recipient_name, recipient_email, recipient_phone,
+      total_amount, paid_amount, due_amount, currency, due_date, status, items, notes,
+      student_id, university_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    invoiceNumber,
+    data.invoice_type || "STUDENT_FEE",
+    data.recipient_name,
+    data.recipient_email || null,
+    data.recipient_phone || null,
+    total,
+    paid,
+    due,
+    data.currency || "NPR",
+    data.due_date || new Date(Date.now() + 14 * 864e5).toISOString().split("T")[0],
+    initialStatus,
+    itemsJson,
+    data.notes || null,
+    data.student_id || null,
+    data.university_id || null
+  );
+  logAudit({
+    userName: performedBy,
+    action: "CREATE_INVOICE",
+    entity: "finance_invoice",
+    entityId: id,
+    newValue: { invoiceNumber, recipient: data.recipient_name, total }
+  });
+  return getInvoices({}).find((i) => i.id === id);
+}
+function recordInvoicePayment(invoiceId, amount, paymentMethod = "Bank Transfer", referenceNumber, performedBy = "Super Admin") {
+  const inv = db.prepare("SELECT * FROM finance_invoices WHERE id = ?").get(invoiceId);
+  if (!inv) throw new Error("Invoice not found");
+  const paymentAmount = Number(amount) || 0;
+  const newPaid = Number(inv.paid_amount) + paymentAmount;
+  const newDue = Math.max(0, Number(inv.total_amount) - newPaid);
+  const newStatus = newDue <= 0 ? "Paid" : "Partial";
+  db.prepare(`
+    UPDATE finance_invoices
+    SET paid_amount = ?,
+        due_amount = ?,
+        status = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(newPaid, newDue, newStatus, invoiceId);
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const txnCategory = inv.invoice_type === "UNIVERSITY_COMMISSION" ? "University Commission" : "Student Fee";
+  createTransaction({
+    type: "INCOME",
+    category: txnCategory,
+    title: `Payment for ${inv.invoice_number} (${inv.recipient_name})`,
+    amount: paymentAmount,
+    currency: inv.currency,
+    transaction_date: today,
+    payment_method: paymentMethod,
+    reference_number: referenceNumber || `PAY-${inv.invoice_number}`,
+    student_id: inv.student_id,
+    student_name: inv.invoice_type === "STUDENT_FEE" ? inv.recipient_name : null,
+    university_id: inv.university_id,
+    university_name: inv.invoice_type === "UNIVERSITY_COMMISSION" ? inv.recipient_name : null,
+    notes: `Recorded against invoice ${inv.invoice_number}. Remaining due: ${newDue} ${inv.currency}`
+  }, performedBy);
+  if (inv.student_id) {
+    try {
+      db.prepare(`
+        UPDATE students
+        SET fee_paid = fee_paid + ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(paymentAmount, inv.student_id);
+    } catch (e) {
+    }
+  }
+  return { success: true, invoiceId, paidAmount: newPaid, dueAmount: newDue, status: newStatus };
+}
+function getFinanceOverview(params = {}) {
+  try {
+    let dateFilter = "";
+    const queryParams = [];
+    if (params.month) {
+      dateFilter = " AND transaction_date LIKE ?";
+      queryParams.push(`${params.month}%`);
+    } else if (params.year) {
+      dateFilter = " AND transaction_date LIKE ?";
+      queryParams.push(`${params.year}%`);
+    }
+    const incomeRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total 
+      FROM finance_transactions 
+      WHERE type = 'INCOME' AND status = 'Completed' ${dateFilter}
+    `).get(...queryParams);
+    const totalIncome = Number(incomeRow?.total || 0);
+    const expenseRow = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total 
+      FROM finance_transactions 
+      WHERE type = 'EXPENSE' AND status = 'Completed' ${dateFilter}
+    `).get(...queryParams);
+    const totalExpense = Number(expenseRow?.total || 0);
+    const netProfit = totalIncome - totalExpense;
+    const incomeBreakdown = db.prepare(`
+      SELECT category, COALESCE(SUM(amount), 0) as amount, count(*) as count
+      FROM finance_transactions
+      WHERE type = 'INCOME' AND status = 'Completed' ${dateFilter}
+      GROUP BY category
+      ORDER BY amount DESC
+    `).all(...queryParams);
+    const expenseBreakdown = db.prepare(`
+      SELECT category, COALESCE(SUM(amount), 0) as amount, count(*) as count
+      FROM finance_transactions
+      WHERE type = 'EXPENSE' AND status = 'Completed' ${dateFilter}
+      GROUP BY category
+      ORDER BY amount DESC
+    `).all(...queryParams);
+    const studentDueRow = db.prepare(`
+      SELECT COALESCE(SUM(due_amount), 0) as totalDue
+      FROM finance_invoices
+      WHERE invoice_type = 'STUDENT_FEE' AND status != 'Paid' AND status != 'Cancelled'
+    `).get();
+    const totalStudentFeeDue = Number(studentDueRow?.totalDue || 0);
+    const uniDueRow = db.prepare(`
+      SELECT COALESCE(SUM(due_amount), 0) as totalDue
+      FROM finance_invoices
+      WHERE invoice_type = 'UNIVERSITY_COMMISSION' AND status != 'Paid' AND status != 'Cancelled'
+    `).get();
+    const totalUniCommissionDue = Number(uniDueRow?.totalDue || 0);
+    return {
+      totalIncome,
+      totalExpense,
+      netProfit,
+      profitMargin: totalIncome > 0 ? Math.round(netProfit / totalIncome * 100) : 0,
+      totalStudentFeeDue,
+      totalUniCommissionDue,
+      incomeBreakdown,
+      expenseBreakdown,
+      currency: "NPR"
+    };
+  } catch (err) {
+    console.warn("[Finance Overview] Failed to compute KPIs:", err.message);
+    return {
+      totalIncome: 0,
+      totalExpense: 0,
+      netProfit: 0,
+      profitMargin: 0,
+      totalStudentFeeDue: 0,
+      totalUniCommissionDue: 0,
+      incomeBreakdown: [],
+      expenseBreakdown: [],
+      currency: "NPR"
+    };
+  }
+}
+function getUniversityCommissionsSummary() {
+  try {
+    const uniAdmissions = db.prepare(`
+      SELECT 
+        u.id as university_id,
+        u.name as university_name,
+        u.city as university_city,
+        u.country as university_country,
+        count(s.id) as total_enrolled_students
+      FROM universities u
+      LEFT JOIN students s ON s.university = u.name OR s.university LIKE '%' || u.short_name || '%'
+      GROUP BY u.id
+      HAVING total_enrolled_students > 0
+      ORDER BY total_enrolled_students DESC
+    `).all();
+    return uniAdmissions.map((uni) => {
+      const estimatedCommission = uni.total_enrolled_students * 45e3;
+      const invoices = db.prepare(`
+        SELECT COALESCE(SUM(total_amount), 0) as totalInvoiced,
+               COALESCE(SUM(paid_amount), 0) as totalPaid,
+               COALESCE(SUM(due_amount), 0) as totalDue
+        FROM finance_invoices
+        WHERE university_id = ? AND invoice_type = 'UNIVERSITY_COMMISSION'
+      `).get(uni.university_id);
+      const invoiced = Number(invoices?.totalInvoiced || 0);
+      const received = Number(invoices?.totalPaid || 0);
+      const pending = invoiced > 0 ? Number(invoices?.totalDue || 0) : estimatedCommission;
+      return {
+        university_id: uni.university_id,
+        university_name: uni.university_name,
+        total_enrolled_students: uni.total_enrolled_students,
+        estimated_commission: estimatedCommission,
+        invoiced_amount: invoiced,
+        received_amount: received,
+        pending_amount: pending,
+        settlement_status: received >= estimatedCommission && estimatedCommission > 0 ? "SETTLED" : received > 0 ? "PARTIAL" : "PENDING"
+      };
+    });
+  } catch (err) {
+    console.warn("[University Commissions] Summary failed:", err.message);
+    return [];
+  }
+}
+
+// server/routes/api.ts
 var apiRouter = Router();
 apiRouter.post("/auth/login", async (req, res) => {
   try {
@@ -3862,6 +5105,7 @@ apiRouter.get("/counselors", (req, res) => {
   const counselors = db.prepare(`
     SELECT c.*,
       COALESCE(u.role, 'Counselor') as role,
+      u.permissions as permissions,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.is_deleted = 0) as total_leads_count,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Interested', 'Application Started', 'Documents Pending') AND l.is_deleted = 0) as active_leads_count
     FROM counselors c
@@ -3891,7 +5135,21 @@ apiRouter.put("/counselors/:id/toggle-active", async (req, res) => {
 });
 apiRouter.post("/counselors", async (req, res) => {
   try {
-    const { name, email, phone, specialization_country, assigned_cities, max_capacity, password, username, role } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      specialization_country,
+      assigned_cities,
+      max_capacity,
+      password,
+      username,
+      role,
+      permissions,
+      specialization_courses,
+      specialization_universities,
+      daily_lead_quota
+    } = req.body;
     if (!name || !email || !phone) {
       return res.status(400).json({ error: "Name, email, and phone number are required" });
     }
@@ -3899,6 +5157,9 @@ apiRouter.post("/counselors", async (req, res) => {
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
     const userRole = role || "Counselor";
+    const permsJson = JSON.stringify(permissions || []);
+    const specCoursesJson = JSON.stringify(specialization_courses || []);
+    const specUnisJson = JSON.stringify(specialization_universities || []);
     let existingUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(cleanEmail);
     if (!existingUser && isNeonEnabled()) {
       existingUser = await findUserInNeon(cleanEmail);
@@ -3912,12 +5173,16 @@ apiRouter.post("/counselors", async (req, res) => {
     const uname = username ? username.trim() : cleanEmail.split("@")[0];
     const now = (/* @__PURE__ */ new Date()).toISOString();
     db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
     db.prepare(`
-      INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, joining_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?)
+      INSERT INTO counselors (
+        id, user_id, name, username, email, phone, specialization_country, assigned_cities,
+        max_capacity, is_active, status, joining_date, specialization_courses,
+        specialization_universities, daily_lead_quota, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -3929,6 +5194,9 @@ apiRouter.post("/counselors", async (req, res) => {
       JSON.stringify(assigned_cities || []),
       max_capacity || 100,
       now,
+      specCoursesJson,
+      specUnisJson,
+      daily_lead_quota || 25,
       now,
       now
     );
@@ -3962,7 +5230,7 @@ apiRouter.post("/counselors", async (req, res) => {
       action: "COUNSELOR_CREATED",
       entity: "counselor",
       entityId: cId,
-      newValue: { name: cleanName, email: cleanEmail, phone: cleanPhone, role: userRole }
+      newValue: { name: cleanName, email: cleanEmail, phone: cleanPhone, role: userRole, permissions }
     });
     res.status(201).json({ success: true, id: cId, user_id: uId, role: userRole });
   } catch (err) {
@@ -3972,7 +5240,21 @@ apiRouter.post("/counselors", async (req, res) => {
 });
 apiRouter.put("/counselors/:id", async (req, res) => {
   try {
-    const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, role } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      specialization_country,
+      assigned_cities,
+      max_capacity,
+      is_active,
+      status,
+      role,
+      permissions,
+      specialization_courses,
+      specialization_universities,
+      daily_lead_quota
+    } = req.body;
     const counselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(req.params.id);
     if (!counselor) return res.status(404).json({ error: "Counselor not found" });
     const activeVal = is_active !== void 0 ? is_active : status === "Inactive" ? 0 : status === "Active" ? 1 : counselor.is_active;
@@ -3987,20 +5269,46 @@ apiRouter.put("/counselors/:id", async (req, res) => {
           max_capacity = COALESCE(?, max_capacity),
           is_active = COALESCE(?, is_active),
           status = COALESCE(?, status),
+          specialization_courses = COALESCE(?, specialization_courses),
+          specialization_universities = COALESCE(?, specialization_universities),
+          daily_lead_quota = COALESCE(?, daily_lead_quota),
           updated_at = datetime('now')
       WHERE id = ?
-    `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, activeVal, statusVal, req.params.id);
-    if (email || name || phone || is_active !== void 0 || role) {
+    `).run(
+      name,
+      email,
+      phone,
+      specialization_country,
+      assigned_cities ? JSON.stringify(assigned_cities) : null,
+      max_capacity,
+      activeVal,
+      statusVal,
+      specialization_courses ? JSON.stringify(specialization_courses) : null,
+      specialization_universities ? JSON.stringify(specialization_universities) : null,
+      daily_lead_quota || null,
+      req.params.id
+    );
+    if (email || name || phone || is_active !== void 0 || role || permissions !== void 0) {
       db.prepare(`
         UPDATE users
         SET name = COALESCE(?, name),
             email = COALESCE(?, email),
             phone = COALESCE(?, phone),
             role = COALESCE(?, role),
+            permissions = COALESCE(?, permissions),
             is_active = COALESCE(?, is_active),
             updated_at = datetime('now')
         WHERE email = ? OR id = ?
-      `).run(name, email, phone, role || null, activeVal, counselor.email, counselor.user_id);
+      `).run(
+        name,
+        email,
+        phone,
+        role || null,
+        permissions !== void 0 ? JSON.stringify(permissions) : null,
+        activeVal,
+        counselor.email,
+        counselor.user_id
+      );
     }
     if (isNeonEnabled()) {
       const updatedCounselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(req.params.id);
@@ -4017,7 +5325,7 @@ apiRouter.put("/counselors/:id", async (req, res) => {
       action: "COUNSELOR_UPDATED",
       entity: "counselor",
       entityId: req.params.id,
-      newValue: { name, email, phone, status: statusVal, role }
+      newValue: { name, email, phone, status: statusVal, role, permissions }
     });
     res.json({ success: true });
   } catch (err) {
@@ -5416,6 +6724,300 @@ apiRouter.post("/import/leads", (req, res) => {
     errorCount
   });
 });
+apiRouter.get("/lead-routing/rules", (req, res) => {
+  try {
+    const rules = getRoutingRules();
+    res.json(rules);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch routing rules" });
+  }
+});
+apiRouter.post("/lead-routing/rules", (req, res) => {
+  try {
+    const { name, counselor_id, course_keywords, university_keywords, target_cities, priority, max_daily_leads, is_active, description, performedBy } = req.body;
+    if (!name || !counselor_id) {
+      return res.status(400).json({ error: "Rule name and assigned counselor are required" });
+    }
+    const rule = createRoutingRule({
+      name,
+      counselor_id,
+      course_keywords,
+      university_keywords,
+      target_cities,
+      priority,
+      max_daily_leads,
+      is_active,
+      description
+    }, performedBy || "Super Admin");
+    res.status(201).json(rule);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create routing rule" });
+  }
+});
+apiRouter.put("/lead-routing/rules/:id", (req, res) => {
+  try {
+    const success = updateRoutingRule(req.params.id, req.body, req.body.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Routing rule not found" });
+    res.json({ success: true, message: "Routing rule updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update routing rule" });
+  }
+});
+apiRouter.delete("/lead-routing/rules/:id", (req, res) => {
+  try {
+    const success = deleteRoutingRule(req.params.id, req.query.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Routing rule not found" });
+    res.json({ success: true, message: "Routing rule deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete routing rule" });
+  }
+});
+apiRouter.post("/lead-routing/distribute-unassigned", async (req, res) => {
+  try {
+    const report = await distributeUnassignedLeads(req.body.performedBy || "Super Admin");
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to distribute unassigned leads" });
+  }
+});
+apiRouter.post("/lead-routing/simulate", (req, res) => {
+  try {
+    const simulation = simulateLeadRouting(req.body);
+    res.json(simulation);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Routing simulation failed" });
+  }
+});
+apiRouter.get("/hr/employees", (req, res) => {
+  try {
+    const employees = getEmployees();
+    res.json(employees);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch employees" });
+  }
+});
+apiRouter.post("/hr/employees", (req, res) => {
+  try {
+    const { full_name, email, phone } = req.body;
+    if (!full_name || !email || !phone) {
+      return res.status(400).json({ error: "Full name, email, and phone number are required" });
+    }
+    const employee = createEmployee(req.body, req.body.performedBy || "Super Admin");
+    res.status(201).json(employee);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create employee" });
+  }
+});
+apiRouter.put("/hr/employees/:id", (req, res) => {
+  try {
+    const success = updateEmployee(req.params.id, req.body, req.body.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Employee not found" });
+    res.json({ success: true, message: "Employee updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update employee" });
+  }
+});
+apiRouter.delete("/hr/employees/:id", (req, res) => {
+  try {
+    const success = deleteEmployee(req.params.id, req.query.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Employee not found" });
+    res.json({ success: true, message: "Employee deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete employee" });
+  }
+});
+apiRouter.get("/hr/attendance", (req, res) => {
+  try {
+    const records = getAttendance({
+      date: req.query.date,
+      employee_id: req.query.employee_id,
+      month: req.query.month
+    });
+    res.json(records);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch attendance" });
+  }
+});
+apiRouter.post("/hr/attendance", (req, res) => {
+  try {
+    const { employee_id, date, status } = req.body;
+    if (!employee_id || !date) {
+      return res.status(400).json({ error: "Employee ID and date are required" });
+    }
+    const result = recordAttendance(req.body, req.body.performedBy || "Super Admin");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to record attendance" });
+  }
+});
+apiRouter.get("/hr/leaves", (req, res) => {
+  try {
+    const leaves = getLeaves({
+      employee_id: req.query.employee_id,
+      status: req.query.status
+    });
+    res.json(leaves);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch leaves" });
+  }
+});
+apiRouter.post("/hr/leaves", (req, res) => {
+  try {
+    const { employee_id, start_date, end_date, reason } = req.body;
+    if (!employee_id || !start_date || !end_date || !reason) {
+      return res.status(400).json({ error: "Employee, start date, end date, and reason are required" });
+    }
+    const result = applyLeave(req.body, req.body.performedBy || "Employee");
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to apply leave" });
+  }
+});
+apiRouter.put("/hr/leaves/:id/status", (req, res) => {
+  try {
+    const { status, remarks, approvedBy } = req.body;
+    if (!status || !["Approved", "Rejected"].includes(status)) {
+      return res.status(400).json({ error: "Valid status (Approved or Rejected) is required" });
+    }
+    const result = updateLeaveStatus(req.params.id, status, remarks, approvedBy || "Super Admin");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update leave status" });
+  }
+});
+apiRouter.get("/hr/payroll", (req, res) => {
+  try {
+    const payroll = getPayroll({
+      month_year: req.query.month_year,
+      employee_id: req.query.employee_id
+    });
+    res.json(payroll);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch payroll" });
+  }
+});
+apiRouter.post("/hr/payroll/generate", (req, res) => {
+  try {
+    const { monthYear, performedBy } = req.body;
+    if (!monthYear) {
+      return res.status(400).json({ error: "Month & Year (YYYY-MM) is required" });
+    }
+    const result = generateMonthlyPayroll(monthYear, performedBy || "Super Admin");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to generate payroll" });
+  }
+});
+apiRouter.put("/hr/payroll/:id/pay", (req, res) => {
+  try {
+    const { paymentMethod, remarks, performedBy } = req.body;
+    const result = markPayrollPaid(req.params.id, paymentMethod || "Bank Transfer", remarks, performedBy || "Super Admin");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to mark payroll paid" });
+  }
+});
+apiRouter.get("/finance/overview", (req, res) => {
+  try {
+    const overview = getFinanceOverview({
+      month: req.query.month,
+      year: req.query.year
+    });
+    res.json(overview);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch financial overview" });
+  }
+});
+apiRouter.get("/finance/transactions", (req, res) => {
+  try {
+    const transactions = getTransactions({
+      type: req.query.type,
+      category: req.query.category,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      paymentMethod: req.query.paymentMethod,
+      limit: req.query.limit ? Number(req.query.limit) : void 0
+    });
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch transactions" });
+  }
+});
+apiRouter.post("/finance/transactions", (req, res) => {
+  try {
+    const { title, amount, type } = req.body;
+    if (!title || amount === void 0 || !type) {
+      return res.status(400).json({ error: "Title, amount, and type (INCOME/EXPENSE) are required" });
+    }
+    const txn = createTransaction(req.body, req.body.performedBy || "Super Admin");
+    res.status(201).json(txn);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create transaction" });
+  }
+});
+apiRouter.put("/finance/transactions/:id", (req, res) => {
+  try {
+    const success = updateTransaction(req.params.id, req.body, req.body.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Transaction not found" });
+    res.json({ success: true, message: "Transaction updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update transaction" });
+  }
+});
+apiRouter.delete("/finance/transactions/:id", (req, res) => {
+  try {
+    const success = deleteTransaction(req.params.id, req.query.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Transaction not found" });
+    res.json({ success: true, message: "Transaction deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete transaction" });
+  }
+});
+apiRouter.get("/finance/invoices", (req, res) => {
+  try {
+    const invoices = getInvoices({
+      invoice_type: req.query.invoice_type,
+      status: req.query.status,
+      student_id: req.query.student_id,
+      university_id: req.query.university_id
+    });
+    res.json(invoices);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch invoices" });
+  }
+});
+apiRouter.post("/finance/invoices", (req, res) => {
+  try {
+    const { recipient_name, total_amount } = req.body;
+    if (!recipient_name || total_amount === void 0) {
+      return res.status(400).json({ error: "Recipient name and total amount are required" });
+    }
+    const invoice = createInvoice(req.body, req.body.performedBy || "Super Admin");
+    res.status(201).json(invoice);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create invoice" });
+  }
+});
+apiRouter.post("/finance/invoices/:id/pay", (req, res) => {
+  try {
+    const { amount, paymentMethod, referenceNumber, performedBy } = req.body;
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: "Payment amount must be greater than 0" });
+    }
+    const result = recordInvoicePayment(req.params.id, Number(amount), paymentMethod || "Bank Transfer", referenceNumber, performedBy || "Super Admin");
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to record invoice payment" });
+  }
+});
+apiRouter.get("/finance/university-commissions", (req, res) => {
+  try {
+    const commissions = getUniversityCommissionsSummary();
+    res.json(commissions);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch university commissions" });
+  }
+});
 
 // server/index.ts
 init_database();
@@ -5432,7 +7034,9 @@ function seedDatabase() {
       ["role-3", "Counselor", "Assigned student counselling, notes, applications, document collection"],
       ["role-4", "Telecaller", "Calling leads, logging WhatsApp outreach, follow-up scheduling"],
       ["role-5", "Marketing Manager", "Campaigns, sources, ROI analytics, Meta lead ads sync"],
-      ["role-6", "Management", "Executive reporting, counselor KPIs, admission revenue oversight"]
+      ["role-6", "Management", "Executive reporting, counselor KPIs, admission revenue oversight"],
+      ["role-7", "Accountant", "Student fee invoicing, university commissions, payment reconciliations, general ledger"],
+      ["role-8", "HR Manager", "Employee directory, daily attendance register, leaves approval, payroll management"]
     ];
     for (const r of roles) insertRole.run(r[0], r[1], r[2]);
     const insertUser = db.prepare(`
@@ -5570,17 +7174,321 @@ function seedDatabase() {
     insertSetting.run("duplicate_check_strictness", "Strict", "Duplicate detection rules (Phone, WhatsApp, Email, FB Lead ID)");
     insertSetting.run("auto_create_first_followup", "true", "Automatically schedule 24-hr follow-up on new lead creation");
     insertSetting.run("auto_convert_student_on_confirm", "true", "Automatically generate student record when lead status hits Admission Confirmed");
+    const counselorCount = db.prepare("SELECT count(*) as count FROM counselors").get().count;
+    if (counselorCount === 0) {
+      const insertUser2 = db.prepare(`
+        INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+      `);
+      const insertCounselor = db.prepare(`
+        INSERT OR REPLACE INTO counselors (
+          id, user_id, name, username, email, phone, role, specialization_country, assigned_cities,
+          max_capacity, current_active_leads, total_assigned_leads, total_admissions, conversion_rate,
+          is_active, status, joining_date, specialization_courses, specialization_universities, daily_lead_quota
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, 20, 4, 20.0, 1, 'Active', ?, ?, ?, ?)
+      `);
+      insertUser2.run(
+        "u-counselor-1",
+        "Suman Sharma",
+        "counselor@educationsansar.com",
+        "counselor123",
+        "Counselor",
+        "+977 9801122334",
+        JSON.stringify(["dashboard", "leads_view", "leads_create", "leads_edit", "pipeline", "applications", "students", "universities", "documents"])
+      );
+      insertCounselor.run(
+        "c-counselor-1",
+        "u-counselor-1",
+        "Suman Sharma",
+        "suman",
+        "counselor@educationsansar.com",
+        "+977 9801122334",
+        "Counselor",
+        "Nepal & North India",
+        JSON.stringify(["Kathmandu", "Pokhara", "Janakpur"]),
+        100,
+        "2025-01-15",
+        JSON.stringify(["B.Tech", "BE", "BCA", "Computer Science", "Data Science", "IT"]),
+        JSON.stringify(["Sharda University", "Chandigarh University", "Parul University"]),
+        25
+      );
+      insertUser2.run(
+        "u-counselor-2",
+        "Dr. Anjali Thapa",
+        "medical@educationsansar.com",
+        "counselor123",
+        "Counselor",
+        "+977 9812233445",
+        JSON.stringify(["dashboard", "leads_view", "leads_create", "leads_edit", "pipeline", "applications", "students", "universities", "documents"])
+      );
+      insertCounselor.run(
+        "c-counselor-2",
+        "u-counselor-2",
+        "Dr. Anjali Thapa",
+        "anjali",
+        "medical@educationsansar.com",
+        "+977 9812233445",
+        "Counselor",
+        "Nepal & Bangladesh",
+        JSON.stringify(["Kathmandu", "Biratnagar", "Dharan"]),
+        80,
+        "2025-02-01",
+        JSON.stringify(["MBBS", "BDS", "B.Sc Nursing", "Pharmacy", "BAMS", "MD"]),
+        JSON.stringify(["Parul University", "Graphic Era University", "Sharda University"]),
+        20
+      );
+      insertUser2.run(
+        "u-marketing-1",
+        "Rajesh Verma",
+        "marketing@educationsansar.com",
+        "marketing123",
+        "Marketing Manager",
+        "+977 9823344556",
+        JSON.stringify(["dashboard", "leads_view", "leads_create", "campaigns", "reports", "integrations"])
+      );
+      insertCounselor.run(
+        "c-marketing-1",
+        "u-marketing-1",
+        "Rajesh Verma",
+        "rajesh",
+        "marketing@educationsansar.com",
+        "+977 9823344556",
+        "Marketing Manager",
+        "Digital & Field Campaigns",
+        JSON.stringify(["Kathmandu", "Chitwan"]),
+        50,
+        "2025-01-10",
+        "[]",
+        "[]",
+        10
+      );
+      insertUser2.run(
+        "u-finance-1",
+        "Pooja Karki",
+        "finance@educationsansar.com",
+        "finance123",
+        "Accountant",
+        "+977 9834455667",
+        JSON.stringify(["dashboard", "students", "finance_management", "hr_management", "reports"])
+      );
+      insertCounselor.run(
+        "c-finance-1",
+        "u-finance-1",
+        "Pooja Karki",
+        "pooja",
+        "finance@educationsansar.com",
+        "+977 9834455667",
+        "Accountant",
+        "General Accounts",
+        "[]",
+        30,
+        "2025-01-20",
+        "[]",
+        "[]",
+        10
+      );
+      const insertRule = db.prepare(`
+        INSERT OR REPLACE INTO lead_routing_rules (
+          id, name, course_keywords, university_keywords, target_cities,
+          counselor_id, counselor_name, priority, max_daily_leads, is_active, description
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertRule.run(
+        "rule-eng",
+        "Engineering & Technology Lead Routing",
+        JSON.stringify(["B.Tech", "BE", "BCA", "Computer Science", "Software", "AI", "Robotics"]),
+        JSON.stringify(["Sharda", "Chandigarh", "Parul"]),
+        JSON.stringify(["Kathmandu", "Pokhara", "Janakpur"]),
+        "c-counselor-1",
+        "Suman Sharma",
+        10,
+        25,
+        1,
+        "Directs all high-value engineering, BCA, and computer science aspirants to Suman Sharma"
+      );
+      insertRule.run(
+        "rule-med",
+        "Medical & Healthcare Admissions Routing",
+        JSON.stringify(["MBBS", "BDS", "Nursing", "B.Sc Nursing", "Pharmacy", "BAMS"]),
+        JSON.stringify(["Parul", "Graphic Era", "Sharda"]),
+        JSON.stringify(["Kathmandu", "Biratnagar", "Dharan"]),
+        "c-counselor-2",
+        "Dr. Anjali Thapa",
+        10,
+        20,
+        1,
+        "Routes all medical, nursing, and dental applicants to Dr. Anjali Thapa"
+      );
+      const insertEmp = db.prepare(`
+        INSERT OR REPLACE INTO hr_employees (
+          id, employee_code, user_id, counselor_id, full_name, email, phone,
+          department, designation, employment_type, joining_date, monthly_salary, currency,
+          bank_name, account_number, pan_number, status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertEmp.run(
+        "emp-1",
+        "EMP-1001",
+        "u-counselor-1",
+        "c-counselor-1",
+        "Suman Sharma",
+        "counselor@educationsansar.com",
+        "+977 9801122334",
+        "Counseling",
+        "Senior Admission Counselor",
+        "Full-time",
+        "2025-01-15",
+        55e3,
+        "NPR",
+        "Nabil Bank Ltd",
+        "01200175001234",
+        "PAN-987654321",
+        "Active"
+      );
+      insertEmp.run(
+        "emp-2",
+        "EMP-1002",
+        "u-counselor-2",
+        "c-counselor-2",
+        "Dr. Anjali Thapa",
+        "medical@educationsansar.com",
+        "+977 9812233445",
+        "Counseling",
+        "Medical Admissions Advisor",
+        "Full-time",
+        "2025-02-01",
+        65e3,
+        "NPR",
+        "Global IME Bank",
+        "2901010004567",
+        "PAN-876543210",
+        "Active"
+      );
+      insertEmp.run(
+        "emp-3",
+        "EMP-1003",
+        "u-marketing-1",
+        "c-marketing-1",
+        "Rajesh Verma",
+        "marketing@educationsansar.com",
+        "+977 9823344556",
+        "Marketing",
+        "Marketing Manager",
+        "Full-time",
+        "2025-01-10",
+        6e4,
+        "NPR",
+        "NIC Asia Bank",
+        "1092003847291",
+        "PAN-765432109",
+        "Active"
+      );
+      insertEmp.run(
+        "emp-4",
+        "EMP-1004",
+        "u-finance-1",
+        "c-finance-1",
+        "Pooja Karki",
+        "finance@educationsansar.com",
+        "+977 9834455667",
+        "Finance & Accounts",
+        "Accounts Officer",
+        "Full-time",
+        "2025-01-20",
+        48e3,
+        "NPR",
+        "Siddhartha Bank",
+        "003150098234",
+        "PAN-654321098",
+        "Active"
+      );
+      const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      const insertAtt = db.prepare(`
+        INSERT OR IGNORE INTO hr_attendance (id, employee_id, date, status, check_in_time, check_out_time, work_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertAtt.run("att-1", "emp-1", todayStr, "Present", "09:45 AM", "06:15 PM", "Office");
+      insertAtt.run("att-2", "emp-2", todayStr, "Present", "09:30 AM", "06:00 PM", "Office");
+      insertAtt.run("att-3", "emp-3", todayStr, "Present", "10:00 AM", "06:30 PM", "Field Work");
+      insertAtt.run("att-4", "emp-4", todayStr, "Present", "09:15 AM", "05:45 PM", "Office");
+      const insertTx = db.prepare(`
+        INSERT OR REPLACE INTO finance_transactions (
+          id, transaction_id, type, category, title, amount, currency, transaction_date,
+          payment_method, reference_number, status, recorded_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insertTx.run(
+        "tx-1",
+        "TXN-2026-0001",
+        "INCOME",
+        "University Commission",
+        "Quarterly admission commission payout from Sharda University for B.Tech batch",
+        185e3,
+        "INR",
+        "2026-10-15",
+        "Bank Transfer",
+        "UTR-SHARDA-99812",
+        "Completed",
+        "System"
+      );
+      insertTx.run(
+        "tx-2",
+        "TXN-2026-0002",
+        "INCOME",
+        "Student Fee",
+        "Counseling registration and university document processing fee",
+        25e3,
+        "NPR",
+        "2026-10-20",
+        "eSewa",
+        "ESEWA-883192",
+        "Completed",
+        "Pooja Karki"
+      );
+      insertTx.run(
+        "tx-3",
+        "TXN-2026-0003",
+        "EXPENSE",
+        "Digital Ads (Meta/Google)",
+        "Meta Lead Ads and Google Search ad campaign for Kathmandu & Pokhara students",
+        35e3,
+        "INR",
+        "2026-10-18",
+        "Bank Transfer",
+        "META-ADS-INV-7721",
+        "Completed",
+        "Rajesh Verma"
+      );
+      insertTx.run(
+        "tx-4",
+        "TXN-2026-0004",
+        "EXPENSE",
+        "Office Rent",
+        "Education Sansar head office monthly rental and high-speed internet",
+        4e4,
+        "NPR",
+        "2026-10-01",
+        "Bank Transfer",
+        "RENT-OCT-2026",
+        "Completed",
+        "Pooja Karki"
+      );
+    }
     logAudit({
       userId: "u-super",
       userName: "System Administrator",
       action: "SYSTEM_INIT",
       entity: "SYSTEM",
       entityId: "system",
-      newValue: "Clean production schema initialized with Super Admin account"
+      newValue: "Clean production schema initialized with Super Admin account and core staff structure"
     });
   });
   runTx();
-  console.log("\u2705 Clean production database initialization complete! Only Super Admin account exists.");
+  console.log("\u2705 Clean production database initialization complete! Super Admin, Counselors, and Rules initialized.");
 }
 if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")) {
   initDatabase();
