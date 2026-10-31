@@ -28,6 +28,7 @@ import {
   persistLeadToNeon, 
   persistDeletedRecordToNeon, 
   deleteLeadFromNeon, 
+  deleteCounselorAndUserFromNeon,
   persistUniversityCourseToNeon 
 } from '../db/neon.ts';
 
@@ -581,20 +582,28 @@ apiRouter.post('/leads/:id/activities', (req: Request, res: Response) => {
 apiRouter.get('/counselors', (req: Request, res: Response) => {
   const counselors = db.prepare(`
     SELECT c.*,
+      COALESCE(u.role, 'Counselor') as role,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.is_deleted = 0) as total_leads_count,
       (SELECT count(*) FROM leads l WHERE l.assigned_counselor_id = c.id AND l.lead_status IN ('New Lead', 'Contacted', 'Counseling Scheduled', 'Interested', 'Application Started', 'Documents Pending') AND l.is_deleted = 0) as active_leads_count
     FROM counselors c
+    LEFT JOIN users u ON (c.user_id = u.id OR LOWER(c.email) = LOWER(u.email))
     ORDER BY c.name ASC
   `).all();
   res.json(counselors);
 });
 
-apiRouter.put('/counselors/:id/toggle-active', (req: Request, res: Response) => {
-  const c = db.prepare('SELECT is_active, name FROM counselors WHERE id = ?').get(req.params.id) as any;
+apiRouter.put('/counselors/:id/toggle-active', async (req: Request, res: Response) => {
+  const c = db.prepare('SELECT is_active, name, email, user_id FROM counselors WHERE id = ?').get(req.params.id) as any;
   if (!c) return res.status(404).json({ error: 'Counselor not found' });
 
   const newActive = c.is_active === 1 ? 0 : 1;
   db.prepare("UPDATE counselors SET is_active = ?, updated_at = datetime('now') WHERE id = ?").run(newActive, req.params.id);
+  db.prepare("UPDATE users SET is_active = ?, updated_at = datetime('now') WHERE email = ? OR id = ?").run(newActive, c.email, c.user_id);
+
+  if (isNeonEnabled()) {
+    const updated = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+    if (updated) await persistCounselorToNeon(updated);
+  }
 
   logAudit({
     userName: req.body.performedBy || 'Admin',
@@ -607,131 +616,235 @@ apiRouter.put('/counselors/:id/toggle-active', (req: Request, res: Response) => 
   res.json({ success: true, is_active: newActive });
 });
 
-apiRouter.post('/counselors', (req: Request, res: Response) => {
-  const { name, email, phone, specialization_country, assigned_cities, max_capacity, password, username } = req.body;
-  if (!name || !email || !phone) return res.status(400).json({ error: 'Name, email and phone are required' });
+apiRouter.post('/counselors', async (req: Request, res: Response) => {
+  try {
+    const { name, email, phone, specialization_country, assigned_cities, max_capacity, password, username, role } = req.body;
+    if (!name || !email || !phone) {
+      return res.status(400).json({ error: 'Name, email, and phone number are required' });
+    }
 
-  const cId = 'c-' + Date.now();
-  const uId = 'u-' + Date.now();
-  const pwd = password || 'counselor123';
-  const uname = username || email.split('@')[0];
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
+    const userRole = role || 'Counselor';
 
-  db.prepare(`
-    INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active')
-  `).run(cId, uId, name, uname, email, phone, specialization_country || 'Nepal & India', JSON.stringify(assigned_cities || []), max_capacity || 100);
+    // Check duplicate in SQLite or Neon
+    let existingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+    if (!existingUser && isNeonEnabled()) {
+      existingUser = await findUserInNeon(cleanEmail);
+    }
+    if (existingUser) {
+      return res.status(400).json({ error: 'A staff or login account with this email address already exists' });
+    }
 
-  db.prepare(`
-    INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active)
-    VALUES (?, ?, ?, ?, 'Counselor', ?, 1)
-  `).run(uId, name, email, pwd, phone);
+    const cId = 'c-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const uId = 'u-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const pwd = password && password.trim().length >= 4 ? password.trim() : 'counselor123';
+    const uname = username ? username.trim() : cleanEmail.split('@')[0];
+    const now = new Date().toISOString();
 
-  logAudit({
-    userName: req.body.performedBy || 'Admin',
-    action: 'COUNSELOR_CREATED',
-    entity: 'counselor',
-    entityId: cId,
-    newValue: { name, email, phone }
-  });
-
-  res.status(201).json({ success: true, id: cId, user_id: uId });
-});
-
-apiRouter.put('/counselors/:id', (req: Request, res: Response) => {
-  const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status } = req.body;
-  const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
-  if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
-
-  const activeVal = is_active !== undefined ? is_active : (status === 'Inactive' ? 0 : (status === 'Active' ? 1 : counselor.is_active));
-  const statusVal = status || (activeVal === 1 ? 'Active' : 'Inactive');
-
-  db.prepare(`
-    UPDATE counselors 
-    SET name = COALESCE(?, name),
-        email = COALESCE(?, email),
-        phone = COALESCE(?, phone),
-        specialization_country = COALESCE(?, specialization_country),
-        assigned_cities = COALESCE(?, assigned_cities),
-        max_capacity = COALESCE(?, max_capacity),
-        is_active = COALESCE(?, is_active),
-        status = COALESCE(?, status),
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, activeVal, statusVal, req.params.id);
-
-  if (email || name || phone || is_active !== undefined) {
+    // 1. Insert into counselors in SQLite
     db.prepare(`
-      UPDATE users
-      SET name = COALESCE(?, name),
-          email = COALESCE(?, email),
-          phone = COALESCE(?, phone),
-          is_active = COALESCE(?, is_active),
-          updated_at = datetime('now')
-      WHERE email = ? OR id = ?
-    `).run(name, email, phone, activeVal, counselor.email, counselor.user_id);
-  }
+      INSERT INTO counselors (id, user_id, name, username, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, joining_date, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?)
+    `).run(
+      cId,
+      uId,
+      cleanName,
+      uname,
+      cleanEmail,
+      cleanPhone,
+      specialization_country || 'Nepal & India',
+      JSON.stringify(assigned_cities || []),
+      max_capacity || 100,
+      now,
+      now,
+      now
+    );
 
-  logAudit({
-    userName: req.body.performedBy || 'Admin',
-    action: 'COUNSELOR_UPDATED',
-    entity: 'counselor',
-    entityId: req.params.id,
-    newValue: { name, email, phone, status: statusVal }
-  });
+    // 2. Insert into users in SQLite with selected role
+    db.prepare(`
+      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, now, now);
 
-  res.json({ success: true });
-});
+    // 3. Persist to Neon PostgreSQL server-side
+    if (isNeonEnabled()) {
+      await persistUserToNeon({
+        id: uId,
+        name: cleanName,
+        email: cleanEmail,
+        password_hash: pwd,
+        role: userRole,
+        phone: cleanPhone,
+        is_active: 1
+      });
 
-apiRouter.delete('/counselors/:id', (req: Request, res: Response) => {
-  const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
-  if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
-
-  const activeLeadCount = (db.prepare('SELECT count(*) as count FROM leads WHERE assigned_counselor_id = ? AND is_deleted = 0').get(req.params.id) as any).count;
-  const reassignToCounselorId = req.body?.reassignToCounselorId || req.query?.reassignToCounselorId;
-
-  if (activeLeadCount > 0) {
-    if (!reassignToCounselorId) {
-      return res.status(400).json({
-        error: `Counselor has ${activeLeadCount} active leads. Please select a counselor to reassign leads before deleting.`,
-        activeLeadCount
+      await persistCounselorToNeon({
+        id: cId,
+        user_id: uId,
+        name: cleanName,
+        username: uname,
+        email: cleanEmail,
+        phone: cleanPhone,
+        specialization_country: specialization_country || 'Nepal & India',
+        assigned_cities: JSON.stringify(assigned_cities || []),
+        max_capacity: max_capacity || 100,
+        is_active: 1,
+        status: 'Active',
+        joining_date: now
       });
     }
-    const targetCounselor = db.prepare('SELECT id, name FROM counselors WHERE id = ?').get(reassignToCounselorId) as any;
-    if (!targetCounselor) {
-      return res.status(400).json({ error: 'Target reassignment counselor not found' });
-    }
-    db.prepare(`
-      UPDATE leads 
-      SET assigned_counselor_id = ?, assigned_counselor_name = ?, updated_at = datetime('now')
-      WHERE assigned_counselor_id = ? AND is_deleted = 0
-    `).run(targetCounselor.id, targetCounselor.name, req.params.id);
 
     logAudit({
       userName: req.body.performedBy || 'Admin',
-      action: 'COUNSELOR_LEADS_REASSIGNED_ON_DELETE',
+      action: 'COUNSELOR_CREATED',
+      entity: 'counselor',
+      entityId: cId,
+      newValue: { name: cleanName, email: cleanEmail, phone: cleanPhone, role: userRole }
+    });
+
+    res.status(201).json({ success: true, id: cId, user_id: uId, role: userRole });
+  } catch (err: any) {
+    console.error('Error creating staff/counselor:', err);
+    res.status(500).json({ error: err.message || 'Failed to create staff member' });
+  }
+});
+
+apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, email, phone, specialization_country, assigned_cities, max_capacity, is_active, status, role } = req.body;
+    const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+    if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
+
+    const activeVal = is_active !== undefined ? is_active : (status === 'Inactive' ? 0 : (status === 'Active' ? 1 : counselor.is_active));
+    const statusVal = status || (activeVal === 1 ? 'Active' : 'Inactive');
+
+    db.prepare(`
+      UPDATE counselors 
+      SET name = COALESCE(?, name),
+          email = COALESCE(?, email),
+          phone = COALESCE(?, phone),
+          specialization_country = COALESCE(?, specialization_country),
+          assigned_cities = COALESCE(?, assigned_cities),
+          max_capacity = COALESCE(?, max_capacity),
+          is_active = COALESCE(?, is_active),
+          status = COALESCE(?, status),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(name, email, phone, specialization_country, assigned_cities ? JSON.stringify(assigned_cities) : null, max_capacity, activeVal, statusVal, req.params.id);
+
+    if (email || name || phone || is_active !== undefined || role) {
+      db.prepare(`
+        UPDATE users
+        SET name = COALESCE(?, name),
+            email = COALESCE(?, email),
+            phone = COALESCE(?, phone),
+            role = COALESCE(?, role),
+            is_active = COALESCE(?, is_active),
+            updated_at = datetime('now')
+        WHERE email = ? OR id = ?
+      `).run(name, email, phone, role || null, activeVal, counselor.email, counselor.user_id);
+    }
+
+    if (isNeonEnabled()) {
+      const updatedCounselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+      if (updatedCounselor) {
+        await persistCounselorToNeon(updatedCounselor);
+      }
+      const updatedUser = db.prepare('SELECT * FROM users WHERE email = ? OR id = ?').get(counselor.email, counselor.user_id) as any;
+      if (updatedUser) {
+        await persistUserToNeon(updatedUser);
+      }
+    }
+
+    logAudit({
+      userName: req.body.performedBy || 'Admin',
+      action: 'COUNSELOR_UPDATED',
       entity: 'counselor',
       entityId: req.params.id,
-      newValue: { reassignedTo: targetCounselor.name, count: activeLeadCount }
+      newValue: { name, email, phone, status: statusVal, role }
     });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating counselor:', err);
+    res.status(500).json({ error: err.message || 'Failed to update counselor' });
   }
+});
 
-  db.prepare('DELETE FROM users WHERE email = ? OR id = ?').run(counselor.email, counselor.user_id);
-  db.prepare('DELETE FROM counselors WHERE id = ?').run(req.params.id);
+apiRouter.delete('/counselors/:id', async (req: Request, res: Response) => {
+  try {
+    const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
+    if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
 
-  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
-  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
-    tombId, 'counselor', req.params.id, counselor.email, JSON.stringify({ name: counselor.name }), req.body.performedBy || 'Admin'
-  );
+    const activeLeadCount = (db.prepare('SELECT count(*) as count FROM leads WHERE assigned_counselor_id = ? AND is_deleted = 0').get(req.params.id) as any).count;
+    const reassignToCounselorId = req.body?.reassignToCounselorId || req.query?.reassignToCounselorId;
 
-  logAudit({
-    userName: req.body.performedBy || 'Admin',
-    action: 'COUNSELOR_DELETED',
-    entity: 'counselor',
-    entityId: req.params.id,
-    oldValue: { name: counselor.name, email: counselor.email }
-  });
+    if (activeLeadCount > 0) {
+      if (!reassignToCounselorId) {
+        return res.status(400).json({
+          error: `Counselor has ${activeLeadCount} active leads. Please select a counselor to reassign leads before deleting.`,
+          activeLeadCount
+        });
+      }
+      const targetCounselor = db.prepare('SELECT id, name FROM counselors WHERE id = ?').get(reassignToCounselorId) as any;
+      if (!targetCounselor) {
+        return res.status(400).json({ error: 'Target reassignment counselor not found' });
+      }
+      db.prepare(`
+        UPDATE leads 
+        SET assigned_counselor_id = ?, assigned_counselor_name = ?, updated_at = datetime('now')
+        WHERE assigned_counselor_id = ? AND is_deleted = 0
+      `).run(targetCounselor.id, targetCounselor.name, req.params.id);
 
-  res.json({ success: true, message: `Counselor ${counselor.name} deleted successfully.` });
+      logAudit({
+        userName: req.body.performedBy || 'Admin',
+        action: 'COUNSELOR_LEADS_REASSIGNED_ON_DELETE',
+        entity: 'counselor',
+        entityId: req.params.id,
+        newValue: { reassignedTo: targetCounselor.name, count: activeLeadCount }
+      });
+    }
+
+    // Delete both user login and counselor profile from local SQLite
+    db.prepare('DELETE FROM users WHERE email = ? OR id = ?').run(counselor.email, counselor.user_id);
+    db.prepare('DELETE FROM counselors WHERE id = ?').run(req.params.id);
+
+    // Delete permanently from Neon PostgreSQL server-side
+    if (isNeonEnabled()) {
+      await deleteCounselorAndUserFromNeon(req.params.id, counselor.email, counselor.user_id);
+    }
+
+    const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+      tombId, 'counselor', req.params.id, counselor.email, JSON.stringify({ name: counselor.name }), req.body.performedBy || 'Admin'
+    );
+
+    if (isNeonEnabled()) {
+      await persistDeletedRecordToNeon({
+        id: tombId,
+        entity_type: 'counselor',
+        entity_id: req.params.id,
+        identifier: counselor.email,
+        details: JSON.stringify({ name: counselor.name }),
+        deleted_by: req.body.performedBy || 'Admin'
+      });
+    }
+
+    logAudit({
+      userName: req.body.performedBy || 'Admin',
+      action: 'COUNSELOR_DELETED',
+      entity: 'counselor',
+      entityId: req.params.id,
+      oldValue: { name: counselor.name, email: counselor.email }
+    });
+
+    res.json({ success: true, message: `Staff member ${counselor.name} and login account deleted successfully.` });
+  } catch (err: any) {
+    console.error('Error deleting counselor:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete staff member' });
+  }
 });
 
 apiRouter.post('/counselors/:id/reset-password', (req: Request, res: Response) => {

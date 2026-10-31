@@ -313,6 +313,23 @@ export async function deleteLeadFromNeon(leadId: string): Promise<boolean> {
 }
 
 /**
+ * Delete a counselor and corresponding user account from Neon
+ */
+export async function deleteCounselorAndUserFromNeon(counselorId: string, email?: string, userId?: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    if (email || userId) {
+      await sql.query(`DELETE FROM users WHERE LOWER(email) = LOWER($1) OR id = $2`, [email || '', userId || '']);
+    }
+    await sql.query(`DELETE FROM counselors WHERE id = $1`, [counselorId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Counselor/User deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
  * Persist University Course & Fee Structure to Neon
  */
 export async function persistUniversityCourseToNeon(uc: any): Promise<boolean> {

@@ -99,6 +99,7 @@ export interface Counselor {
   email: string;
   phone: string;
   username?: string;
+  role?: string;
   joining_date?: string;
   status?: string;
   specialization_country?: string;

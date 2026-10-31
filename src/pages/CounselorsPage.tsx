@@ -45,6 +45,7 @@ export const CounselorsPage: React.FC = () => {
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
+  const [formRole, setFormRole] = useState<'Admin' | 'Counselor' | 'Marketing Manager' | 'Telecaller' | 'Management'>('Counselor');
   const [formSpec, setFormSpec] = useState('Nepal & India');
   const [formCapacity, setFormCapacity] = useState('100');
   const [formPassword, setFormPassword] = useState('counselor123');
@@ -87,6 +88,7 @@ export const CounselorsPage: React.FC = () => {
     setFormName('');
     setFormEmail('');
     setFormPhone('');
+    setFormRole('Counselor');
     setFormSpec('Nepal & India');
     setFormCapacity('100');
     setFormPassword('counselor123');
@@ -103,16 +105,17 @@ export const CounselorsPage: React.FC = () => {
         name: formName,
         email: formEmail,
         phone: formPhone,
+        role: formRole,
         specialization_country: formSpec,
         assigned_cities: citiesArray,
         max_capacity: parseInt(formCapacity, 10) || 100,
         password: formPassword || 'counselor123',
       });
-      addToast(`Counselor ${formName} added with login credentials!`, 'success');
+      addToast(`${formRole} ${formName} added with login credentials!`, 'success');
       setAddModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
-      addToast(err.message || 'Failed to add counselor', 'error');
+      addToast(err.message || 'Failed to add staff member', 'error');
     }
   };
 
@@ -121,6 +124,7 @@ export const CounselorsPage: React.FC = () => {
     setFormName(c.name);
     setFormEmail(c.email);
     setFormPhone(c.phone);
+    setFormRole((c.role as any) || 'Counselor');
     setFormSpec(c.specialization_country || 'Nepal & India');
     setFormCapacity(String(c.max_capacity || 100));
     setFormStatus(c.is_active === 1 ? 'Active' : 'Inactive');
@@ -142,13 +146,14 @@ export const CounselorsPage: React.FC = () => {
         name: formName,
         email: formEmail,
         phone: formPhone,
+        role: formRole,
         specialization_country: formSpec,
         assigned_cities: citiesArray,
         max_capacity: parseInt(formCapacity, 10) || 100,
         is_active: formStatus === 'Active' ? 1 : 0,
         status: formStatus,
       });
-      addToast(`Counselor ${formName} updated successfully`, 'success');
+      addToast(`Staff member ${formName} updated successfully`, 'success');
       setEditModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
@@ -185,11 +190,11 @@ export const CounselorsPage: React.FC = () => {
     if (!selectedCounselor) return;
     try {
       await api.deleteCounselor(selectedCounselor.id, reassignTargetId || undefined, 'Admin');
-      addToast(`Counselor ${selectedCounselor.name} deleted successfully`, 'success');
+      addToast(`Staff member ${selectedCounselor.name} and login account deleted successfully`, 'success');
       setDeleteModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
-      addToast(err.message || 'Failed to delete counselor', 'error');
+      addToast(err.message || 'Failed to delete staff member', 'error');
     }
   };
 
@@ -200,13 +205,13 @@ export const CounselorsPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-blue-600 font-semibold text-xs tracking-wider uppercase mb-1">
             <Briefcase className="w-4 h-4" />
-            <span>Admissions Staff Directory</span>
+            <span>Staff &amp; Counselor Directory</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-            Counselor Management &amp; Assignment
+            Staff &amp; Counselor Management
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Configure counselor team accounts, reset access credentials, toggle active workload distribution, and oversee individual conversion performance.
+            Create, manage, and delete staff logins for Admins, Counselors, Marketing Managers, and Telecallers. All accounts are synced directly to Neon Cloud Database.
           </p>
         </div>
 
@@ -216,7 +221,7 @@ export const CounselorsPage: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-900/20 transition-all self-start sm:self-auto"
           >
             <UserPlus className="w-4 h-4" />
-            <span>Add Counselor</span>
+            <span>Add Staff Member</span>
           </button>
         )}
       </div>
@@ -225,7 +230,7 @@ export const CounselorsPage: React.FC = () => {
       {loading ? (
         <div className="py-20 text-center flex flex-col items-center justify-center gap-2 text-slate-500 text-xs">
           <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
-          <span>Loading counselor team...</span>
+          <span>Loading staff &amp; counselor team...</span>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -236,6 +241,7 @@ export const CounselorsPage: React.FC = () => {
             } catch (e) {}
 
             const isActive = c.is_active === 1;
+            const staffRole = c.role || 'Counselor';
 
             return (
               <div
@@ -254,7 +260,22 @@ export const CounselorsPage: React.FC = () => {
                         {c.name.charAt(0)}
                       </div>
                       <div>
-                        <h3 className="font-bold text-sm text-slate-900 leading-tight">{c.name}</h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-sm text-slate-900 leading-tight">{c.name}</h3>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                              staffRole === 'Admin' || staffRole === 'Super Admin'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : staffRole === 'Marketing Manager' || staffRole === 'Marketing'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : staffRole === 'Telecaller'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}
+                          >
+                            {staffRole}
+                          </span>
+                        </div>
                         <div className="text-[11px] text-slate-400 font-mono mt-0.5">{c.email}</div>
                       </div>
                     </div>
@@ -374,7 +395,7 @@ export const CounselorsPage: React.FC = () => {
         </div>
       )}
 
-      {/* 1. Add Counselor Modal */}
+      {/* 1. Add Counselor / Staff Modal */}
       {addModalOpen && (
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
           <form
@@ -384,7 +405,7 @@ export const CounselorsPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-4 h-4 text-blue-600" />
-                Add New Counselor
+                Add New Staff Member / Login Account
               </h3>
               <button
                 type="button"
@@ -408,20 +429,51 @@ export const CounselorsPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Email (Login ID)</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address (Login Username)</label>
               <input
                 required
                 type="email"
                 value={formEmail}
                 onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="counselor@educationsansar.com"
+                placeholder="staff@educationsansar.com"
                 className="w-full p-2 text-xs rounded-xl border border-slate-300"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Staff Role &amp; Access <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formRole}
+                  onChange={(e) => setFormRole(e.target.value as any)}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Counselor">Counselor</option>
+                  <option value="Admin">Admin</option>
+                  <option value="Marketing Manager">Marketing Manager</option>
+                  <option value="Telecaller">Telecaller</option>
+                  <option value="Management">Management</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Initial Password</label>
+                <input
+                  required
+                  type="text"
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  placeholder="Min 4 chars"
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Phone / WhatsApp</label>
                 <input
                   required
                   type="tel"
@@ -433,14 +485,13 @@ export const CounselorsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Initial Password</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Target Specialization</label>
                 <input
-                  required
                   type="text"
-                  value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
-                  placeholder="Password"
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-mono"
+                  value={formSpec}
+                  onChange={(e) => setFormSpec(e.target.value)}
+                  placeholder="Nepal & North India"
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
                 />
               </div>
             </div>
@@ -456,26 +507,14 @@ export const CounselorsPage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Target Specialization</label>
-                <input
-                  type="text"
-                  value={formSpec}
-                  onChange={(e) => setFormSpec(e.target.value)}
-                  placeholder="Nepal & North India"
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Max Capacity</label>
-                <input
-                  type="number"
-                  value={formCapacity}
-                  onChange={(e) => setFormCapacity(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Max Lead Capacity</label>
+              <input
+                type="number"
+                value={formCapacity}
+                onChange={(e) => setFormCapacity(e.target.value)}
+                className="w-full p-2 text-xs rounded-xl border border-slate-300"
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -490,14 +529,14 @@ export const CounselorsPage: React.FC = () => {
                 type="submit"
                 className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs"
               >
-                Save Counselor
+                Create Staff Account
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* 2. Edit Counselor Modal */}
+      {/* 2. Edit Counselor / Staff Modal */}
       {editModalOpen && selectedCounselor && (
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
           <form
@@ -507,7 +546,7 @@ export const CounselorsPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <Edit2 className="w-4 h-4 text-blue-600" />
-                Edit Counselor Profile
+                Edit Staff Profile &amp; Role
               </h3>
               <button
                 type="button"
@@ -552,6 +591,37 @@ export const CounselorsPage: React.FC = () => {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Account Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={formRole}
+                  onChange={(e) => setFormRole(e.target.value as any)}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800"
+                >
+                  <option value="Counselor">Counselor</option>
+                  <option value="Admin">Admin</option>
+                  <option value="Marketing Manager">Marketing Manager</option>
+                  <option value="Telecaller">Telecaller</option>
+                  <option value="Management">Management</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Workload Status</label>
+                <select
+                  value={formStatus}
+                  onChange={(e) => setFormStatus(e.target.value)}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
+                >
+                  <option value="Active">Active (Accepting Leads)</option>
+                  <option value="Inactive">Inactive (Paused)</option>
+                </select>
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Cities</label>
               <input
@@ -574,15 +644,13 @@ export const CounselorsPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Workload Status</label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl border border-slate-300 font-semibold"
-                >
-                  <option value="Active">Active (Accepting Leads)</option>
-                  <option value="Inactive">Inactive (Paused)</option>
-                </select>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Max Capacity</label>
+                <input
+                  type="number"
+                  value={formCapacity}
+                  onChange={(e) => setFormCapacity(e.target.value)}
+                  className="w-full p-2 text-xs rounded-xl border border-slate-300"
+                />
               </div>
             </div>
 
@@ -598,7 +666,7 @@ export const CounselorsPage: React.FC = () => {
                 type="submit"
                 className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs"
               >
-                Update Profile
+                Update Profile &amp; Role
               </button>
             </div>
           </form>
@@ -627,7 +695,7 @@ export const CounselorsPage: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-600">
-              Enter a new login password for counselor <strong>{selectedCounselor.name}</strong> ({selectedCounselor.email}):
+              Enter a new login password for <strong>{selectedCounselor.name}</strong> ({selectedCounselor.email}):
             </p>
 
             <div>
@@ -661,7 +729,7 @@ export const CounselorsPage: React.FC = () => {
         </div>
       )}
 
-      {/* 4. Delete Counselor with Reassignment Modal */}
+      {/* 4. Delete Counselor / Staff with Reassignment Modal */}
       {deleteModalOpen && selectedCounselor && (
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center">
           <div className="w-full max-w-md bg-white rounded-2xl p-6 space-y-4 shadow-xl border border-slate-200">
@@ -670,20 +738,20 @@ export const CounselorsPage: React.FC = () => {
                 <AlertTriangle className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Delete Counselor Account</h3>
+                <h3 className="text-sm font-bold text-slate-900">Delete Staff &amp; Login Account</h3>
                 <p className="text-xs text-slate-500">
-                  Are you sure you want to delete {selectedCounselor.name}?
+                  Delete {selectedCounselor.name} ({selectedCounselor.role || 'Counselor'}) permanently?
                 </p>
               </div>
             </div>
 
             <div className="bg-amber-50 rounded-xl p-3 border border-amber-200 text-xs text-amber-900 space-y-2">
               <p>
-                <strong>Lead Reassignment Policy:</strong> This counselor currently has{' '}
+                <strong>Lead Reassignment:</strong> This staff member has{' '}
                 <strong>{(selectedCounselor as any).total_leads_count || (selectedCounselor as any).current_active_leads || 0} leads</strong>.
               </p>
               <p>
-                To avoid orphaned student leads, choose a counselor to inherit all assigned leads:
+                Choose another active staff member or counselor to inherit their assigned leads:
               </p>
 
               <div>
@@ -693,17 +761,21 @@ export const CounselorsPage: React.FC = () => {
                   onChange={(e) => setReassignTargetId(e.target.value)}
                   className="w-full p-2 text-xs rounded-lg border border-amber-300 bg-white"
                 >
-                  <option value="">-- Select Target Counselor --</option>
+                  <option value="">-- No reassignment (or select staff) --</option>
                   {counselors
                     .filter((c) => c.id !== selectedCounselor.id)
                     .map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} ({c.email})
+                        {c.name} ({c.role || 'Counselor'} - {c.email})
                       </option>
                     ))}
                 </select>
               </div>
             </div>
+
+            <p className="text-[11px] text-slate-500">
+              Deleting this account removes both the staff profile and their login user account permanently from Neon PostgreSQL.
+            </p>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
@@ -717,7 +789,7 @@ export const CounselorsPage: React.FC = () => {
                 onClick={handleDeleteCounselor}
                 className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
               >
-                Reassign &amp; Delete
+                Delete Staff &amp; Login
               </button>
             </div>
           </div>
