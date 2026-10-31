@@ -18,7 +18,12 @@
     "start": "node dist-server/index.js",
     "start:ts": "NODE_ENV=production tsx server/index.ts",
     "tunnel": "npx localtunnel --port 5001",
-    "seed": "tsx server/db/seed.ts"
+    "seed": "tsx server/db/seed.ts",
+    "electron:start": "electron electron/main.cjs",
+    "electron:dev": "concurrently \"vite --port 5173\" \"ELECTRON_DEV=true electron electron/main.cjs\"",
+    "build:desktop": "npm run build:client && electron-builder --config electron-builder.json",
+    "build:desktop:mac": "npm run build:client && electron-builder --mac --config electron-builder.json",
+    "build:desktop:win": "npm run build:client && electron-builder --win --config electron-builder.json"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
@@ -45,6 +50,8 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",

@@ -1,4 +1,7 @@
-const API_BASE = '/api';
+const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
+const API_BASE = isFileProtocol 
+  ? ((import.meta as any).env?.VITE_API_URL || 'https://education-sansar-crm.vercel.app/api')
+  : '/api';
 
 export async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   let userRole = '';
