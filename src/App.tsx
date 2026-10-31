@@ -5,6 +5,8 @@ import { Header } from './components/layout/Header';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { CreateLeadModal } from './components/common/CreateLeadModal';
 
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+
 // Pages
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -102,31 +104,33 @@ export const App: React.FC = () => {
         {/* Dynamic Page Routes */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/leads" element={<LeadsPage />} />
-              <Route path="/leads/:id" element={<LeadDetailPage />} />
-              <Route path="/my-leads" element={<MyLeadsPage />} />
-              <Route path="/pipeline" element={<PipelinePage />} />
-              <Route path="/followups" element={<FollowupsPage />} />
-              <Route path="/applications" element={<ApplicationsPage />} />
-              <Route path="/students" element={<StudentsPage />} />
-              <Route path="/universities" element={<UniversitiesPage />} />
-              <Route path="/courses" element={<CoursesPage />} />
-              <Route path="/university-fees" element={<UniversityFeesPage />} />
-              <Route path="/counselors" element={<CounselorsPage />} />
-              <Route path="/campaigns" element={<CampaignsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/documents" element={<DocumentsPage />} />
-              <Route path="/notifications" element={<NotificationsPage />} />
-              <Route path="/integrations" element={<IntegrationsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/hr" element={<HRPage />} />
-              <Route path="/finance" element={<FinancePage />} />
-              <Route path="/communications" element={<CommunicationsPage />} />
-              <Route path="/login" element={<Navigate to="/" replace />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <ErrorBoundary fallbackTitle="Module rendering issue detected">
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/leads" element={<LeadsPage />} />
+                <Route path="/leads/:id" element={<LeadDetailPage />} />
+                <Route path="/my-leads" element={<MyLeadsPage />} />
+                <Route path="/pipeline" element={<PipelinePage />} />
+                <Route path="/followups" element={<FollowupsPage />} />
+                <Route path="/applications" element={<ApplicationsPage />} />
+                <Route path="/students" element={<StudentsPage />} />
+                <Route path="/universities" element={<UniversitiesPage />} />
+                <Route path="/courses" element={<CoursesPage />} />
+                <Route path="/university-fees" element={<UniversityFeesPage />} />
+                <Route path="/counselors" element={<CounselorsPage />} />
+                <Route path="/campaigns" element={<CampaignsPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/integrations" element={<IntegrationsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/hr" element={<HRPage />} />
+                <Route path="/finance" element={<FinancePage />} />
+                <Route path="/communications" element={<CommunicationsPage />} />
+                <Route path="/login" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </ErrorBoundary>
           </div>
         </main>
       </div>

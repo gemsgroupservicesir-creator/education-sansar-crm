@@ -27,6 +27,27 @@ import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 import { EmailTemplate, BulkEmailCampaign } from '../types';
 
+// Safe helper utilities to prevent any string/array method mismatches
+const toArray = (val: any): string[] => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean).map(String);
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === '[]') return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+    } catch {}
+    return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const formatTags = (val: any): string => {
+  const arr = toArray(val);
+  return arr.length > 0 ? `(${arr.join(', ')})` : '';
+};
+
 export const CommunicationsPage: React.FC = () => {
   const { addToast } = useNotifications();
   const { user, isSuperAdmin, hasPermission } = useAuth();
@@ -131,11 +152,15 @@ Education Sansar`);
           filter_city: filterCity
         });
         if (active) {
-          setTargetCount(res.count);
-          setSampleLeads(res.sample || []);
+          setTargetCount(typeof res?.count === 'number' ? res.count : 0);
+          setSampleLeads(Array.isArray(res?.sample) ? res.sample : []);
         }
       } catch (err: any) {
         console.warn('Error fetching count:', err);
+        if (active) {
+          setTargetCount(0);
+          setSampleLeads([]);
+        }
       } finally {
         if (active) setLoadingCount(false);
       }
@@ -150,9 +175,9 @@ Education Sansar`);
     let active = true;
     const updatePreview = async () => {
       try {
-        const sampleStudent = sampleLeads[0] ? {
-          student_name: sampleLeads[0].student_name,
-          email: sampleLeads[0].email,
+        const sampleStudent = Array.isArray(sampleLeads) && sampleLeads[0] ? {
+          student_name: sampleLeads[0].student_name || 'Student',
+          email: sampleLeads[0].email || 'student@example.com',
           preferred_course: sampleLeads[0].course || 'B.Tech Computer Science',
           preferred_university: sampleLeads[0].university || 'Sharda University',
           city: sampleLeads[0].city || 'Kathmandu'
@@ -163,9 +188,9 @@ Education Sansar`);
           content,
           sampleData: sampleStudent
         });
-        if (active) {
-          setPreviewSubject(res.subject);
-          setPreviewContent(res.content);
+        if (active && res) {
+          setPreviewSubject(res.subject || subject);
+          setPreviewContent(res.content || content);
         }
       } catch (e) {
         if (active) {
@@ -186,7 +211,15 @@ Education Sansar`);
   const fetchFilterOptions = async () => {
     try {
       const opts = await api.getEmailFilterOptions();
-      if (opts) setFilterOptions(opts);
+      if (opts && typeof opts === 'object') {
+        setFilterOptions({
+          courses: Array.isArray(opts.courses) ? opts.courses : [],
+          universities: Array.isArray(opts.universities) ? opts.universities : [],
+          statuses: Array.isArray(opts.statuses) ? opts.statuses : [],
+          temperatures: Array.isArray(opts.temperatures) ? opts.temperatures : [],
+          totalLeadsWithEmail: typeof opts.totalLeadsWithEmail === 'number' ? opts.totalLeadsWithEmail : 0
+        });
+      }
     } catch (e) {
       console.warn('Failed to load filter options:', e);
     }
@@ -204,9 +237,10 @@ Education Sansar`);
         category: templateFilterCategory,
         course: templateFilterCourse
       });
-      setTemplates(data);
+      setTemplates(Array.isArray(data) ? data : []);
     } catch (err: any) {
       addToast(err.message || 'Failed to fetch templates', 'error');
+      setTemplates([]);
     } finally {
       setLoadingTemplates(false);
     }
@@ -217,9 +251,10 @@ Education Sansar`);
     setLoadingCampaigns(true);
     try {
       const data = await api.getEmailCampaigns();
-      setCampaigns(data);
+      setCampaigns(Array.isArray(data) ? data : []);
     } catch (err: any) {
       addToast(err.message || 'Failed to fetch campaigns history', 'error');
+      setCampaigns([]);
     } finally {
       setLoadingCampaigns(false);
     }
@@ -238,16 +273,18 @@ Education Sansar`);
   const handleSelectTemplate = (tId: string) => {
     setSelectedTemplateId(tId);
     if (!tId) return;
-    const found = templates.find(t => t.id === tId);
+    const allTemplates = Array.isArray(templates) ? templates : [];
+    const found = allTemplates.find(t => t.id === tId);
     if (found) {
-      setSubject(found.subject);
-      setContent(found.content);
-      // Auto-focus target course if present and current course filter is empty
-      if (found.target_courses && found.target_courses.length > 0 && !filterCourse) {
-        setFilterCourse(found.target_courses[0]);
+      setSubject(found.subject || '');
+      setContent(found.content || '');
+      const coursesList = toArray(found.target_courses);
+      const unisList = toArray(found.target_universities);
+      if (coursesList.length > 0 && !filterCourse) {
+        setFilterCourse(coursesList[0]);
       }
-      if (found.target_universities && found.target_universities.length > 0 && !filterUniversity) {
-        setFilterUniversity(found.target_universities[0]);
+      if (unisList.length > 0 && !filterUniversity) {
+        setFilterUniversity(unisList[0]);
       }
       addToast(`Applied template: "${found.name}"`, 'info');
     }
@@ -329,8 +366,8 @@ Education Sansar`);
     setTmplSubject(t.subject);
     setTmplContent(t.content);
     setTmplDescription(t.description || '');
-    setTmplCourses(Array.isArray(t.target_courses) ? t.target_courses.join(', ') : (t.target_courses || ''));
-    setTmplUniversities(Array.isArray(t.target_universities) ? t.target_universities.join(', ') : (t.target_universities || ''));
+    setTmplCourses(toArray(t.target_courses).join(', '));
+    setTmplUniversities(toArray(t.target_universities).join(', '));
     setTemplateModalOpen(true);
   };
 
@@ -508,7 +545,7 @@ Education Sansar`);
                   />
                   {/* Dynamic course chips with real-time database counts */}
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {filterOptions.courses.length > 0 ? (
+                    {Array.isArray(filterOptions?.courses) && filterOptions.courses.length > 0 ? (
                       filterOptions.courses.map((c) => (
                         <button
                           key={c.name}
@@ -573,7 +610,7 @@ Education Sansar`);
                   />
                   {/* Dynamic university chips with real-time database counts */}
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    {filterOptions.universities.length > 0 ? (
+                    {Array.isArray(filterOptions?.universities) && filterOptions.universities.length > 0 ? (
                       filterOptions.universities.map((u) => (
                         <button
                           key={u.name}
@@ -689,10 +726,10 @@ Education Sansar`);
               {/* Sample Matching Students */}
               <div className="pt-2 border-t border-slate-100">
                 <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
-                  <span>Sample Matched Students ({sampleLeads.length})</span>
+                  <span>Sample Matched Students ({Array.isArray(sampleLeads) ? sampleLeads.length : 0})</span>
                   <span className="text-[10px] text-slate-400">Total: {targetCount}</span>
                 </div>
-                {sampleLeads.length === 0 ? (
+                {!Array.isArray(sampleLeads) || sampleLeads.length === 0 ? (
                   <div className="text-center py-4 text-xs text-slate-400 italic bg-slate-50 rounded-xl border border-slate-100">
                     No matching leads found for these filters
                   </div>
@@ -735,9 +772,9 @@ Education Sansar`);
                   className="w-full p-2.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Choose Template (or write custom) --</option>
-                  {templates.map((t) => (
+                  {(Array.isArray(templates) ? templates : []).map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} [{t.category}] {t.target_courses?.length ? `(${t.target_courses.join(', ')})` : ''}
+                      {t.name} [{t.category}] {formatTags(t.target_courses)}
                     </option>
                   ))}
                 </select>
@@ -988,7 +1025,7 @@ Education Sansar`);
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
               <span>Loading email templates...</span>
             </div>
-          ) : templates.length === 0 ? (
+          ) : !Array.isArray(templates) || templates.length === 0 ? (
             <div className="py-16 text-center bg-white rounded-3xl border border-slate-200 space-y-3">
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
               <h3 className="text-sm font-bold text-slate-700">No Email Templates Found</h3>
@@ -996,7 +1033,7 @@ Education Sansar`);
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {templates.map((tmpl) => (
+              {(Array.isArray(templates) ? templates : []).map((tmpl) => (
                 <div
                   key={tmpl.id}
                   className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-xs hover:border-blue-300 hover:shadow-md transition-all flex flex-col justify-between space-y-4"
@@ -1005,7 +1042,7 @@ Education Sansar`);
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                          {tmpl.category.replace(/_/g, ' ')}
+                          {tmpl.category ? tmpl.category.replace(/_/g, ' ') : 'General'}
                         </span>
                         <h3 className="text-sm font-bold text-slate-900 mt-1.5 leading-snug">{tmpl.name}</h3>
                       </div>
@@ -1037,13 +1074,13 @@ Education Sansar`);
                     )}
 
                     {/* Target Courses Tags */}
-                    {Array.isArray(tmpl.target_courses) && tmpl.target_courses.length > 0 && (
+                    {toArray(tmpl.target_courses).length > 0 && (
                       <div>
                         <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                           Target Courses:
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {tmpl.target_courses.map((crs, i) => (
+                          {toArray(tmpl.target_courses).map((crs, i) => (
                             <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
                               {crs}
                             </span>
@@ -1053,13 +1090,13 @@ Education Sansar`);
                     )}
 
                     {/* Target Universities Tags */}
-                    {Array.isArray(tmpl.target_universities) && tmpl.target_universities.length > 0 && (
+                    {toArray(tmpl.target_universities).length > 0 && (
                       <div>
                         <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                           Target Universities:
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {tmpl.target_universities.map((uni, i) => (
+                          {toArray(tmpl.target_universities).map((uni, i) => (
                             <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
                               {uni}
                             </span>
@@ -1123,7 +1160,7 @@ Education Sansar`);
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
               <span>Loading campaign logs...</span>
             </div>
-          ) : campaigns.length === 0 ? (
+          ) : !Array.isArray(campaigns) || campaigns.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400 italic">
               No bulk email campaigns have been sent yet.
             </div>
@@ -1144,7 +1181,7 @@ Education Sansar`);
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {campaigns.map((camp) => (
+                  {(Array.isArray(campaigns) ? campaigns : []).map((camp) => (
                     <tr key={camp.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3 font-bold text-slate-900">{camp.name}</td>
                       <td className="py-3 text-slate-700 max-w-xs truncate" title={camp.subject}>
