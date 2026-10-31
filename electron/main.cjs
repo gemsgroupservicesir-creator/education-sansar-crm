@@ -22,16 +22,20 @@ function createWindow() {
     backgroundColor: '#0f172a'
   });
 
-  // Determine whether to load Vite dev server or production dist files
+  // Primary live cloud app URL
+  const LIVE_URL = process.env.VITE_APP_URL || 'https://education-sansar-crm.vercel.app';
   const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173').catch(() => {
-      // If dev server not running, fallback to dist
-      mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+      mainWindow.loadURL(LIVE_URL);
     });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    // Connect directly to live app so any change or deployment is instantly visible in the desktop app
+    mainWindow.loadURL(LIVE_URL).catch((err) => {
+      console.warn('Network issue reaching cloud app, loading local offline fallback:', err);
+      mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    });
   }
 
   // Smooth show once ready
@@ -39,9 +43,12 @@ function createWindow() {
     mainWindow.show();
   });
 
-  // Handle external link clicks in system default browser
+  // Handle links: keep CRM internal routes inside the desktop app, open external sites in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:')) {
+    if (url.startsWith(LIVE_URL) || url.startsWith('http://localhost') || url.startsWith('file:')) {
+      return { action: 'allow' };
+    }
+    if (url.startsWith('http:') || url.startsWith('https:') || url.startsWith('mailto:') || url.startsWith('tel:')) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
