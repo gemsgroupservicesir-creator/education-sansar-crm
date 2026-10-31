@@ -1,0 +1,11 @@
+release/
+*.dmg
+*.zip
+*.blockmap
+node_modules/
+.git/
+.neon/
+.env*
+*.db
+*.db-shm
+*.db-wal
