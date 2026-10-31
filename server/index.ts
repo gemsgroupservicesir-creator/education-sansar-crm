@@ -38,14 +38,16 @@ app.use('/uploads', express.static(uploadsDir));
 app.use('/api', apiRouter);
 
 // Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
+const handleHealth = (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     system: 'Education Sansar CRM Backend',
     version: '1.0.0',
     timestamp: new Date().toISOString()
   });
-});
+};
+app.get('/health', handleHealth);
+app.get('/api/health', handleHealth);
 
 // Production: serve built frontend static files
 const clientDist = path.resolve(process.cwd(), 'dist');

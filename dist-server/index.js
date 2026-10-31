@@ -4497,14 +4497,16 @@ if (!fs2.existsSync(uploadsDir)) {
 }
 app.use("/uploads", express.static(uploadsDir));
 app.use("/api", apiRouter);
-app.get("/health", (req, res) => {
+var handleHealth = (req, res) => {
   res.json({
     status: "healthy",
     system: "Education Sansar CRM Backend",
     version: "1.0.0",
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
-});
+};
+app.get("/health", handleHealth);
+app.get("/api/health", handleHealth);
 var clientDist = path2.resolve(process.cwd(), "dist");
 var indexPath = path2.join(clientDist, "index.html");
 app.use(express.static(clientDist));
