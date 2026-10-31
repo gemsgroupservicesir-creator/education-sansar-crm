@@ -58,6 +58,25 @@ export function handleMetaLeadWebhook(payload: any) {
       throw new Error('Meta lead payload missing phone and email');
     }
 
+    // 0. Check Tombstone Suppression (prevents resurrecting permanently deleted leads)
+    const metaPhoneDigits = leadData.phone ? String(leadData.phone).replace(/[^0-9]/g, '') : '';
+    const metaPhoneLast10 = metaPhoneDigits.length >= 10 ? metaPhoneDigits.slice(-10) : metaPhoneDigits;
+    const metaCleanEmail = leadData.email ? String(leadData.email).trim().toLowerCase() : '';
+
+    const metaTombstone = db.prepare(`
+      SELECT id FROM deleted_records 
+      WHERE entity_type = 'lead' AND (
+        identifier = ? 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '')
+      )
+      LIMIT 1
+    `).get(leadData.phone || '', metaPhoneLast10, metaPhoneLast10, metaCleanEmail, metaCleanEmail);
+
+    if (metaTombstone) {
+      return { success: true, skipped: true, isDeleted: true, message: 'Lead was previously deleted permanently by user. Meta sync re-import suppressed.' };
+    }
+
     // 1. Duplicate check
     const dupResult = checkDuplicate({
       phone: leadData.phone,
@@ -298,6 +317,38 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       remarks: sheetNotes || (raw.row_number ? `Imported from Google Sheet row #${raw.row_number}` : 'Imported via Google Sheets sync'),
       is_demo: 0
     };
+
+    // 0. Check Tombstone Suppression (prevents resurrecting permanently deleted leads)
+    const phoneDigits = rawPhone ? String(rawPhone).replace(/[^0-9]/g, '') : '';
+    const phoneLast10 = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : '';
+
+    const tombstone = db.prepare(`
+      SELECT id, entity_id FROM deleted_records 
+      WHERE entity_type = 'lead' AND (
+        identifier = ? 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '')
+      )
+      LIMIT 1
+    `).get(
+      rawPhone || '', 
+      phoneDigits, phoneDigits,
+      phoneLast10, phoneLast10, 
+      cleanEmail, cleanEmail, 
+      sheetLeadId || '', sheetLeadId || ''
+    ) as any;
+
+    if (tombstone) {
+      return {
+        success: true,
+        skipped: true,
+        isDeleted: true,
+        message: `Lead ${student_name || rawPhone} was previously deleted permanently by user. Sync re-import suppressed.`
+      };
+    }
 
     // 1. Duplicate check - Phone Number is primary duplicate check
     const dupResult = checkDuplicate({
@@ -1024,9 +1075,12 @@ export function updateGoogleSheetConnection(id: string, updates: any, performedB
 
 export function deleteGoogleSheetConnection(id: string, performedBy: string = 'Admin') {
   const current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
-  if (!current) throw new Error('Google Sheet connection not found: ' + id);
-
   db.prepare('DELETE FROM google_sheets_connections WHERE id = ?').run(id);
+
+  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'google_sheet', id, current.spreadsheet_id || id, JSON.stringify({ name: current.name }), performedBy
+  );
 
   logAudit({
     userName: performedBy,

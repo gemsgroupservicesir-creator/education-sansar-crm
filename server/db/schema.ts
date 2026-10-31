@@ -472,6 +472,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 25. Deleted records tombstone (prevents sync resurrection of permanently deleted records)
+CREATE TABLE IF NOT EXISTS deleted_records (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL, -- 'lead', 'counselor', 'university', 'course', 'university_course', 'google_sheet'
+  entity_id TEXT NOT NULL,
+  identifier TEXT, -- phone, email, or key for deduplication suppression
+  details TEXT,
+  deleted_by TEXT DEFAULT 'System',
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
+CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);

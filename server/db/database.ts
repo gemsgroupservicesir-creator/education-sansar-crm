@@ -4,20 +4,41 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SCHEMA_SQL } from './schema.ts';
 
-// Resolve directory paths safely across tsx and bundled dist-server
-const dbDir = process.env.DATABASE_DIR 
-  ? path.resolve(process.env.DATABASE_DIR)
-  : path.resolve(process.cwd(), 'server/db');
+// Detect Vercel serverless environment
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-if (!fs.existsSync(dbDir)) {
-  try {
-    fs.mkdirSync(dbDir, { recursive: true });
-  } catch (e) {}
+// Resolve directory paths safely across tsx, bundled dist-server, and Vercel serverless
+let dbDir: string;
+let dbPath: string;
+
+if (isVercel) {
+  dbDir = '/tmp';
+  dbPath = path.join(dbDir, 'education_sansar.db');
+  if (!fs.existsSync(dbPath)) {
+    try {
+      const sourceDb = path.resolve(process.cwd(), 'server/db/education_sansar.db');
+      if (fs.existsSync(sourceDb)) {
+        fs.copyFileSync(sourceDb, dbPath);
+      }
+    } catch (e) {
+      console.warn('[Vercel] Could not copy seed db to /tmp:', e);
+    }
+  }
+} else {
+  dbDir = process.env.DATABASE_DIR 
+    ? path.resolve(process.env.DATABASE_DIR)
+    : path.resolve(process.cwd(), 'server/db');
+
+  if (!fs.existsSync(dbDir)) {
+    try {
+      fs.mkdirSync(dbDir, { recursive: true });
+    } catch (e) {}
+  }
+
+  dbPath = process.env.DATABASE_PATH 
+    ? path.resolve(process.env.DATABASE_PATH)
+    : path.join(dbDir, 'education_sansar.db');
 }
-
-const dbPath = process.env.DATABASE_PATH 
-  ? path.resolve(process.env.DATABASE_PATH)
-  : path.join(dbDir, 'education_sansar.db');
 
 export const db = new Database(dbPath, {
   verbose: process.env.NODE_ENV === 'development' && process.env.DB_VERBOSE === 'true' 
@@ -25,12 +46,40 @@ export const db = new Database(dbPath, {
     : undefined
 });
 
-// Configure WAL mode for high performance concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
+// Configure appropriate journal mode (DELETE for serverless /tmp, WAL for persistent server)
+if (isVercel) {
+  db.pragma('journal_mode = DELETE');
+} else {
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+}
 db.pragma('foreign_keys = ON');
 
+export function checkpointDatabase() {
+  try {
+    db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (e) {}
+}
+
 function runSafeMigrations() {
+  // Ensure deleted_records tombstone table exists
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS deleted_records (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        identifier TEXT,
+        details TEXT,
+        deleted_by TEXT DEFAULT 'System',
+        deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
+      CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] deleted_records table:', e.message);
+  }
   const addColumnIfNotExists = (table: string, column: string, columnDef: string) => {
     try {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];

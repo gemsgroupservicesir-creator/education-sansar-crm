@@ -1,5 +1,7 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __esm = (fn, res, err) => function __init() {
   if (err) throw err[0];
   try {
@@ -12,6 +14,15 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // server/db/schema.ts
 var SCHEMA_SQL;
@@ -492,6 +503,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 25. Deleted records tombstone (prevents sync resurrection of permanently deleted records)
+CREATE TABLE IF NOT EXISTS deleted_records (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL, -- 'lead', 'counselor', 'university', 'course', 'university_course', 'google_sheet'
+  entity_id TEXT NOT NULL,
+  identifier TEXT, -- phone, email, or key for deduplication suppression
+  details TEXT,
+  deleted_by TEXT DEFAULT 'System',
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
+CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);
@@ -524,10 +549,42 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
 });
 
 // server/db/database.ts
+var database_exports = {};
+__export(database_exports, {
+  checkpointDatabase: () => checkpointDatabase,
+  createNotification: () => createNotification,
+  db: () => db,
+  initDatabase: () => initDatabase,
+  logAudit: () => logAudit,
+  logLeadActivity: () => logLeadActivity
+});
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+function checkpointDatabase() {
+  try {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+  } catch (e) {
+  }
+}
 function runSafeMigrations() {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS deleted_records (
+        id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        identifier TEXT,
+        details TEXT,
+        deleted_by TEXT DEFAULT 'System',
+        deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_del_rec_ident ON deleted_records(identifier);
+      CREATE INDEX IF NOT EXISTS idx_del_rec_entity ON deleted_records(entity_type, entity_id);
+    `);
+  } catch (e) {
+    console.warn("[Migration Notice] deleted_records table:", e.message);
+  }
   const addColumnIfNotExists = (table, column, columnDef) => {
     try {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -642,24 +699,44 @@ function createNotification(params) {
     console.error("Notification write failed:", err);
   }
 }
-var dbDir, dbPath, db;
+var isVercel, dbDir, dbPath, db;
 var init_database = __esm({
   "server/db/database.ts"() {
     "use strict";
     init_schema();
-    dbDir = process.env.DATABASE_DIR ? path.resolve(process.env.DATABASE_DIR) : path.resolve(process.cwd(), "server/db");
-    if (!fs.existsSync(dbDir)) {
-      try {
-        fs.mkdirSync(dbDir, { recursive: true });
-      } catch (e) {
+    isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (isVercel) {
+      dbDir = "/tmp";
+      dbPath = path.join(dbDir, "education_sansar.db");
+      if (!fs.existsSync(dbPath)) {
+        try {
+          const sourceDb = path.resolve(process.cwd(), "server/db/education_sansar.db");
+          if (fs.existsSync(sourceDb)) {
+            fs.copyFileSync(sourceDb, dbPath);
+          }
+        } catch (e) {
+          console.warn("[Vercel] Could not copy seed db to /tmp:", e);
+        }
       }
+    } else {
+      dbDir = process.env.DATABASE_DIR ? path.resolve(process.env.DATABASE_DIR) : path.resolve(process.cwd(), "server/db");
+      if (!fs.existsSync(dbDir)) {
+        try {
+          fs.mkdirSync(dbDir, { recursive: true });
+        } catch (e) {
+        }
+      }
+      dbPath = process.env.DATABASE_PATH ? path.resolve(process.env.DATABASE_PATH) : path.join(dbDir, "education_sansar.db");
     }
-    dbPath = process.env.DATABASE_PATH ? path.resolve(process.env.DATABASE_PATH) : path.join(dbDir, "education_sansar.db");
     db = new Database(dbPath, {
       verbose: process.env.NODE_ENV === "development" && process.env.DB_VERBOSE === "true" ? console.log : void 0
     });
-    db.pragma("journal_mode = WAL");
-    db.pragma("synchronous = NORMAL");
+    if (isVercel) {
+      db.pragma("journal_mode = DELETE");
+    } else {
+      db.pragma("journal_mode = WAL");
+      db.pragma("synchronous = NORMAL");
+    }
     db.pragma("foreign_keys = ON");
     initDatabase();
   }
@@ -798,6 +875,22 @@ function generateLeadId() {
 function createLead(data, performedBy = "System") {
   const id = "lead-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
   const leadId = data.lead_id || generateLeadId();
+  if (performedBy !== "Google Sheets Sync" && performedBy !== "Meta Webhook") {
+    if (data.phone) {
+      const digits = String(data.phone).replace(/[^0-9]/g, "");
+      const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+      try {
+        db.prepare("DELETE FROM deleted_records WHERE entity_type = 'lead' AND (identifier = ? OR identifier = ? OR identifier = ?)").run(data.phone, digits, last10);
+      } catch (e) {
+      }
+    }
+    if (data.email) {
+      try {
+        db.prepare("DELETE FROM deleted_records WHERE entity_type = 'lead' AND identifier = ?").run(data.email.toLowerCase().trim());
+      } catch (e) {
+      }
+    }
+  }
   let counselorId = data.assigned_counselor_id;
   let counselorName = data.assigned_counselor_name;
   let assignmentMethod = "Manual";
@@ -1226,6 +1319,21 @@ function handleMetaLeadWebhook(payload) {
     if (!leadData.phone && !leadData.email) {
       throw new Error("Meta lead payload missing phone and email");
     }
+    const metaPhoneDigits = leadData.phone ? String(leadData.phone).replace(/[^0-9]/g, "") : "";
+    const metaPhoneLast10 = metaPhoneDigits.length >= 10 ? metaPhoneDigits.slice(-10) : metaPhoneDigits;
+    const metaCleanEmail = leadData.email ? String(leadData.email).trim().toLowerCase() : "";
+    const metaTombstone = db.prepare(`
+      SELECT id FROM deleted_records 
+      WHERE entity_type = 'lead' AND (
+        identifier = ? 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '')
+      )
+      LIMIT 1
+    `).get(leadData.phone || "", metaPhoneLast10, metaPhoneLast10, metaCleanEmail, metaCleanEmail);
+    if (metaTombstone) {
+      return { success: true, skipped: true, isDeleted: true, message: "Lead was previously deleted permanently by user. Meta sync re-import suppressed." };
+    }
     const dupResult = checkDuplicate({
       phone: leadData.phone,
       whatsapp_number: leadData.whatsapp_number || leadData.phone,
@@ -1416,6 +1524,38 @@ function handleGoogleSheetsLeadWebhook(payload) {
       remarks: sheetNotes || (raw.row_number ? `Imported from Google Sheet row #${raw.row_number}` : "Imported via Google Sheets sync"),
       is_demo: 0
     };
+    const phoneDigits = rawPhone ? String(rawPhone).replace(/[^0-9]/g, "") : "";
+    const phoneLast10 = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+    const cleanEmail = email ? String(email).trim().toLowerCase() : "";
+    const tombstone = db.prepare(`
+      SELECT id, entity_id FROM deleted_records 
+      WHERE entity_type = 'lead' AND (
+        identifier = ? 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '') 
+        OR (identifier = ? AND ? != '')
+      )
+      LIMIT 1
+    `).get(
+      rawPhone || "",
+      phoneDigits,
+      phoneDigits,
+      phoneLast10,
+      phoneLast10,
+      cleanEmail,
+      cleanEmail,
+      sheetLeadId || "",
+      sheetLeadId || ""
+    );
+    if (tombstone) {
+      return {
+        success: true,
+        skipped: true,
+        isDeleted: true,
+        message: `Lead ${student_name || rawPhone} was previously deleted permanently by user. Sync re-import suppressed.`
+      };
+    }
     const dupResult = checkDuplicate({
       phone: rawPhone,
       whatsapp_number: rawWa,
@@ -2046,8 +2186,16 @@ function updateGoogleSheetConnection(id, updates, performedBy = "Admin") {
 }
 function deleteGoogleSheetConnection(id, performedBy = "Admin") {
   const current = db.prepare("SELECT * FROM google_sheets_connections WHERE id = ?").get(id);
-  if (!current) throw new Error("Google Sheet connection not found: " + id);
   db.prepare("DELETE FROM google_sheets_connections WHERE id = ?").run(id);
+  const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "google_sheet",
+    id,
+    current.spreadsheet_id || id,
+    JSON.stringify({ name: current.name }),
+    performedBy
+  );
   logAudit({
     userName: performedBy,
     action: "GOOGLE_SHEET_DELETED",
@@ -2699,7 +2847,36 @@ apiRouter.delete("/leads/:id", (req, res) => {
   }
   const lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(req.params.id);
   if (!lead) return res.status(404).json({ error: "Lead not found" });
+  const performedBy = req.body.performedBy || "User";
+  const recordTombstone = (identifier) => {
+    if (!identifier) return;
+    const clean = String(identifier).trim();
+    if (!clean) return;
+    const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9) + "-" + Math.random().toString(36).substring(2, 6);
+    db.prepare(`
+      INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by)
+      VALUES (?, 'lead', ?, ?, ?, ?)
+    `).run(tombId, lead.id, clean, JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }), performedBy);
+  };
   const deleteTx = db.transaction((id) => {
+    if (lead.phone) {
+      recordTombstone(lead.phone);
+      const digits = lead.phone.replace(/[^0-9]/g, "");
+      if (digits) recordTombstone(digits);
+      if (digits.length >= 10) recordTombstone(digits.slice(-10));
+    }
+    if (lead.whatsapp_number && lead.whatsapp_number !== lead.phone) {
+      recordTombstone(lead.whatsapp_number);
+      const waDigits = lead.whatsapp_number.replace(/[^0-9]/g, "");
+      if (waDigits) recordTombstone(waDigits);
+      if (waDigits.length >= 10) recordTombstone(waDigits.slice(-10));
+    }
+    if (lead.email) {
+      recordTombstone(lead.email.toLowerCase().trim());
+    }
+    if (lead.lead_id) {
+      recordTombstone(lead.lead_id);
+    }
     db.prepare("DELETE FROM students WHERE lead_id = ?").run(id);
     db.prepare("DELETE FROM followups WHERE lead_id = ?").run(id);
     db.prepare("DELETE FROM lead_activities WHERE lead_id = ?").run(id);
@@ -2713,7 +2890,7 @@ apiRouter.delete("/leads/:id", (req, res) => {
   });
   deleteTx(req.params.id);
   logAudit({
-    userName: req.body.performedBy || "User",
+    userName: performedBy,
     action: "LEAD_DELETED_PERMANENT",
     entity: "lead",
     entityId: req.params.id,
@@ -2866,6 +3043,15 @@ apiRouter.delete("/counselors/:id", (req, res) => {
   }
   db.prepare("DELETE FROM users WHERE email = ? OR id = ?").run(counselor.email, counselor.user_id);
   db.prepare("DELETE FROM counselors WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "counselor",
+    req.params.id,
+    counselor.email,
+    JSON.stringify({ name: counselor.name }),
+    req.body.performedBy || "Admin"
+  );
   logAudit({
     userName: req.body.performedBy || "Admin",
     action: "COUNSELOR_DELETED",
@@ -3186,6 +3372,15 @@ apiRouter.delete("/universities/:id", (req, res) => {
   db.prepare("DELETE FROM university_courses WHERE university_id = ?").run(req.params.id);
   db.prepare("DELETE FROM courses WHERE university_id = ?").run(req.params.id);
   db.prepare("DELETE FROM universities WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "university",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
   res.json({ success: true });
 });
 apiRouter.get("/courses", (req, res) => {
@@ -3280,6 +3475,15 @@ apiRouter.delete("/courses/:id", (req, res) => {
   }
   db.prepare("DELETE FROM university_courses WHERE course_id = ?").run(req.params.id);
   db.prepare("DELETE FROM courses WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "course",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
   res.json({ success: true });
 });
 apiRouter.get("/university-courses", (req, res) => {
@@ -3529,6 +3733,15 @@ apiRouter.delete("/university-courses/:id", (req, res) => {
     return res.status(403).json({ error: "Counselors do not have permission to delete fee structures." });
   }
   db.prepare("DELETE FROM university_courses WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "university_course",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
   res.json({ success: true });
 });
 apiRouter.get("/documents", (req, res) => {
@@ -4321,16 +4534,36 @@ app.use((err, req, res, next) => {
     code: err.code || "INTERNAL_ERROR"
   });
 });
-setInterval(async () => {
-  try {
-    const { syncAllActiveGoogleSheets: syncAllActiveGoogleSheets2 } = await Promise.resolve().then(() => (init_integrationService(), integrationService_exports));
-    await syncAllActiveGoogleSheets2("System Background Sync");
-  } catch (err) {
-    console.log("Background sync check completed with note:", err.message);
-  }
-}, 15 * 60 * 1e3);
-app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`\u{1F680} Education Sansar CRM Server is LIVE on port ${PORT}:`);
-  console.log(`   \u279C Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
-  console.log(`\u{1F4CD} Office: Sector 94, Noida, Uttar Pradesh 201313`);
-});
+var isVercel2 = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+if (!isVercel2) {
+  setInterval(async () => {
+    try {
+      const { syncAllActiveGoogleSheets: syncAllActiveGoogleSheets2 } = await Promise.resolve().then(() => (init_integrationService(), integrationService_exports));
+      await syncAllActiveGoogleSheets2("System Background Sync");
+    } catch (err) {
+      console.log("Background sync check completed with note:", err.message);
+    }
+  }, 15 * 60 * 1e3);
+  const server = app.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`\u{1F680} Education Sansar CRM Server is LIVE on port ${PORT}:`);
+    console.log(`   \u279C Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
+    console.log(`\u{1F4CD} Office: Sector 94, Noida, Uttar Pradesh 201313`);
+  });
+  const handleShutdown = () => {
+    console.log("Shutting down gracefully, running database checkpoint...");
+    try {
+      const { checkpointDatabase: checkpointDatabase2, db: db2 } = (init_database(), __toCommonJS(database_exports));
+      checkpointDatabase2();
+      db2.close();
+    } catch (e) {
+    }
+    process.exit(0);
+  };
+  process.on("SIGINT", handleShutdown);
+  process.on("SIGTERM", handleShutdown);
+}
+var index_default = app;
+export {
+  app,
+  index_default as default
+};

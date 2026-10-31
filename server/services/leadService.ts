@@ -177,6 +177,22 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
   const id = 'lead-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
   const leadId = data.lead_id || generateLeadId();
 
+  // Clear any existing tombstone for this phone or email ONLY when manually created (not via sync/webhooks)
+  if (performedBy !== 'Google Sheets Sync' && performedBy !== 'Meta Webhook') {
+    if (data.phone) {
+      const digits = String(data.phone).replace(/[^0-9]/g, '');
+      const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+      try {
+        db.prepare("DELETE FROM deleted_records WHERE entity_type = 'lead' AND (identifier = ? OR identifier = ? OR identifier = ?)").run(data.phone, digits, last10);
+      } catch (e) {}
+    }
+    if (data.email) {
+      try {
+        db.prepare("DELETE FROM deleted_records WHERE entity_type = 'lead' AND identifier = ?").run(data.email.toLowerCase().trim());
+      } catch (e) {}
+    }
+  }
+
   // Determine counselor
   let counselorId = data.assigned_counselor_id;
   let counselorName = data.assigned_counselor_name;

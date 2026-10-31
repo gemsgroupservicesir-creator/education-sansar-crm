@@ -81,18 +81,37 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Periodic Background Google Sheets sync (Every 15 minutes)
-setInterval(async () => {
-  try {
-    const { syncAllActiveGoogleSheets } = await import('./services/integrationService.ts');
-    await syncAllActiveGoogleSheets('System Background Sync');
-  } catch (err: any) {
-    console.log('Background sync check completed with note:', err.message);
-  }
-}, 15 * 60 * 1000);
+// Periodic Background Google Sheets sync (Every 15 minutes, standalone server only)
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-app.listen(Number(PORT), '0.0.0.0', () => {
-  console.log(`🚀 Education Sansar CRM Server is LIVE on port ${PORT}:`);
-  console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
-  console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
-});
+if (!isVercel) {
+  setInterval(async () => {
+    try {
+      const { syncAllActiveGoogleSheets } = await import('./services/integrationService.ts');
+      await syncAllActiveGoogleSheets('System Background Sync');
+    } catch (err: any) {
+      console.log('Background sync check completed with note:', err.message);
+    }
+  }, 15 * 60 * 1000);
+
+  const server = app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`🚀 Education Sansar CRM Server is LIVE on port ${PORT}:`);
+    console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
+    console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
+  });
+
+  const handleShutdown = () => {
+    console.log('Shutting down gracefully, running database checkpoint...');
+    try {
+      const { checkpointDatabase, db } = require('./db/database.ts');
+      checkpointDatabase();
+      db.close();
+    } catch (e) {}
+    process.exit(0);
+  };
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
+}
+
+export { app };
+export default app;

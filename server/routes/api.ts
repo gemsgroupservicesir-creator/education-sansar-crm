@@ -298,8 +298,41 @@ apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id) as Lead | undefined;
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
+  const performedBy = req.body.performedBy || 'User';
+
+  // Record tombstone suppression so Google Sheets sync or webhooks never resurrect this deleted lead
+  const recordTombstone = (identifier: string | null | undefined) => {
+    if (!identifier) return;
+    const clean = String(identifier).trim();
+    if (!clean) return;
+    const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9) + '-' + Math.random().toString(36).substring(2, 6);
+    db.prepare(`
+      INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by)
+      VALUES (?, 'lead', ?, ?, ?, ?)
+    `).run(tombId, lead.id, clean, JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }), performedBy);
+  };
+
   // Permanent Hard Delete with Cascade
   const deleteTx = db.transaction((id: string) => {
+    if (lead.phone) {
+      recordTombstone(lead.phone);
+      const digits = lead.phone.replace(/[^0-9]/g, '');
+      if (digits) recordTombstone(digits);
+      if (digits.length >= 10) recordTombstone(digits.slice(-10));
+    }
+    if (lead.whatsapp_number && lead.whatsapp_number !== lead.phone) {
+      recordTombstone(lead.whatsapp_number);
+      const waDigits = lead.whatsapp_number.replace(/[^0-9]/g, '');
+      if (waDigits) recordTombstone(waDigits);
+      if (waDigits.length >= 10) recordTombstone(waDigits.slice(-10));
+    }
+    if (lead.email) {
+      recordTombstone(lead.email.toLowerCase().trim());
+    }
+    if (lead.lead_id) {
+      recordTombstone(lead.lead_id);
+    }
+
     db.prepare('DELETE FROM students WHERE lead_id = ?').run(id);
     db.prepare('DELETE FROM followups WHERE lead_id = ?').run(id);
     db.prepare('DELETE FROM lead_activities WHERE lead_id = ?').run(id);
@@ -314,7 +347,7 @@ apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
   deleteTx(req.params.id);
 
   logAudit({
-    userName: req.body.performedBy || 'User',
+    userName: performedBy,
     action: 'LEAD_DELETED_PERMANENT',
     entity: 'lead',
     entityId: req.params.id,
@@ -500,6 +533,11 @@ apiRouter.delete('/counselors/:id', (req: Request, res: Response) => {
 
   db.prepare('DELETE FROM users WHERE email = ? OR id = ?').run(counselor.email, counselor.user_id);
   db.prepare('DELETE FROM counselors WHERE id = ?').run(req.params.id);
+
+  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'counselor', req.params.id, counselor.email, JSON.stringify({ name: counselor.name }), req.body.performedBy || 'Admin'
+  );
 
   logAudit({
     userName: req.body.performedBy || 'Admin',
@@ -894,6 +932,12 @@ apiRouter.delete('/universities/:id', (req: Request, res: Response) => {
   db.prepare('DELETE FROM university_courses WHERE university_id = ?').run(req.params.id);
   db.prepare('DELETE FROM courses WHERE university_id = ?').run(req.params.id);
   db.prepare('DELETE FROM universities WHERE id = ?').run(req.params.id);
+
+  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'university', req.params.id, req.params.id, null, 'User'
+  );
+
   res.json({ success: true });
 });
 
@@ -986,6 +1030,12 @@ apiRouter.delete('/courses/:id', (req: Request, res: Response) => {
 
   db.prepare('DELETE FROM university_courses WHERE course_id = ?').run(req.params.id);
   db.prepare('DELETE FROM courses WHERE id = ?').run(req.params.id);
+
+  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'course', req.params.id, req.params.id, null, 'User'
+  );
+
   res.json({ success: true });
 });
 
@@ -1243,6 +1293,12 @@ apiRouter.delete('/university-courses/:id', (req: Request, res: Response) => {
   }
 
   db.prepare('DELETE FROM university_courses WHERE id = ?').run(req.params.id);
+
+  const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'university_course', req.params.id, req.params.id, null, 'User'
+  );
+
   res.json({ success: true });
 });
 
