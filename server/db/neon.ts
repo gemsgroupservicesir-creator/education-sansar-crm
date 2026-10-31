@@ -388,6 +388,106 @@ export async function persistUniversityCourseToNeon(uc: any): Promise<boolean> {
 }
 
 /**
+ * Persist Google Sheets Connection to Neon
+ */
+export async function persistGoogleSheetConnectionToNeon(conn: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    const lastSynced = conn.last_synced_at ? (isNaN(new Date(conn.last_synced_at).getTime()) ? null : new Date(conn.last_synced_at).toISOString()) : null;
+    await sql.query(`
+      INSERT INTO google_sheets_connections (
+        id, name, sheet_url, spreadsheet_id, gid, sheet_name,
+        campaign_tag, target_city, source_label, status,
+        total_leads_imported, last_rows_count, last_synced_at,
+        last_sync_status, last_sync_error, is_demo, column_mapping, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        sheet_url = EXCLUDED.sheet_url,
+        spreadsheet_id = EXCLUDED.spreadsheet_id,
+        gid = EXCLUDED.gid,
+        sheet_name = EXCLUDED.sheet_name,
+        campaign_tag = EXCLUDED.campaign_tag,
+        target_city = EXCLUDED.target_city,
+        source_label = EXCLUDED.source_label,
+        status = EXCLUDED.status,
+        total_leads_imported = EXCLUDED.total_leads_imported,
+        last_rows_count = EXCLUDED.last_rows_count,
+        last_synced_at = EXCLUDED.last_synced_at,
+        last_sync_status = EXCLUDED.last_sync_status,
+        last_sync_error = EXCLUDED.last_sync_error,
+        is_demo = EXCLUDED.is_demo,
+        column_mapping = EXCLUDED.column_mapping,
+        updated_at = NOW()
+    `, [
+      conn.id,
+      conn.name || 'Google Sheet',
+      conn.sheet_url,
+      conn.spreadsheet_id || '',
+      conn.gid || '0',
+      conn.sheet_name || 'Leads 2026',
+      conn.campaign_tag || null,
+      conn.target_city || null,
+      conn.source_label || 'Google Sheets',
+      conn.status || 'ACTIVE',
+      Number(conn.total_leads_imported) || 0,
+      Number(conn.last_rows_count) || 0,
+      lastSynced,
+      conn.last_sync_status || null,
+      conn.last_sync_error || null,
+      conn.is_demo ? 1 : 0,
+      conn.column_mapping || null
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Google Sheet connection persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete a Google Sheet connection permanently from Neon
+ */
+export async function deleteGoogleSheetConnectionFromNeon(id: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM google_sheets_connections WHERE id = $1`, [id]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Google Sheet connection delete failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Find a Google Sheet connection in Neon by ID
+ */
+export async function findGoogleSheetInNeon(id: string): Promise<any | null> {
+  if (!sql) return null;
+  try {
+    const rows = await sql.query(`SELECT * FROM google_sheets_connections WHERE id = $1 LIMIT 1`, [id]);
+    return rows && rows.length > 0 ? rows[0] : null;
+  } catch (err: any) {
+    console.error('[Neon Query] Find Google Sheet failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Get all Google Sheet connections from Neon
+ */
+export async function getAllGoogleSheetsFromNeon(): Promise<any[]> {
+  if (!sql) return [];
+  try {
+    return await sql.query(`SELECT * FROM google_sheets_connections ORDER BY created_at DESC`);
+  } catch (err: any) {
+    console.error('[Neon Query] Get all Google Sheets failed:', err.message);
+    return [];
+  }
+}
+
+/**
  * Synchronize all tables from Neon PostgreSQL into local SQLite
  * This ensures full persistence across serverless cold starts and restarts.
  */
@@ -496,8 +596,8 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       `);
       for (const l of leads) {
         upsertLead.run(
-          l.id, l.lead_id, l.student_name, l.first_name, l.last_name, l.phone, l.whatsapp_number, l.email,
-          l.parent_name, l.school_college, l.passing_year, l.gender, l.date_of_birth, l.country, l.state, l.city,
+          l.id, l.lead_id || ('LD-' + l.id), l.student_name, l.first_name || l.student_name || 'Student', l.last_name || '', l.phone, l.whatsapp_number || l.phone, l.email,
+          l.parent_name, l.school_college, l.passing_year, l.gender, l.date_of_birth, l.country || 'Nepal', l.state, l.city || 'Kathmandu',
           l.address, l.academic_qualification, l.percentage_10th, l.percentage_12th, l.graduation_percentage,
           l.entrance_exam, l.entrance_score, l.preferred_course, l.preferred_university, l.second_university,
           l.budget, l.scholarship_required, l.lead_source, l.campaign, l.ad_set, l.ad, l.facebook_lead_id,
@@ -526,6 +626,49 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           u.is_demo, String(u.created_at), String(u.updated_at)
         );
       }
+    }
+
+    // 6. Sync Google Sheets Connections
+    const gsheets = await sql.query('SELECT * FROM google_sheets_connections');
+    if (gsheets && gsheets.length > 0) {
+      const upsertGSheet = db.prepare(`
+        INSERT INTO google_sheets_connections (
+          id, name, sheet_url, spreadsheet_id, gid, sheet_name,
+          campaign_tag, target_city, source_label, status,
+          total_leads_imported, last_rows_count, last_synced_at,
+          last_sync_status, last_sync_error, is_demo, column_mapping, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET
+          name = excluded.name,
+          sheet_url = excluded.sheet_url,
+          spreadsheet_id = excluded.spreadsheet_id,
+          gid = excluded.gid,
+          sheet_name = excluded.sheet_name,
+          campaign_tag = excluded.campaign_tag,
+          target_city = excluded.target_city,
+          source_label = excluded.source_label,
+          status = excluded.status,
+          total_leads_imported = excluded.total_leads_imported,
+          last_rows_count = excluded.last_rows_count,
+          last_synced_at = excluded.last_synced_at,
+          last_sync_status = excluded.last_sync_status,
+          last_sync_error = excluded.last_sync_error,
+          is_demo = excluded.is_demo,
+          column_mapping = excluded.column_mapping,
+          updated_at = excluded.updated_at
+      `);
+      for (const g of gsheets) {
+        upsertGSheet.run(
+          g.id, g.name, g.sheet_url, g.spreadsheet_id, g.gid, g.sheet_name,
+          g.campaign_tag, g.target_city, g.source_label, g.status || 'ACTIVE',
+          Number(g.total_leads_imported) || 0, Number(g.last_rows_count) || 0,
+          g.last_synced_at ? String(g.last_synced_at) : null,
+          g.last_sync_status, g.last_sync_error, g.is_demo || 0,
+          g.column_mapping, String(g.created_at), String(g.updated_at)
+        );
+      }
+      console.log(`[Neon Sync] Synced ${gsheets.length} Google Sheet connections from Neon.`);
     }
 
     console.log('✅ [Neon Sync] Synchronization complete!');

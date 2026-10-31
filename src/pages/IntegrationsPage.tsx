@@ -230,7 +230,13 @@ export const IntegrationsPage: React.FC = () => {
       );
       loadData();
     } catch (err: any) {
-      addToast(err.message || `Failed to sync sheet "${name}"`, 'error');
+      const errMsg = err.message || '';
+      if (errMsg.includes('not found') || errMsg.includes('connectionNotFound') || errMsg.includes('reconnect')) {
+        addToast(`Sheet "${name}" was expired or not found. Refreshing connections...`, 'warning');
+        loadData();
+      } else {
+        addToast(errMsg || `Failed to sync sheet "${name}"`, 'error');
+      }
     } finally {
       setSyncingSheetId(null);
     }
@@ -242,7 +248,13 @@ export const IntegrationsPage: React.FC = () => {
       const data = await api.previewGoogleSheetById(sheet.id);
       setActivePreviewSheet({ sheet, data });
     } catch (err: any) {
-      addToast(err.message || 'Failed to preview sheet', 'error');
+      const errMsg = err.message || '';
+      if (errMsg.includes('not found') || errMsg.includes('connectionNotFound') || errMsg.includes('reconnect')) {
+        addToast(`Sheet "${sheet.name}" was expired or removed. Refreshing list...`, 'warning');
+        loadData();
+      } else {
+        addToast(errMsg || 'Failed to preview sheet', 'error');
+      }
     } finally {
       setPreviewingSheetId(null);
     }
@@ -255,7 +267,13 @@ export const IntegrationsPage: React.FC = () => {
       addToast(`Sheet "${sheet.name}" is now ${newStatus}`, 'info');
       loadData();
     } catch (err: any) {
-      addToast(err.message || 'Failed to update sheet status', 'error');
+      const errMsg = err.message || '';
+      if (errMsg.includes('not found') || errMsg.includes('connectionNotFound')) {
+        addToast(`Sheet "${sheet.name}" was not found. Refreshing...`, 'warning');
+        loadData();
+      } else {
+        addToast(errMsg || 'Failed to update sheet status', 'error');
+      }
     }
   };
 
@@ -269,7 +287,13 @@ export const IntegrationsPage: React.FC = () => {
       addToast(`Disconnected Google Sheet "${name}"`, 'info');
       loadData();
     } catch (err: any) {
-      addToast(err.message || 'Failed to disconnect sheet', 'error');
+      const errMsg = err.message || '';
+      if (errMsg.includes('not found') || errMsg.includes('connectionNotFound')) {
+        addToast(`Sheet was already removed or expired. Refreshing...`, 'warning');
+        loadData();
+      } else {
+        addToast(errMsg || 'Failed to disconnect sheet', 'error');
+      }
     }
   };
 

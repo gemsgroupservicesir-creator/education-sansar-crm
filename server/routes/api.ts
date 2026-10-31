@@ -29,7 +29,9 @@ import {
   persistDeletedRecordToNeon, 
   deleteLeadFromNeon, 
   deleteCounselorAndUserFromNeon,
-  persistUniversityCourseToNeon 
+  persistUniversityCourseToNeon,
+  findGoogleSheetInNeon,
+  getAllGoogleSheetsFromNeon 
 } from '../db/neon.ts';
 
 export const apiRouter = Router();
@@ -1895,9 +1897,9 @@ apiRouter.get('/integrations/google-sheets/apps-script-code', (req: Request, res
 // ==========================================
 
 // List all connected Google Sheets & summary stats
-apiRouter.get('/integrations/google-sheets/list', (req: Request, res: Response) => {
+apiRouter.get('/integrations/google-sheets/list', async (req: Request, res: Response) => {
   try {
-    const data = getAllGoogleSheetConnections();
+    const data = await getAllGoogleSheetConnections();
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1935,9 +1937,52 @@ apiRouter.post('/integrations/google-sheets/connect-link', async (req: Request, 
 apiRouter.post('/integrations/google-sheets/:id/sync', async (req: Request, res: Response) => {
   try {
     const sheetId = req.params.id;
-    const sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+    let sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+
+    if (!sheet && isNeonEnabled()) {
+      sheet = await findGoogleSheetInNeon(sheetId);
+      if (sheet) {
+        db.prepare(`
+          INSERT INTO google_sheets_connections (
+            id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo, column_mapping
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET name = excluded.name, sheet_url = excluded.sheet_url
+        `).run(
+          sheet.id, sheet.name, sheet.sheet_url, sheet.spreadsheet_id, sheet.gid,
+          sheet.sheet_name, sheet.campaign_tag, sheet.target_city, sheet.source_label,
+          sheet.status || 'ACTIVE', Number(sheet.total_leads_imported) || 0, Number(sheet.last_rows_count) || 0, sheet.is_demo || 0,
+          sheet.column_mapping || null
+        );
+      }
+    }
+
+    // Auto-heal fallback: If missing from storage, check global integration config
     if (!sheet) {
-      return res.status(404).json({ error: 'Google Sheet connection not found: ' + sheetId });
+      const globalInt = db.prepare("SELECT config FROM integrations WHERE id = 'int-sheets' OR name = 'Google Sheets Sync'").get() as any;
+      let fallbackUrl = req.body?.sheetUrl;
+      if (!fallbackUrl && globalInt?.config) {
+        try {
+          const cfg = JSON.parse(globalInt.config);
+          if (cfg.spreadsheetUrl) fallbackUrl = cfg.spreadsheetUrl;
+        } catch {}
+      }
+
+      if (fallbackUrl) {
+        const reconnected = await addOrConnectGoogleSheet({
+          name: 'Google Sheet Leads',
+          sheetUrl: fallbackUrl,
+          performedBy: req.body?.performedBy || 'Admin'
+        });
+        sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(reconnected.connectionId) as any;
+      }
+    }
+
+    if (!sheet) {
+      return res.status(404).json({
+        error: `Google Sheet connection '${sheetId}' was not found in permanent storage. Please click "Connect New Sheet" to link your Google Sheet URL.`,
+        connectionNotFound: true,
+        sheetId
+      });
     }
 
     const syncReport = await syncLiveGoogleSheetLeads(sheet.sheet_url, req.body.performedBy || 'Admin', {
@@ -1957,9 +2002,31 @@ apiRouter.post('/integrations/google-sheets/:id/sync', async (req: Request, res:
 apiRouter.post('/integrations/google-sheets/:id/preview', async (req: Request, res: Response) => {
   try {
     const sheetId = req.params.id;
-    const sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+    let sheet = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(sheetId) as any;
+
+    if (!sheet && isNeonEnabled()) {
+      sheet = await findGoogleSheetInNeon(sheetId);
+      if (sheet) {
+        db.prepare(`
+          INSERT INTO google_sheets_connections (
+            id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo, column_mapping
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET name = excluded.name, sheet_url = excluded.sheet_url
+        `).run(
+          sheet.id, sheet.name, sheet.sheet_url, sheet.spreadsheet_id, sheet.gid,
+          sheet.sheet_name, sheet.campaign_tag, sheet.target_city, sheet.source_label,
+          sheet.status || 'ACTIVE', Number(sheet.total_leads_imported) || 0, Number(sheet.last_rows_count) || 0, sheet.is_demo || 0,
+          sheet.column_mapping || null
+        );
+      }
+    }
+
     if (!sheet) {
-      return res.status(404).json({ error: 'Google Sheet connection not found: ' + sheetId });
+      return res.status(404).json({
+        error: `Google Sheet connection '${sheetId}' was not found in permanent storage. Please re-enter your Google Sheet link in Integrations.`,
+        connectionNotFound: true,
+        sheetId
+      });
     }
 
     const liveData = await fetchLiveGoogleSheetData(sheet.sheet_url, sheet.sheet_name);
@@ -1970,9 +2037,9 @@ apiRouter.post('/integrations/google-sheets/:id/preview', async (req: Request, r
 });
 
 // Update an existing Google Sheet connection
-apiRouter.put('/integrations/google-sheets/:id', (req: Request, res: Response) => {
+apiRouter.put('/integrations/google-sheets/:id', async (req: Request, res: Response) => {
   try {
-    const updated = updateGoogleSheetConnection(req.params.id, req.body, req.body.performedBy || 'Admin');
+    const updated = await updateGoogleSheetConnection(req.params.id, req.body, req.body.performedBy || 'Admin');
     res.json({ success: true, sheet: updated });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -1980,9 +2047,9 @@ apiRouter.put('/integrations/google-sheets/:id', (req: Request, res: Response) =
 });
 
 // Disconnect / Delete a specific Google Sheet connection
-apiRouter.delete('/integrations/google-sheets/:id', (req: Request, res: Response) => {
+apiRouter.delete('/integrations/google-sheets/:id', async (req: Request, res: Response) => {
   try {
-    const result = deleteGoogleSheetConnection(req.params.id, req.body.performedBy || 'Admin');
+    const result = await deleteGoogleSheetConnection(req.params.id, req.body.performedBy || 'Admin');
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ error: err.message });

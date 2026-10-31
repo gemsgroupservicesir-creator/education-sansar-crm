@@ -1,6 +1,13 @@
 import { db, logAudit, logLeadActivity } from '../db/database.ts';
 import { createLead, checkDuplicate, updateLead } from './leadService.ts';
 import type { Lead } from '../types/index.ts';
+import { 
+  isNeonEnabled, 
+  persistGoogleSheetConnectionToNeon, 
+  deleteGoogleSheetConnectionFromNeon, 
+  findGoogleSheetInNeon, 
+  getAllGoogleSheetsFromNeon 
+} from '../db/neon.ts';
 
 // Meta Lead Ads Webhook & Payload Processing
 export function verifyMetaWebhook(mode: string, token: string, challenge: string): string | null {
@@ -924,8 +931,52 @@ export async function fetchLiveGoogleSheetData(sheetUrlOrId: string, sheetName?:
   };
 }
 
-export function getAllGoogleSheetConnections() {
-  const connections = db.prepare('SELECT * FROM google_sheets_connections ORDER BY created_at DESC').all() as any[];
+export async function getAllGoogleSheetConnections() {
+  let connections = db.prepare('SELECT * FROM google_sheets_connections ORDER BY created_at DESC').all() as any[];
+
+  if (isNeonEnabled()) {
+    try {
+      const neonSheets = await getAllGoogleSheetsFromNeon();
+      if (neonSheets && neonSheets.length > 0) {
+        const upsertGSheet = db.prepare(`
+          INSERT INTO google_sheets_connections (
+            id, name, sheet_url, spreadsheet_id, gid, sheet_name,
+            campaign_tag, target_city, source_label, status,
+            total_leads_imported, last_rows_count, last_synced_at,
+            last_sync_status, last_sync_error, is_demo, column_mapping, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            sheet_url = excluded.sheet_url,
+            spreadsheet_id = excluded.spreadsheet_id,
+            gid = excluded.gid,
+            sheet_name = excluded.sheet_name,
+            status = excluded.status,
+            total_leads_imported = excluded.total_leads_imported,
+            last_rows_count = excluded.last_rows_count,
+            last_synced_at = excluded.last_synced_at,
+            last_sync_status = excluded.last_sync_status,
+            last_sync_error = excluded.last_sync_error,
+            updated_at = excluded.updated_at
+        `);
+        for (const g of neonSheets) {
+          upsertGSheet.run(
+            g.id, g.name, g.sheet_url, g.spreadsheet_id, g.gid, g.sheet_name,
+            g.campaign_tag, g.target_city, g.source_label, g.status || 'ACTIVE',
+            Number(g.total_leads_imported) || 0, Number(g.last_rows_count) || 0,
+            g.last_synced_at ? String(g.last_synced_at) : null,
+            g.last_sync_status, g.last_sync_error, g.is_demo || 0,
+            g.column_mapping, String(g.created_at), String(g.updated_at)
+          );
+        }
+        connections = db.prepare('SELECT * FROM google_sheets_connections ORDER BY created_at DESC').all() as any[];
+      }
+    } catch (e: any) {
+      console.warn('Neon get all sheets notice:', e.message);
+    }
+  }
+
   const totalSheets = connections.length;
   const activeSheets = connections.filter(c => c.status === 'ACTIVE').length;
   const totalLeadsImported = connections.reduce((acc, c) => acc + (c.total_leads_imported || 0), 0);
@@ -954,7 +1005,12 @@ export async function addOrConnectGoogleSheet(data: {
   const parsed = parseGoogleSheetUrl(data.sheetUrl);
   const liveData = await fetchLiveGoogleSheetData(data.sheetUrl, data.sheetName);
 
-  const existing = db.prepare('SELECT id FROM google_sheets_connections WHERE spreadsheet_id = ? AND gid = ?').get(parsed.spreadsheetId, parsed.gid) as any;
+  let existing = db.prepare('SELECT id FROM google_sheets_connections WHERE spreadsheet_id = ? AND gid = ?').get(parsed.spreadsheetId, parsed.gid) as any;
+  if (!existing && isNeonEnabled()) {
+    const neonSheets = await getAllGoogleSheetsFromNeon();
+    const match = neonSheets.find((s: any) => s.spreadsheet_id === parsed.spreadsheetId && String(s.gid) === String(parsed.gid));
+    if (match) existing = match;
+  }
 
   const id = existing?.id || 'gsheet-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
 
@@ -1001,6 +1057,16 @@ export async function addOrConnectGoogleSheet(data: {
     );
   }
 
+  // Persist to Neon PostgreSQL server-side
+  const savedRow = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (savedRow && isNeonEnabled()) {
+    try {
+      await persistGoogleSheetConnectionToNeon(savedRow);
+    } catch (neonErr: any) {
+      console.warn('Neon persist google sheet connection warning:', neonErr.message);
+    }
+  }
+
   // Also update standard integrations table config
   const config = {
     spreadsheetUrl: liveData.cleanUrl,
@@ -1038,8 +1104,18 @@ export async function addOrConnectGoogleSheet(data: {
   };
 }
 
-export function updateGoogleSheetConnection(id: string, updates: any, performedBy: string = 'Admin') {
-  const current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+export async function updateGoogleSheetConnection(id: string, updates: any, performedBy: string = 'Admin') {
+  let current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (!current && isNeonEnabled()) {
+    current = await findGoogleSheetInNeon(id);
+    if (current) {
+      db.prepare(`
+        INSERT INTO google_sheets_connections (id, name, sheet_url, spreadsheet_id, gid, sheet_name, campaign_tag, target_city, source_label, status, total_leads_imported, last_rows_count, is_demo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET name = excluded.name, sheet_url = excluded.sheet_url
+      `).run(current.id, current.name, current.sheet_url, current.spreadsheet_id, current.gid, current.sheet_name, current.campaign_tag, current.target_city, current.source_label, current.status || 'ACTIVE', current.total_leads_imported || 0, current.last_rows_count || 0, current.is_demo || 0);
+    }
+  }
   if (!current) throw new Error('Google Sheet connection not found: ' + id);
 
   const name = updates.name !== undefined ? updates.name : current.name;
@@ -1061,6 +1137,15 @@ export function updateGoogleSheetConnection(id: string, updates: any, performedB
     WHERE id = ?
   `).run(name, status, campaign_tag, target_city, source_label, sheet_name, id);
 
+  const updated = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (updated && isNeonEnabled()) {
+    try {
+      await persistGoogleSheetConnectionToNeon(updated);
+    } catch (e: any) {
+      console.warn('Neon update sheet warning:', e.message);
+    }
+  }
+
   logAudit({
     userName: performedBy,
     action: 'GOOGLE_SHEET_UPDATED',
@@ -1070,16 +1155,28 @@ export function updateGoogleSheetConnection(id: string, updates: any, performedB
     newValue: updates
   });
 
-  return db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id);
+  return updated;
 }
 
-export function deleteGoogleSheetConnection(id: string, performedBy: string = 'Admin') {
-  const current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+export async function deleteGoogleSheetConnection(id: string, performedBy: string = 'Admin') {
+  let current = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(id) as any;
+  if (!current && isNeonEnabled()) {
+    current = await findGoogleSheetInNeon(id);
+  }
+
   db.prepare('DELETE FROM google_sheets_connections WHERE id = ?').run(id);
+
+  if (isNeonEnabled()) {
+    try {
+      await deleteGoogleSheetConnectionFromNeon(id);
+    } catch (e: any) {
+      console.warn('Neon delete sheet warning:', e.message);
+    }
+  }
 
   const tombId = 'DEL-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
   db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
-    tombId, 'google_sheet', id, current.spreadsheet_id || id, JSON.stringify({ name: current.name }), performedBy
+    tombId, 'google_sheet', id, current?.spreadsheet_id || id, JSON.stringify({ name: current?.name || 'Google Sheet' }), performedBy
   );
 
   logAudit({
@@ -1148,6 +1245,7 @@ export async function syncLiveGoogleSheetLeads(
   const syncStatus = errorCount > 0 && importedCount === 0 && updatedCount === 0 ? 'ERROR' : errorCount > 0 ? 'WARN' : 'SUCCESS';
 
   // Update specific google_sheets_connections record if identified
+  let updatedConnId = options?.connectionId;
   if (options?.connectionId) {
     db.prepare(`
       UPDATE google_sheets_connections
@@ -1171,6 +1269,19 @@ export async function syncLiveGoogleSheetLeads(
           updated_at = datetime('now')
       WHERE spreadsheet_id = ?
     `).run(importedCount, rows.length, syncStatus, liveData.spreadsheetId);
+    const matched = db.prepare('SELECT id FROM google_sheets_connections WHERE spreadsheet_id = ?').get(liveData.spreadsheetId) as any;
+    if (matched) updatedConnId = matched.id;
+  }
+
+  if (updatedConnId && isNeonEnabled()) {
+    try {
+      const connRow = db.prepare('SELECT * FROM google_sheets_connections WHERE id = ?').get(updatedConnId) as any;
+      if (connRow) {
+        await persistGoogleSheetConnectionToNeon(connRow);
+      }
+    } catch (e: any) {
+      console.warn('Neon sync stats persist notice:', e.message);
+    }
   }
 
   // Update global integration status
@@ -1218,6 +1329,32 @@ export async function syncLiveGoogleSheetLeads(
 }
 
 export async function syncAllActiveGoogleSheets(performedBy: string = 'User') {
+  if (isNeonEnabled()) {
+    try {
+      const neonSheets = await getAllGoogleSheetsFromNeon();
+      if (neonSheets && neonSheets.length > 0) {
+        for (const ns of neonSheets) {
+          db.prepare(`
+            INSERT OR REPLACE INTO google_sheets_connections (
+              id, name, sheet_url, spreadsheet_id, gid, sheet_name,
+              campaign_tag, target_city, source_label, status,
+              total_leads_imported, last_rows_count, last_synced_at,
+              last_sync_status, last_sync_error, is_demo, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            ns.id, ns.name, ns.sheet_url, ns.spreadsheet_id, ns.gid, ns.sheet_name,
+            ns.campaign_tag, ns.target_city, ns.source_label, ns.status,
+            ns.total_leads_imported || 0, ns.last_rows_count || 0, ns.last_synced_at,
+            ns.last_sync_status, ns.last_sync_error, ns.is_demo ? 1 : 0,
+            ns.created_at || new Date().toISOString(), ns.updated_at || new Date().toISOString()
+          );
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Sync All] Failed to refresh from Neon:', e.message);
+    }
+  }
+
   const sheets = db.prepare("SELECT * FROM google_sheets_connections WHERE status = 'ACTIVE' ORDER BY created_at ASC").all() as any[];
   
   let totalRows = 0;
