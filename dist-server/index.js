@@ -548,6 +548,477 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
   }
 });
 
+// server/db/neon.ts
+import { neon } from "@neondatabase/serverless";
+import dotenv from "dotenv";
+async function findUserInNeon(identifier) {
+  if (!sql) return null;
+  const clean = identifier.trim().toLowerCase();
+  try {
+    const rows = await sql.query(`
+      SELECT * FROM users 
+      WHERE (LOWER(email) = $1 OR id IN (SELECT user_id FROM counselors WHERE LOWER(username) = $1))
+        AND is_active = 1
+      LIMIT 1
+    `, [clean]);
+    return rows[0] || null;
+  } catch (err) {
+    console.error("[Neon Auth] Failed to query user:", err);
+    return null;
+  }
+}
+async function persistUserToNeon(user) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        password_hash = EXCLUDED.password_hash,
+        role = EXCLUDED.role,
+        phone = EXCLUDED.phone,
+        avatar_url = EXCLUDED.avatar_url,
+        is_active = EXCLUDED.is_active,
+        updated_at = NOW()
+    `, [
+      user.id,
+      user.name,
+      user.email.toLowerCase(),
+      user.password_hash,
+      user.role,
+      user.phone || null,
+      user.avatar_url || null,
+      user.is_active !== void 0 ? user.is_active : 1
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] User persist failed:", err.message);
+    return false;
+  }
+}
+async function persistCounselorToNeon(counselor) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO counselors (
+        id, user_id, name, email, phone, specialization_country, assigned_cities,
+        is_active, max_capacity, current_active_leads, total_assigned_leads,
+        total_admissions, conversion_rate, username, joining_date, status, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        specialization_country = EXCLUDED.specialization_country,
+        assigned_cities = EXCLUDED.assigned_cities,
+        is_active = EXCLUDED.is_active,
+        max_capacity = EXCLUDED.max_capacity,
+        current_active_leads = EXCLUDED.current_active_leads,
+        total_assigned_leads = EXCLUDED.total_assigned_leads,
+        total_admissions = EXCLUDED.total_admissions,
+        conversion_rate = EXCLUDED.conversion_rate,
+        username = EXCLUDED.username,
+        status = EXCLUDED.status,
+        updated_at = NOW()
+    `, [
+      counselor.id,
+      counselor.user_id || null,
+      counselor.name,
+      counselor.email,
+      counselor.phone,
+      counselor.specialization_country || "Nepal & India",
+      counselor.assigned_cities || "[]",
+      counselor.is_active !== void 0 ? counselor.is_active : 1,
+      counselor.max_capacity || 100,
+      counselor.current_active_leads || 0,
+      counselor.total_assigned_leads || 0,
+      counselor.total_admissions || 0,
+      counselor.conversion_rate || 0,
+      counselor.username || counselor.email.split("@")[0],
+      counselor.joining_date || (/* @__PURE__ */ new Date()).toISOString(),
+      counselor.status || "Active"
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Counselor persist failed:", err.message);
+    return false;
+  }
+}
+async function persistLeadToNeon(lead) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO leads (
+        id, lead_id, student_name, first_name, last_name, phone, whatsapp_number, email,
+        parent_name, school_college, passing_year, gender, date_of_birth, country, state, city,
+        address, academic_qualification, percentage_10th, percentage_12th, graduation_percentage,
+        entrance_exam, entrance_score, preferred_course, preferred_university, second_university,
+        budget, scholarship_required, lead_source, campaign, ad_set, ad, facebook_lead_id,
+        lead_created_date, assigned_counselor_id, assigned_counselor_name, lead_status,
+        lead_temperature, priority, last_contact_date, next_follow_up_date, remarks,
+        created_by, updated_by, is_converted_to_student, is_deleted, is_demo, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37,
+        $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        student_name = EXCLUDED.student_name,
+        first_name = EXCLUDED.first_name,
+        last_name = EXCLUDED.last_name,
+        phone = EXCLUDED.phone,
+        whatsapp_number = EXCLUDED.whatsapp_number,
+        email = EXCLUDED.email,
+        parent_name = EXCLUDED.parent_name,
+        school_college = EXCLUDED.school_college,
+        passing_year = EXCLUDED.passing_year,
+        gender = EXCLUDED.gender,
+        date_of_birth = EXCLUDED.date_of_birth,
+        country = EXCLUDED.country,
+        state = EXCLUDED.state,
+        city = EXCLUDED.city,
+        address = EXCLUDED.address,
+        academic_qualification = EXCLUDED.academic_qualification,
+        percentage_10th = EXCLUDED.percentage_10th,
+        percentage_12th = EXCLUDED.percentage_12th,
+        graduation_percentage = EXCLUDED.graduation_percentage,
+        entrance_exam = EXCLUDED.entrance_exam,
+        entrance_score = EXCLUDED.entrance_score,
+        preferred_course = EXCLUDED.preferred_course,
+        preferred_university = EXCLUDED.preferred_university,
+        second_university = EXCLUDED.second_university,
+        budget = EXCLUDED.budget,
+        scholarship_required = EXCLUDED.scholarship_required,
+        lead_source = EXCLUDED.lead_source,
+        campaign = EXCLUDED.campaign,
+        ad_set = EXCLUDED.ad_set,
+        ad = EXCLUDED.ad,
+        facebook_lead_id = EXCLUDED.facebook_lead_id,
+        assigned_counselor_id = EXCLUDED.assigned_counselor_id,
+        assigned_counselor_name = EXCLUDED.assigned_counselor_name,
+        lead_status = EXCLUDED.lead_status,
+        lead_temperature = EXCLUDED.lead_temperature,
+        priority = EXCLUDED.priority,
+        last_contact_date = EXCLUDED.last_contact_date,
+        next_follow_up_date = EXCLUDED.next_follow_up_date,
+        remarks = EXCLUDED.remarks,
+        updated_by = EXCLUDED.updated_by,
+        is_converted_to_student = EXCLUDED.is_converted_to_student,
+        is_deleted = EXCLUDED.is_deleted,
+        updated_at = NOW()
+    `, [
+      lead.id,
+      lead.lead_id,
+      lead.student_name,
+      lead.first_name || null,
+      lead.last_name || null,
+      lead.phone,
+      lead.whatsapp_number || null,
+      lead.email || null,
+      lead.parent_name || null,
+      lead.school_college || null,
+      lead.passing_year || null,
+      lead.gender || null,
+      lead.date_of_birth || null,
+      lead.country || "Nepal",
+      lead.state || null,
+      lead.city || "Kathmandu",
+      lead.address || null,
+      lead.academic_qualification || null,
+      lead.percentage_10th !== void 0 ? lead.percentage_10th : null,
+      lead.percentage_12th !== void 0 ? lead.percentage_12th : null,
+      lead.graduation_percentage !== void 0 ? lead.graduation_percentage : null,
+      lead.entrance_exam || null,
+      lead.entrance_score || null,
+      lead.preferred_course || "B.Tech",
+      lead.preferred_university || "SRM Institute of Science and Technology",
+      lead.second_university || null,
+      lead.budget || null,
+      lead.scholarship_required ? 1 : 0,
+      lead.lead_source || "Direct Walk-in",
+      lead.campaign || null,
+      lead.ad_set || null,
+      lead.ad || null,
+      lead.facebook_lead_id || null,
+      lead.lead_created_date ? new Date(lead.lead_created_date) : /* @__PURE__ */ new Date(),
+      lead.assigned_counselor_id || null,
+      lead.assigned_counselor_name || null,
+      lead.lead_status || "New Lead",
+      lead.lead_temperature || "WARM",
+      lead.priority || "MEDIUM",
+      lead.last_contact_date ? new Date(lead.last_contact_date) : null,
+      lead.next_follow_up_date ? new Date(lead.next_follow_up_date) : null,
+      lead.remarks || null,
+      lead.created_by || "System",
+      lead.updated_by || null,
+      lead.is_converted_to_student ? 1 : 0,
+      lead.is_deleted ? 1 : 0,
+      lead.is_demo ? 1 : 0
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Lead persist failed:", err.message);
+    return false;
+  }
+}
+async function persistDeletedRecordToNeon(tombstone) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      tombstone.id,
+      tombstone.entity_type,
+      tombstone.entity_id,
+      tombstone.identifier || null,
+      tombstone.details || null,
+      tombstone.deleted_by || "System"
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Tombstone persist failed:", err.message);
+    return false;
+  }
+}
+async function deleteLeadFromNeon(leadId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM students WHERE lead_id = $1`, [leadId]);
+    await sql.query(`DELETE FROM followups WHERE lead_id = $1`, [leadId]);
+    await sql.query(`DELETE FROM lead_activities WHERE lead_id = $1`, [leadId]);
+    await sql.query(`DELETE FROM applications WHERE lead_id = $1`, [leadId]);
+    await sql.query(`DELETE FROM documents WHERE lead_id = $1`, [leadId]);
+    await sql.query(`DELETE FROM leads WHERE id = $1`, [leadId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Lead deletion failed:", err.message);
+    return false;
+  }
+}
+async function syncFromNeonToSQLite(db2) {
+  if (!sql) return;
+  try {
+    console.log("\u{1F504} [Neon Sync] Synchronizing server-side data from Neon PostgreSQL to SQLite cache...");
+    const users = await sql.query("SELECT * FROM users");
+    if (users && users.length > 0) {
+      const upsertUser = db2.prepare(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET
+          name = excluded.name,
+          email = excluded.email,
+          password_hash = excluded.password_hash,
+          role = excluded.role,
+          phone = excluded.phone,
+          avatar_url = excluded.avatar_url,
+          is_active = excluded.is_active,
+          updated_at = excluded.updated_at
+      `);
+      for (const u of users) {
+        upsertUser.run(
+          u.id,
+          u.name,
+          u.email,
+          u.password_hash,
+          u.role,
+          u.phone,
+          u.avatar_url,
+          u.is_active,
+          String(u.created_at),
+          String(u.updated_at)
+        );
+      }
+      console.log(`[Neon Sync] Synced ${users.length} users from Neon.`);
+    }
+    const counselors = await sql.query("SELECT * FROM counselors");
+    if (counselors && counselors.length > 0) {
+      const upsertCounselor = db2.prepare(`
+        INSERT INTO counselors (
+          id, user_id, name, email, phone, specialization_country, assigned_cities,
+          is_active, max_capacity, current_active_leads, total_assigned_leads,
+          total_admissions, conversion_rate, username, joining_date, status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET
+          name = excluded.name,
+          email = excluded.email,
+          phone = excluded.phone,
+          is_active = excluded.is_active,
+          username = excluded.username,
+          status = excluded.status,
+          updated_at = excluded.updated_at
+      `);
+      for (const c of counselors) {
+        upsertCounselor.run(
+          c.id,
+          c.user_id,
+          c.name,
+          c.email,
+          c.phone,
+          c.specialization_country,
+          typeof c.assigned_cities === "string" ? c.assigned_cities : JSON.stringify(c.assigned_cities || []),
+          c.is_active,
+          c.max_capacity,
+          c.current_active_leads,
+          c.total_assigned_leads,
+          c.total_admissions,
+          Number(c.conversion_rate) || 0,
+          c.username,
+          c.joining_date,
+          c.status,
+          String(c.created_at),
+          String(c.updated_at)
+        );
+      }
+      console.log(`[Neon Sync] Synced ${counselors.length} counselors from Neon.`);
+    }
+    const tombstones = await sql.query("SELECT * FROM deleted_records");
+    if (tombstones && tombstones.length > 0) {
+      const insertTombstone = db2.prepare(`
+        INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of tombstones) {
+        insertTombstone.run(t.id, t.entity_type, t.entity_id, t.identifier, t.details, t.deleted_by, String(t.deleted_at));
+      }
+      console.log(`[Neon Sync] Synced ${tombstones.length} tombstone records from Neon.`);
+    }
+    const leads = await sql.query("SELECT * FROM leads WHERE is_deleted = 0");
+    if (leads && leads.length > 0) {
+      const upsertLead = db2.prepare(`
+        INSERT INTO leads (
+          id, lead_id, student_name, first_name, last_name, phone, whatsapp_number, email,
+          parent_name, school_college, passing_year, gender, date_of_birth, country, state, city,
+          address, academic_qualification, percentage_10th, percentage_12th, graduation_percentage,
+          entrance_exam, entrance_score, preferred_course, preferred_university, second_university,
+          budget, scholarship_required, lead_source, campaign, ad_set, ad, facebook_lead_id,
+          lead_created_date, assigned_counselor_id, assigned_counselor_name, lead_status,
+          lead_temperature, priority, last_contact_date, next_follow_up_date, remarks,
+          created_by, updated_by, is_converted_to_student, is_deleted, is_demo, created_at, updated_at
+        )
+        VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          student_name = excluded.student_name,
+          phone = excluded.phone,
+          email = excluded.email,
+          lead_status = excluded.lead_status,
+          lead_temperature = excluded.lead_temperature,
+          priority = excluded.priority,
+          assigned_counselor_id = excluded.assigned_counselor_id,
+          assigned_counselor_name = excluded.assigned_counselor_name,
+          updated_at = excluded.updated_at
+      `);
+      for (const l of leads) {
+        upsertLead.run(
+          l.id,
+          l.lead_id,
+          l.student_name,
+          l.first_name,
+          l.last_name,
+          l.phone,
+          l.whatsapp_number,
+          l.email,
+          l.parent_name,
+          l.school_college,
+          l.passing_year,
+          l.gender,
+          l.date_of_birth,
+          l.country,
+          l.state,
+          l.city,
+          l.address,
+          l.academic_qualification,
+          l.percentage_10th,
+          l.percentage_12th,
+          l.graduation_percentage,
+          l.entrance_exam,
+          l.entrance_score,
+          l.preferred_course,
+          l.preferred_university,
+          l.second_university,
+          l.budget,
+          l.scholarship_required,
+          l.lead_source,
+          l.campaign,
+          l.ad_set,
+          l.ad,
+          l.facebook_lead_id,
+          String(l.lead_created_date),
+          l.assigned_counselor_id,
+          l.assigned_counselor_name,
+          l.lead_status,
+          l.lead_temperature,
+          l.priority,
+          l.last_contact_date ? String(l.last_contact_date) : null,
+          l.next_follow_up_date ? String(l.next_follow_up_date) : null,
+          l.remarks,
+          l.created_by,
+          l.updated_by,
+          l.is_converted_to_student,
+          l.is_deleted,
+          l.is_demo,
+          String(l.created_at),
+          String(l.updated_at)
+        );
+      }
+      console.log(`[Neon Sync] Synced ${leads.length} active leads from Neon.`);
+    }
+    const universities = await sql.query("SELECT * FROM universities");
+    if (universities && universities.length > 0) {
+      const upsertUni = db2.prepare(`
+        INSERT INTO universities (id, name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active, is_demo, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET name = excluded.name, status = excluded.status
+      `);
+      for (const u of universities) {
+        upsertUni.run(
+          u.id,
+          u.name,
+          u.short_name,
+          u.campus,
+          u.city,
+          u.state,
+          u.country,
+          u.university_type,
+          u.accreditation,
+          u.ranking,
+          u.website,
+          u.contact,
+          u.description,
+          u.status,
+          u.is_active,
+          u.is_demo,
+          String(u.created_at),
+          String(u.updated_at)
+        );
+      }
+    }
+    console.log("\u2705 [Neon Sync] Synchronization complete!");
+  } catch (err) {
+    console.error("[Neon Sync] Background sync failed:", err.message);
+  }
+}
+var connectionString, isNeonEnabled, sql;
+var init_neon = __esm({
+  "server/db/neon.ts"() {
+    "use strict";
+    dotenv.config();
+    connectionString = process.env.DATABASE_URL;
+    isNeonEnabled = () => Boolean(connectionString);
+    sql = connectionString ? neon(connectionString) : null;
+  }
+});
+
 // server/db/database.ts
 var database_exports = {};
 __export(database_exports, {
@@ -631,6 +1102,11 @@ function initDatabase() {
     db.exec(SCHEMA_SQL);
     runSafeMigrations();
     console.log("\u2705 Database schema initialized and migrated successfully");
+    if (isNeonEnabled()) {
+      syncFromNeonToSQLite(db).catch((err) => {
+        console.warn("[Neon Sync] Initial sync deferred:", err.message);
+      });
+    }
   } catch (error) {
     console.error("\u274C Failed to initialize database schema:", error);
     throw error;
@@ -704,6 +1180,7 @@ var init_database = __esm({
   "server/db/database.ts"() {
     "use strict";
     init_schema();
+    init_neon();
     isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     if (isVercel) {
       dbDir = "/tmp";
@@ -777,12 +1254,12 @@ function checkDuplicate(params) {
   if (conditions.length === 0) {
     return { hasDuplicate: false, duplicates: [], matchReasons: [] };
   }
-  let sql = `SELECT * FROM leads WHERE is_deleted = 0 AND (${conditions.join(" OR ")})`;
+  let sql2 = `SELECT * FROM leads WHERE is_deleted = 0 AND (${conditions.join(" OR ")})`;
   if (params.excludeId) {
-    sql += ` AND id != ?`;
+    sql2 += ` AND id != ?`;
     queryParams.push(params.excludeId);
   }
-  const duplicates = db.prepare(sql).all(...queryParams);
+  const duplicates = db.prepare(sql2).all(...queryParams);
   if (duplicates.length > 0) {
     const d = duplicates[0];
     const dNormPhone = normalizePhoneNumber(d.phone);
@@ -1033,7 +1510,11 @@ function createLead(data, performedBy = "System") {
     entityId: id,
     newValue: { lead_id: leadId, student_name: studentName, phone: data.phone, counselor: counselorName }
   });
-  return db.prepare("SELECT * FROM leads WHERE id = ?").get(id);
+  const createdLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(id);
+  if (isNeonEnabled() && createdLead) {
+    persistLeadToNeon(createdLead).catch((err) => console.warn("[Neon Sync] Lead persist deferred:", err.message));
+  }
+  return createdLead;
 }
 function updateLead(id, updates, performedBy = "System") {
   const currentLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(id);
@@ -1137,7 +1618,11 @@ function updateLead(id, updates, performedBy = "System") {
     oldValue: currentLead,
     newValue: updates
   });
-  return db.prepare("SELECT * FROM leads WHERE id = ?").get(id);
+  const updatedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(id);
+  if (isNeonEnabled() && updatedLead) {
+    persistLeadToNeon(updatedLead).catch((err) => console.warn("[Neon Sync] Lead update persist deferred:", err.message));
+  }
+  return updatedLead;
 }
 function convertLeadToStudent(leadId, performedBy = "System") {
   const lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(leadId);
@@ -1250,6 +1735,7 @@ var init_leadService = __esm({
   "server/services/leadService.ts"() {
     "use strict";
     init_database();
+    init_neon();
   }
 });
 
@@ -2388,7 +2874,7 @@ import cors from "cors";
 import path2 from "path";
 import fs2 from "fs";
 import { fileURLToPath } from "url";
-import dotenv from "dotenv";
+import dotenv2 from "dotenv";
 
 // server/routes/api.ts
 init_database();
@@ -2623,8 +3109,9 @@ function getCampaignROIReport() {
 
 // server/routes/api.ts
 init_integrationService();
+init_neon();
 var apiRouter = Router();
-apiRouter.post("/auth/login", (req, res) => {
+apiRouter.post("/auth/login", async (req, res) => {
   try {
     const { email, username, password, role } = req.body || {};
     if (role) {
@@ -2650,6 +3137,20 @@ apiRouter.post("/auth/login", (req, res) => {
         AND is_active = 1
       LIMIT 1
     `).get(identifier, identifier);
+    if (!user && isNeonEnabled()) {
+      const neonUser = await findUserInNeon(identifier);
+      if (neonUser) {
+        user = neonUser;
+        try {
+          db.prepare(`
+            INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role
+          `).run(user.id, user.name, user.email, user.password_hash, user.role, user.phone, user.avatar_url, user.is_active);
+        } catch (e) {
+        }
+      }
+    }
     if (!user && (identifier === "admin" || identifier === "superadmin" || identifier.includes("admin@"))) {
       user = db.prepare("SELECT * FROM users WHERE email = 'admin@educationsansar.com' AND is_active = 1").get();
     }
@@ -2688,6 +3189,126 @@ apiRouter.post("/auth/login", (req, res) => {
     console.error("Login Route Error:", err);
     return res.status(500).json({ error: err.message || "Internal server error during authentication" });
   }
+});
+apiRouter.post("/auth/register", async (req, res) => {
+  try {
+    const { name, email, password, role = "Counselor", phone } = req.body || {};
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "Full Name is required" });
+    }
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: "Email Address is required" });
+    }
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone?.trim() || null;
+    let existing = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(cleanEmail);
+    if (!existing && isNeonEnabled()) {
+      const neonUser = await findUserInNeon(cleanEmail);
+      if (neonUser) existing = neonUser;
+    }
+    if (existing) {
+      return res.status(400).json({ error: "An account with this email address already exists. Please sign in." });
+    }
+    const userId = "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    db.prepare(`
+      INSERT INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(userId, cleanName, cleanEmail, password, role, cleanPhone, now, now);
+    if (isNeonEnabled()) {
+      await persistUserToNeon({
+        id: userId,
+        name: cleanName,
+        email: cleanEmail,
+        password_hash: password,
+        role,
+        phone: cleanPhone,
+        is_active: 1
+      });
+    }
+    if (role === "Counselor" || role === "Telecaller") {
+      const counselorId = "c-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+      const username = cleanEmail.split("@")[0];
+      try {
+        db.prepare(`
+          INSERT INTO counselors (id, user_id, name, email, phone, specialization_country, assigned_cities, is_active, max_capacity, username, joining_date, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'Nepal & India', '[]', 1, 100, ?, ?, 'Active', ?, ?)
+        `).run(counselorId, userId, cleanName, cleanEmail, cleanPhone || "+977 9800000000", username, now, now, now);
+        if (isNeonEnabled()) {
+          await persistCounselorToNeon({
+            id: counselorId,
+            user_id: userId,
+            name: cleanName,
+            email: cleanEmail,
+            phone: cleanPhone || "+977 9800000000",
+            username,
+            joining_date: now,
+            status: "Active",
+            is_active: 1
+          });
+        }
+      } catch (cErr) {
+        console.warn("Counselor profile creation notice:", cErr.message);
+      }
+    }
+    logAudit({
+      userName: cleanName,
+      action: "USER_REGISTER",
+      entity: "user",
+      entityId: userId,
+      newValue: { role, email: cleanEmail }
+    });
+    const safeUser = { id: userId, name: cleanName, email: cleanEmail, role, phone: cleanPhone, is_active: 1, created_at: now };
+    return res.status(201).json({
+      success: true,
+      message: "Account created successfully in server-side Neon database!",
+      user: safeUser,
+      token: "session-token-" + userId
+    });
+  } catch (err) {
+    console.error("Registration Route Error:", err);
+    return res.status(500).json({ error: err.message || "Failed to create user account" });
+  }
+});
+apiRouter.post("/users", async (req, res) => {
+  const { name, email, password, role, phone } = req.body || {};
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: "Name, email, and password are required" });
+  }
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = name.trim();
+  const cleanPhone = phone?.trim() || null;
+  let existing = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(cleanEmail);
+  if (!existing && isNeonEnabled()) {
+    const neonUser = await findUserInNeon(cleanEmail);
+    if (neonUser) existing = neonUser;
+  }
+  if (existing) {
+    return res.status(400).json({ error: "User with this email already exists" });
+  }
+  const userId = "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(`
+    INSERT INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(userId, cleanName, cleanEmail, password, role || "Counselor", cleanPhone, now, now);
+  if (isNeonEnabled()) {
+    await persistUserToNeon({
+      id: userId,
+      name: cleanName,
+      email: cleanEmail,
+      password_hash: password,
+      role: role || "Counselor",
+      phone: cleanPhone,
+      is_active: 1
+    });
+  }
+  const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: role || "Counselor", phone: cleanPhone, is_active: 1 };
+  res.status(201).json({ success: true, user: safeUser });
 });
 apiRouter.get("/auth/users", (req, res) => {
   const users = db.prepare("SELECT id, name, email, role, phone, is_active FROM users ORDER BY name ASC").all();
@@ -2857,6 +3478,16 @@ apiRouter.delete("/leads/:id", (req, res) => {
       INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by)
       VALUES (?, 'lead', ?, ?, ?, ?)
     `).run(tombId, lead.id, clean, JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }), performedBy);
+    if (isNeonEnabled()) {
+      persistDeletedRecordToNeon({
+        id: tombId,
+        entity_type: "lead",
+        entity_id: lead.id,
+        identifier: clean,
+        details: JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }),
+        deleted_by: performedBy
+      }).catch((e) => console.warn("[Neon Tombstone] Deferred:", e.message));
+    }
   };
   const deleteTx = db.transaction((id) => {
     if (lead.phone) {
@@ -2889,6 +3520,9 @@ apiRouter.delete("/leads/:id", (req, res) => {
     db.prepare("DELETE FROM leads WHERE id = ?").run(id);
   });
   deleteTx(req.params.id);
+  if (isNeonEnabled()) {
+    deleteLeadFromNeon(lead.id).catch((e) => console.warn("[Neon Delete] Deferred:", e.message));
+  }
   logAudit({
     userName: performedBy,
     action: "LEAD_DELETED_PERMANENT",
@@ -3084,7 +3718,7 @@ apiRouter.post("/counselors/:id/reset-password", (req, res) => {
 });
 apiRouter.get("/followups", (req, res) => {
   const { counselorId, status, view, date } = req.query;
-  let sql = `
+  let sql2 = `
     SELECT f.*, 
       l.student_name as lead_name, 
       l.phone as lead_phone,
@@ -3098,27 +3732,27 @@ apiRouter.get("/followups", (req, res) => {
   `;
   const params = [];
   if (counselorId) {
-    sql += " AND f.counselor_id = ?";
+    sql2 += " AND f.counselor_id = ?";
     params.push(counselorId);
   }
   if (view === "today") {
-    sql += " AND date(f.follow_up_date) = date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) = date('now') AND f.status = 'Pending'";
   } else if (view === "overdue") {
-    sql += " AND date(f.follow_up_date) < date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) < date('now') AND f.status = 'Pending'";
   } else if (view === "upcoming") {
-    sql += " AND date(f.follow_up_date) > date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) > date('now') AND f.status = 'Pending'";
   } else if (view === "completed") {
-    sql += " AND f.status = 'Completed'";
+    sql2 += " AND f.status = 'Completed'";
   } else if (status) {
-    sql += " AND f.status = ?";
+    sql2 += " AND f.status = ?";
     params.push(status);
   }
   if (date) {
-    sql += " AND date(f.follow_up_date) = date(?)";
+    sql2 += " AND date(f.follow_up_date) = date(?)";
     params.push(date);
   }
-  sql += " ORDER BY f.follow_up_date ASC, f.follow_up_time ASC";
-  const followups = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY f.follow_up_date ASC, f.follow_up_time ASC";
+  const followups = db.prepare(sql2).all(...params);
   res.json(followups);
 });
 apiRouter.post("/followups", (req, res) => {
@@ -3169,7 +3803,7 @@ apiRouter.delete("/followups/:id", (req, res) => {
 });
 apiRouter.get("/applications", (req, res) => {
   const { status, counselorId, universityId, search } = req.query;
-  let sql = `
+  let sql2 = `
     SELECT a.*, l.phone as student_phone, l.email as student_email
     FROM applications a
     JOIN leads l ON a.lead_id = l.id
@@ -3177,23 +3811,23 @@ apiRouter.get("/applications", (req, res) => {
   `;
   const params = [];
   if (status) {
-    sql += " AND a.application_status = ?";
+    sql2 += " AND a.application_status = ?";
     params.push(status);
   }
   if (counselorId) {
-    sql += " AND a.counselor_id = ?";
+    sql2 += " AND a.counselor_id = ?";
     params.push(counselorId);
   }
   if (universityId) {
-    sql += " AND a.university_id = ?";
+    sql2 += " AND a.university_id = ?";
     params.push(universityId);
   }
   if (search) {
-    sql += " AND (a.student_name LIKE ? OR a.application_id LIKE ? OR a.application_number LIKE ?)";
+    sql2 += " AND (a.student_name LIKE ? OR a.application_id LIKE ? OR a.application_number LIKE ?)";
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
-  sql += " ORDER BY a.created_at DESC";
-  const apps = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY a.created_at DESC";
+  const apps = db.prepare(sql2).all(...params);
   res.json(apps);
 });
 apiRouter.post("/applications", (req, res) => {
@@ -3275,22 +3909,22 @@ apiRouter.delete("/applications/:id", (req, res) => {
 });
 apiRouter.get("/students", (req, res) => {
   const { search, university, course } = req.query;
-  let sql = "SELECT * FROM students WHERE 1=1";
+  let sql2 = "SELECT * FROM students WHERE 1=1";
   const params = [];
   if (search) {
-    sql += " AND (student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?)";
+    sql2 += " AND (student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?)";
     params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
   if (university) {
-    sql += " AND university = ?";
+    sql2 += " AND university = ?";
     params.push(university);
   }
   if (course) {
-    sql += " AND course = ?";
+    sql2 += " AND course = ?";
     params.push(course);
   }
-  sql += " ORDER BY admission_date DESC";
-  const students = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY admission_date DESC";
+  const students = db.prepare(sql2).all(...params);
   res.json(students);
 });
 apiRouter.get("/students/:id", (req, res) => {
@@ -3385,26 +4019,26 @@ apiRouter.delete("/universities/:id", (req, res) => {
 });
 apiRouter.get("/courses", (req, res) => {
   const { university_id, stream, course_level, search } = req.query;
-  let sql = "SELECT * FROM courses WHERE 1=1";
+  let sql2 = "SELECT * FROM courses WHERE 1=1";
   const params = [];
   if (university_id) {
-    sql += " AND university_id = ?";
+    sql2 += " AND university_id = ?";
     params.push(university_id);
   }
   if (stream) {
-    sql += " AND stream = ?";
+    sql2 += " AND stream = ?";
     params.push(stream);
   }
   if (course_level) {
-    sql += " AND course_level = ?";
+    sql2 += " AND course_level = ?";
     params.push(course_level);
   }
   if (search) {
-    sql += " AND (course_name LIKE ? OR stream LIKE ? OR short_name LIKE ?)";
+    sql2 += " AND (course_name LIKE ? OR stream LIKE ? OR short_name LIKE ?)";
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
-  sql += " ORDER BY course_name ASC";
-  const courses = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY course_name ASC";
+  const courses = db.prepare(sql2).all(...params);
   res.json(courses);
 });
 apiRouter.post("/courses", (req, res) => {
@@ -3488,7 +4122,7 @@ apiRouter.delete("/courses/:id", (req, res) => {
 });
 apiRouter.get("/university-courses", (req, res) => {
   const { search, university_id, course_id, stream, course_level, max_fee, city, state } = req.query;
-  let sql = `
+  let sql2 = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -3514,42 +4148,42 @@ apiRouter.get("/university-courses", (req, res) => {
   const params = [];
   if (search) {
     const s = `%${search}%`;
-    sql += ` AND (u.name LIKE ? OR c.course_name LIKE ? OR u.city LIKE ? OR c.stream LIKE ? OR u.short_name LIKE ?)`;
+    sql2 += ` AND (u.name LIKE ? OR c.course_name LIKE ? OR u.city LIKE ? OR c.stream LIKE ? OR u.short_name LIKE ?)`;
     params.push(s, s, s, s, s);
   }
   if (university_id) {
-    sql += ` AND uc.university_id = ?`;
+    sql2 += ` AND uc.university_id = ?`;
     params.push(university_id);
   }
   if (course_id) {
-    sql += ` AND uc.course_id = ?`;
+    sql2 += ` AND uc.course_id = ?`;
     params.push(course_id);
   }
   if (stream) {
-    sql += ` AND c.stream = ?`;
+    sql2 += ` AND c.stream = ?`;
     params.push(stream);
   }
   if (course_level) {
-    sql += ` AND c.course_level = ?`;
+    sql2 += ` AND c.course_level = ?`;
     params.push(course_level);
   }
   if (city) {
-    sql += ` AND u.city LIKE ?`;
+    sql2 += ` AND u.city LIKE ?`;
     params.push(`%${city}%`);
   }
   if (state) {
-    sql += ` AND u.state LIKE ?`;
+    sql2 += ` AND u.state LIKE ?`;
     params.push(`%${state}%`);
   }
   if (max_fee) {
     const feeNum = parseFloat(max_fee);
     if (!isNaN(feeNum)) {
-      sql += ` AND (uc.tuition_fee_per_year <= ? OR uc.total_first_year_fee <= ?)`;
+      sql2 += ` AND (uc.tuition_fee_per_year <= ? OR uc.total_first_year_fee <= ?)`;
       params.push(feeNum, feeNum);
     }
   }
-  sql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC`;
-  const results = db.prepare(sql).all(...params);
+  sql2 += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC`;
+  const results = db.prepare(sql2).all(...params);
   res.json(results);
 });
 apiRouter.get("/university-courses/compare", (req, res) => {
@@ -3558,7 +4192,7 @@ apiRouter.get("/university-courses/compare", (req, res) => {
   const idList = ids.split(",").map((s) => s.trim()).filter(Boolean);
   if (idList.length === 0) return res.json([]);
   const placeholders = idList.map(() => "?").join(",");
-  const sql = `
+  const sql2 = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -3581,11 +4215,11 @@ apiRouter.get("/university-courses/compare", (req, res) => {
     JOIN courses c ON uc.course_id = c.id
     WHERE uc.id IN (${placeholders})
   `;
-  const results = db.prepare(sql).all(...idList);
+  const results = db.prepare(sql2).all(...idList);
   res.json(results);
 });
 apiRouter.get("/university-courses/:id", (req, res) => {
-  const sql = `
+  const sql2 = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -3606,7 +4240,7 @@ apiRouter.get("/university-courses/:id", (req, res) => {
     JOIN courses c ON uc.course_id = c.id
     WHERE uc.id = ?
   `;
-  const item = db.prepare(sql).get(req.params.id);
+  const item = db.prepare(sql2).get(req.params.id);
   if (!item) return res.status(404).json({ error: "Fee structure not found" });
   res.json(item);
 });
@@ -3746,18 +4380,18 @@ apiRouter.delete("/university-courses/:id", (req, res) => {
 });
 apiRouter.get("/documents", (req, res) => {
   const { lead_id, status } = req.query;
-  let sql = "SELECT * FROM documents WHERE 1=1";
+  let sql2 = "SELECT * FROM documents WHERE 1=1";
   const params = [];
   if (lead_id) {
-    sql += " AND lead_id = ?";
+    sql2 += " AND lead_id = ?";
     params.push(lead_id);
   }
   if (status) {
-    sql += " AND verification_status = ?";
+    sql2 += " AND verification_status = ?";
     params.push(status);
   }
-  sql += " ORDER BY upload_date DESC";
-  const docs = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY upload_date DESC";
+  const docs = db.prepare(sql2).all(...params);
   res.json(docs);
 });
 apiRouter.post("/documents/upload", (req, res) => {
@@ -3829,14 +4463,14 @@ apiRouter.post("/campaigns", (req, res) => {
 });
 apiRouter.get("/notifications", (req, res) => {
   const { counselorId } = req.query;
-  let sql = "SELECT * FROM notifications WHERE 1=1";
+  let sql2 = "SELECT * FROM notifications WHERE 1=1";
   const params = [];
   if (counselorId) {
-    sql += " AND (counselor_id = ? OR counselor_id IS NULL)";
+    sql2 += " AND (counselor_id = ? OR counselor_id IS NULL)";
     params.push(counselorId);
   }
-  sql += " ORDER BY created_at DESC LIMIT 50";
-  const notifs = db.prepare(sql).all(...params);
+  sql2 += " ORDER BY created_at DESC LIMIT 50";
+  const notifs = db.prepare(sql2).all(...params);
   res.json(notifs);
 });
 apiRouter.put("/notifications/:id/read", (req, res) => {
@@ -4478,7 +5112,7 @@ if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")
 }
 
 // server/index.ts
-dotenv.config();
+dotenv2.config();
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path2.dirname(__filename);
 var app = express();

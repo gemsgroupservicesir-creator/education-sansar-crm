@@ -134,12 +134,20 @@ function runSafeMigrations() {
   addColumnIfNotExists('university_courses', 'is_active', 'INTEGER DEFAULT 1');
 }
 
+import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';
+
 // Initialize database schema
 export function initDatabase() {
   try {
     db.exec(SCHEMA_SQL);
     runSafeMigrations();
     console.log('✅ Database schema initialized and migrated successfully');
+
+    if (isNeonEnabled()) {
+      syncFromNeonToSQLite(db).catch(err => {
+        console.warn('[Neon Sync] Initial sync deferred:', err.message);
+      });
+    }
 
   } catch (error) {
     console.error('❌ Failed to initialize database schema:', error);

@@ -37,6 +37,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(credentials),
     }),
+  register: (data: { name: string; email: string; password: string; role?: string; phone?: string }) =>
+    fetchJson<{ success: boolean; message: string; user: any; token: string }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getUsers: () => fetchJson<any[]>('/auth/users'),
 
   // Leads

@@ -1,4 +1,5 @@
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
+import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
 import type { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
 
 export function normalizePhoneNumber(phone?: string): string {
@@ -356,7 +357,12 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     newValue: { lead_id: leadId, student_name: studentName, phone: data.phone, counselor: counselorName }
   });
 
-  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
+  const createdLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
+  if (isNeonEnabled() && createdLead) {
+    persistLeadToNeon(createdLead).catch(err => console.warn('[Neon Sync] Lead persist deferred:', err.message));
+  }
+
+  return createdLead;
 }
 
 // Update lead with status tracking and student conversion automation
@@ -452,7 +458,12 @@ export function updateLead(id: string, updates: Partial<Lead>, performedBy: stri
     newValue: updates
   });
 
-  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
+  const updatedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
+  if (isNeonEnabled() && updatedLead) {
+    persistLeadToNeon(updatedLead).catch(err => console.warn('[Neon Sync] Lead update persist deferred:', err.message));
+  }
+
+  return updatedLead;
 }
 
 // Convert lead to official Student record

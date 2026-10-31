@@ -20,12 +20,23 @@ import {
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
+import { 
+  isNeonEnabled, 
+  findUserInNeon, 
+  persistUserToNeon, 
+  persistCounselorToNeon, 
+  persistLeadToNeon, 
+  persistDeletedRecordToNeon, 
+  deleteLeadFromNeon, 
+  persistUniversityCourseToNeon 
+} from '../db/neon.ts';
+
 export const apiRouter = Router();
 
 // ==========================================
 // 1. AUTH & ROLES
 // ==========================================
-apiRouter.post('/auth/login', (req: Request, res: Response) => {
+apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
     const { email, username, password, role } = req.body || {};
 
@@ -57,6 +68,21 @@ apiRouter.post('/auth/login', (req: Request, res: Response) => {
         AND is_active = 1
       LIMIT 1
     `).get(identifier, identifier) as any;
+
+    // 2b. If not in local SQLite, query server-side Neon PostgreSQL database directly
+    if (!user && isNeonEnabled()) {
+      const neonUser = await findUserInNeon(identifier);
+      if (neonUser) {
+        user = neonUser;
+        try {
+          db.prepare(`
+            INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role
+          `).run(user.id, user.name, user.email, user.password_hash, user.role, user.phone, user.avatar_url, user.is_active);
+        } catch (e) {}
+      }
+    }
 
     // 3. Convenience fallbacks for common aliases & test accounts
     if (!user && (identifier === 'admin' || identifier === 'superadmin' || identifier.includes('admin@'))) {
@@ -102,6 +128,149 @@ apiRouter.post('/auth/login', (req: Request, res: Response) => {
     console.error('Login Route Error:', err);
     return res.status(500).json({ error: err.message || 'Internal server error during authentication' });
   }
+});
+
+// User Registration endpoint (stored permanently server-side on Neon PostgreSQL)
+apiRouter.post('/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { name, email, password, role = 'Counselor', phone } = req.body || {};
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Full Name is required' });
+    }
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Email Address is required' });
+    }
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone?.trim() || null;
+
+    // Check duplicate in SQLite and Neon
+    let existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+    if (!existing && isNeonEnabled()) {
+      const neonUser = await findUserInNeon(cleanEmail);
+      if (neonUser) existing = neonUser;
+    }
+    if (existing) {
+      return res.status(400).json({ error: 'An account with this email address already exists. Please sign in.' });
+    }
+
+    const userId = 'u-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    const now = new Date().toISOString();
+
+    // 1. Insert into local SQLite
+    db.prepare(`
+      INSERT INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(userId, cleanName, cleanEmail, password, role, cleanPhone, now, now);
+
+    // 2. Persist to Neon PostgreSQL server-side
+    if (isNeonEnabled()) {
+      await persistUserToNeon({
+        id: userId,
+        name: cleanName,
+        email: cleanEmail,
+        password_hash: password,
+        role,
+        phone: cleanPhone,
+        is_active: 1
+      });
+    }
+
+    // 3. If role is Counselor or Telecaller, also create a counselor profile
+    if (role === 'Counselor' || role === 'Telecaller') {
+      const counselorId = 'c-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+      const username = cleanEmail.split('@')[0];
+      try {
+        db.prepare(`
+          INSERT INTO counselors (id, user_id, name, email, phone, specialization_country, assigned_cities, is_active, max_capacity, username, joining_date, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'Nepal & India', '[]', 1, 100, ?, ?, 'Active', ?, ?)
+        `).run(counselorId, userId, cleanName, cleanEmail, cleanPhone || '+977 9800000000', username, now, now, now);
+
+        if (isNeonEnabled()) {
+          await persistCounselorToNeon({
+            id: counselorId,
+            user_id: userId,
+            name: cleanName,
+            email: cleanEmail,
+            phone: cleanPhone || '+977 9800000000',
+            username,
+            joining_date: now,
+            status: 'Active',
+            is_active: 1
+          });
+        }
+      } catch (cErr: any) {
+        console.warn('Counselor profile creation notice:', cErr.message);
+      }
+    }
+
+    logAudit({
+      userName: cleanName,
+      action: 'USER_REGISTER',
+      entity: 'user',
+      entityId: userId,
+      newValue: { role, email: cleanEmail }
+    });
+
+    const safeUser = { id: userId, name: cleanName, email: cleanEmail, role, phone: cleanPhone, is_active: 1, created_at: now };
+    return res.status(201).json({
+      success: true,
+      message: 'Account created successfully in server-side Neon database!',
+      user: safeUser,
+      token: 'session-token-' + userId
+    });
+  } catch (err: any) {
+    console.error('Registration Route Error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to create user account' });
+  }
+});
+
+// Admin User creation endpoint
+apiRouter.post('/users', async (req: Request, res: Response) => {
+  // Delegate to registration handler
+  const { name, email, password, role, phone } = req.body || {};
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and password are required' });
+  }
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = name.trim();
+  const cleanPhone = phone?.trim() || null;
+
+  let existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+  if (!existing && isNeonEnabled()) {
+    const neonUser = await findUserInNeon(cleanEmail);
+    if (neonUser) existing = neonUser;
+  }
+  if (existing) {
+    return res.status(400).json({ error: 'User with this email already exists' });
+  }
+
+  const userId = 'u-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `).run(userId, cleanName, cleanEmail, password, role || 'Counselor', cleanPhone, now, now);
+
+  if (isNeonEnabled()) {
+    await persistUserToNeon({
+      id: userId,
+      name: cleanName,
+      email: cleanEmail,
+      password_hash: password,
+      role: role || 'Counselor',
+      phone: cleanPhone,
+      is_active: 1
+    });
+  }
+
+  const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: role || 'Counselor', phone: cleanPhone, is_active: 1 };
+  res.status(201).json({ success: true, user: safeUser });
 });
 
 apiRouter.get('/auth/users', (req: Request, res: Response) => {
@@ -310,6 +479,17 @@ apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
       INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by)
       VALUES (?, 'lead', ?, ?, ?, ?)
     `).run(tombId, lead.id, clean, JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }), performedBy);
+
+    if (isNeonEnabled()) {
+      persistDeletedRecordToNeon({
+        id: tombId,
+        entity_type: 'lead',
+        entity_id: lead.id,
+        identifier: clean,
+        details: JSON.stringify({ lead_id: lead.lead_id, student_name: lead.student_name }),
+        deleted_by: performedBy
+      }).catch(e => console.warn('[Neon Tombstone] Deferred:', e.message));
+    }
   };
 
   // Permanent Hard Delete with Cascade
@@ -345,6 +525,10 @@ apiRouter.delete('/leads/:id', (req: Request, res: Response) => {
     db.prepare('DELETE FROM leads WHERE id = ?').run(id);
   });
   deleteTx(req.params.id);
+
+  if (isNeonEnabled()) {
+    deleteLeadFromNeon(lead.id).catch(e => console.warn('[Neon Delete] Deferred:', e.message));
+  }
 
   logAudit({
     userName: performedBy,

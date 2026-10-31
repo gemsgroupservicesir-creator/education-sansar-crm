@@ -8,6 +8,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   switchRole: (role: UserRole) => Promise<void>;
   login: (emailOrUsername: string, pass: string) => Promise<User>;
+  register: (data: { name: string; email: string; password: string; role?: UserRole; phone?: string }) => Promise<User>;
   loginWithRole: (role: UserRole) => Promise<User>;
   logout: () => void;
   canManageUsers: boolean;
@@ -62,36 +63,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login = async (emailOrUsername: string, pass: string): Promise<User> => {
-    try {
-      const res = await api.login({ email: emailOrUsername, username: emailOrUsername, password: pass });
-      if (res.user) {
-        setUser(res.user);
-        setCurrentRole(res.user.role);
-        localStorage.setItem('sansar_user', JSON.stringify(res.user));
-        return res.user;
-      }
-    } catch (apiError: any) {
-      console.warn('Backend login request error, applying resilient fallback:', apiError.message);
-      // Fail-safe: If server has a 500 error or is unreachable, allow instant login with demo user
-      const id = (emailOrUsername || '').trim().toLowerCase();
-      const isCounselor = id.includes('aarav') || id.includes('priya') || id.includes('counselor');
-      const fallbackUser: User = {
-        id: id.includes('aarav') ? 'u-c1' : id.includes('priya') ? 'u-c2' : 'u-super',
-        name: id.includes('aarav') ? 'Aarav Sharma' : id.includes('priya') ? 'Priya Patel' : 'Bikash Karki',
-        email: emailOrUsername.includes('@') ? emailOrUsername : `${emailOrUsername}@educationsansar.com`,
-        role: isCounselor ? 'Counselor' : 'Super Admin',
-        phone: '+977 9801234567',
-        is_active: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      setUser(fallbackUser);
-      setCurrentRole(fallbackUser.role);
-      localStorage.setItem('sansar_user', JSON.stringify(fallbackUser));
-      return fallbackUser;
+    const res = await api.login({ email: emailOrUsername, username: emailOrUsername, password: pass });
+    if (res.user) {
+      setUser(res.user);
+      setCurrentRole(res.user.role);
+      localStorage.setItem('sansar_user', JSON.stringify(res.user));
+      return res.user;
     }
     throw new Error('Login failed: invalid response from server');
+  };
+
+  const register = async (data: { name: string; email: string; password: string; role?: UserRole; phone?: string }): Promise<User> => {
+    const res = await api.register(data);
+    if (res.user) {
+      setUser(res.user);
+      setCurrentRole(res.user.role);
+      localStorage.setItem('sansar_user', JSON.stringify(res.user));
+      return res.user;
+    }
+    throw new Error('Registration failed: invalid response from server');
   };
 
   const loginWithRole = async (role: UserRole): Promise<User> => {
@@ -145,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated,
         switchRole,
         login,
+        register,
         loginWithRole,
         logout,
         canManageUsers,
