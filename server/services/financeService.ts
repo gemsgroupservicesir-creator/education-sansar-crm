@@ -1,4 +1,5 @@
 import { db, logAudit } from '../db/database.ts';
+import { isNeonEnabled, persistTransactionToNeon, deleteTransactionFromNeon, persistInvoiceToNeon, deleteInvoiceFromNeon, persistDeletedRecordToNeon } from '../db/neon.ts';
 
 export interface FinanceTransaction {
   id: string;
@@ -131,7 +132,11 @@ export function createTransaction(data: Partial<FinanceTransaction>, performedBy
     newValue: { type: data.type, title: data.title, amount: data.amount }
   });
 
-  return db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id) as any;
+  const newTxn = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id) as any;
+  if (isNeonEnabled() && newTxn) {
+    persistTransactionToNeon(newTxn).catch(e => console.warn('[Neon Sync] Tx defer:', e.message));
+  }
+  return newTxn;
 }
 
 export function updateTransaction(id: string, data: Partial<FinanceTransaction>, performedBy: string = 'Super Admin'): boolean {
@@ -174,14 +179,46 @@ export function updateTransaction(id: string, data: Partial<FinanceTransaction>,
     id
   );
 
+  const updatedTx = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id) as any;
+  if (isNeonEnabled() && updatedTx) {
+    persistTransactionToNeon(updatedTx).catch(e => console.warn('[Neon Sync] Tx update defer:', e.message));
+  }
+
   return true;
 }
 
 export function deleteTransaction(id: string, performedBy: string = 'Super Admin'): boolean {
-  const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id) as any;
   if (!existing) return false;
 
   db.prepare("DELETE FROM finance_transactions WHERE id = ?").run(id);
+
+  const tombId = 'DEL-TX-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'finance_transaction', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.transaction_id || id, JSON.stringify({ title: existing.title, amount: existing.amount }), performedBy);
+
+  if (isNeonEnabled()) {
+    deleteTransactionFromNeon(id).catch(e => console.warn('[Neon Delete] Tx defer:', e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: 'finance_transaction',
+      entity_id: id,
+      identifier: existing.transaction_id || id,
+      details: JSON.stringify({ title: existing.title, amount: existing.amount }),
+      deleted_by: performedBy
+    }).catch(e => console.warn('[Neon Tombstone] Tx defer:', e.message));
+  }
+
+  logAudit({
+    userName: performedBy,
+    action: 'DELETE_FINANCE_TRANSACTION',
+    entity: 'finance_transaction',
+    entityId: id,
+    oldValue: existing
+  });
+
   return true;
 }
 
@@ -279,7 +316,47 @@ export function createInvoice(data: Partial<FinanceInvoice>, performedBy: string
     newValue: { invoiceNumber, recipient: data.recipient_name, total }
   });
 
-  return getInvoices({}).find(i => i.id === id)!;
+  const createdInv = getInvoices({}).find(i => i.id === id)!;
+  if (isNeonEnabled() && createdInv) {
+    persistInvoiceToNeon(createdInv).catch(e => console.warn('[Neon Sync] Invoice defer:', e.message));
+  }
+
+  return createdInv;
+}
+
+export function deleteInvoice(id: string, performedBy: string = 'Super Admin'): boolean {
+  const existing = db.prepare("SELECT * FROM finance_invoices WHERE id = ?").get(id) as any;
+  if (!existing) return false;
+
+  db.prepare("DELETE FROM finance_invoices WHERE id = ?").run(id);
+
+  const tombId = 'DEL-INV-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'finance_invoice', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.invoice_number || id, JSON.stringify({ recipient: existing.recipient_name, total: existing.total_amount }), performedBy);
+
+  if (isNeonEnabled()) {
+    deleteInvoiceFromNeon(id).catch(e => console.warn('[Neon Delete] Invoice defer:', e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: 'finance_invoice',
+      entity_id: id,
+      identifier: existing.invoice_number || id,
+      details: JSON.stringify({ recipient: existing.recipient_name, total: existing.total_amount }),
+      deleted_by: performedBy
+    }).catch(e => console.warn('[Neon Tombstone] Invoice defer:', e.message));
+  }
+
+  logAudit({
+    userName: performedBy,
+    action: 'DELETE_FINANCE_INVOICE',
+    entity: 'finance_invoice',
+    entityId: id,
+    oldValue: existing
+  });
+
+  return true;
 }
 
 export function recordInvoicePayment(

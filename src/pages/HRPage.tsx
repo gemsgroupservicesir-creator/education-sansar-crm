@@ -22,7 +22,8 @@ import {
   Send,
   Printer,
   X,
-  CreditCard
+  CreditCard,
+  Trash2
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Employee, AttendanceRecord, LeaveRequest, PayrollRecord } from '../types';
@@ -235,6 +236,19 @@ export const HRPage: React.FC = () => {
     }
   };
 
+  const handleDeleteEmployee = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently delete employee "${name}"? This action cannot be undone and will delete all associated attendance, leave, and payroll records permanently from SQLite and Neon Cloud Database.`)) {
+      return;
+    }
+    try {
+      await api.deleteEmployee(id);
+      addToast(`Employee "${name}" deleted permanently across local and Neon database`, 'success');
+      loadEmployees();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to delete employee', 'error');
+    }
+  };
+
   // Filtered employees
   const filteredEmployees = employees.filter(e => {
     const matchesSearch = e.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -429,12 +443,13 @@ export const HRPage: React.FC = () => {
                     <th className="py-3 px-4">Joining Date</th>
                     <th className="py-3 px-4">Salary (Monthly)</th>
                     <th className="py-3 px-4">Status</th>
+                    {canManageHR && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-400">
+                      <td colSpan={canManageHR ? 7 : 6} className="text-center py-8 text-slate-400">
                         No employees found matching the filters.
                       </td>
                     </tr>
@@ -488,6 +503,17 @@ export const HRPage: React.FC = () => {
                             {emp.status}
                           </span>
                         </td>
+                        {canManageHR && (
+                          <td className="py-3.5 px-4 text-right">
+                            <button
+                              onClick={() => handleDeleteEmployee(emp.id, emp.full_name)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Employee Permanently"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}

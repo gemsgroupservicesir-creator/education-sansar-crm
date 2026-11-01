@@ -982,9 +982,282 @@ async function deleteCounselorAndUserFromNeon(counselorId, email, userId) {
       await sql.query(`DELETE FROM users WHERE LOWER(email) = LOWER($1) OR id = $2`, [email || "", userId || ""]);
     }
     await sql.query(`DELETE FROM counselors WHERE id = $1`, [counselorId]);
+    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR user_id = $2`, [counselorId, userId || ""]);
+    await sql.query(`DELETE FROM lead_routing_rules WHERE counselor_id = $1`, [counselorId]);
+    await sql.query(`UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id = $1`, [counselorId]);
     return true;
   } catch (err) {
     console.error("[Neon Delete] Counselor/User deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteEmployeeFromNeon(employeeId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM hr_attendance WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_leaves WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_payroll WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_employees WHERE id = $1`, [employeeId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Employee deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteTransactionFromNeon(transactionId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM finance_transactions WHERE id = $1`, [transactionId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Finance transaction deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteInvoiceFromNeon(invoiceId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM finance_invoices WHERE id = $1`, [invoiceId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Finance invoice deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteStudentFromNeon(studentId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM students WHERE id = $1`, [studentId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Student deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteApplicationFromNeon(appId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM applications WHERE id = $1`, [appId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Application deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteFollowupFromNeon(followupId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM followups WHERE id = $1`, [followupId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Followup deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteUniversityFromNeon(uniId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE university_id = $1`, [uniId]);
+    await sql.query(`DELETE FROM courses WHERE university_id = $1`, [uniId]);
+    await sql.query(`DELETE FROM universities WHERE id = $1`, [uniId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] University deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteCourseFromNeon(courseId) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE course_id = $1`, [courseId]);
+    await sql.query(`DELETE FROM courses WHERE id = $1`, [courseId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Course deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteUniversityCourseFromNeon(id) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE id = $1`, [id]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] University course deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteRoutingRuleFromNeon(id) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM lead_routing_rules WHERE id = $1`, [id]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Routing rule deletion failed:", err.message);
+    return false;
+  }
+}
+async function deleteMessageTemplateFromNeon(id) {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM message_templates WHERE id = $1`, [id]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] Message template deletion failed:", err.message);
+    return false;
+  }
+}
+async function persistEmployeeToNeon(emp) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO hr_employees (
+        id, employee_code, user_id, counselor_id, full_name, email, phone,
+        department, designation, employment_type, joining_date, monthly_salary,
+        currency, bank_name, account_number, pan_number, emergency_contact, status, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        full_name = EXCLUDED.full_name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        department = EXCLUDED.department,
+        designation = EXCLUDED.designation,
+        employment_type = EXCLUDED.employment_type,
+        joining_date = EXCLUDED.joining_date,
+        monthly_salary = EXCLUDED.monthly_salary,
+        currency = EXCLUDED.currency,
+        bank_name = EXCLUDED.bank_name,
+        account_number = EXCLUDED.account_number,
+        pan_number = EXCLUDED.pan_number,
+        emergency_contact = EXCLUDED.emergency_contact,
+        status = EXCLUDED.status,
+        user_id = EXCLUDED.user_id,
+        counselor_id = EXCLUDED.counselor_id,
+        updated_at = NOW()
+    `, [
+      emp.id,
+      emp.employee_code,
+      emp.user_id || null,
+      emp.counselor_id || null,
+      emp.full_name,
+      emp.email,
+      emp.phone,
+      emp.department || "Counseling",
+      emp.designation || "Education Counselor",
+      emp.employment_type || "Full-Time",
+      emp.joining_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      Number(emp.monthly_salary) || 0,
+      emp.currency || "NPR",
+      emp.bank_name || null,
+      emp.account_number || null,
+      emp.pan_number || null,
+      emp.emergency_contact || null,
+      emp.status || "Active"
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Employee persist failed:", err.message);
+    return false;
+  }
+}
+async function persistTransactionToNeon(tx) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO finance_transactions (
+        id, transaction_id, type, category, title, amount, currency,
+        transaction_date, payment_method, reference_number, student_id, student_name,
+        university_id, university_name, status, notes, recorded_by, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        type = EXCLUDED.type,
+        category = EXCLUDED.category,
+        title = EXCLUDED.title,
+        amount = EXCLUDED.amount,
+        currency = EXCLUDED.currency,
+        transaction_date = EXCLUDED.transaction_date,
+        payment_method = EXCLUDED.payment_method,
+        reference_number = EXCLUDED.reference_number,
+        student_id = EXCLUDED.student_id,
+        student_name = EXCLUDED.student_name,
+        university_id = EXCLUDED.university_id,
+        university_name = EXCLUDED.university_name,
+        status = EXCLUDED.status,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `, [
+      tx.id,
+      tx.transaction_id,
+      tx.type || "INCOME",
+      tx.category || "General",
+      tx.title,
+      Number(tx.amount) || 0,
+      tx.currency || "NPR",
+      tx.transaction_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      tx.payment_method || "Bank Transfer",
+      tx.reference_number || null,
+      tx.student_id || null,
+      tx.student_name || null,
+      tx.university_id || null,
+      tx.university_name || null,
+      tx.status || "Completed",
+      tx.notes || null,
+      tx.recorded_by || "Super Admin"
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Transaction persist failed:", err.message);
+    return false;
+  }
+}
+async function persistInvoiceToNeon(inv) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO finance_invoices (
+        id, invoice_number, invoice_type, recipient_name, recipient_email, recipient_phone,
+        total_amount, paid_amount, due_amount, currency, due_date, status, items, notes,
+        student_id, university_id, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        invoice_number = EXCLUDED.invoice_number,
+        invoice_type = EXCLUDED.invoice_type,
+        recipient_name = EXCLUDED.recipient_name,
+        recipient_email = EXCLUDED.recipient_email,
+        recipient_phone = EXCLUDED.recipient_phone,
+        total_amount = EXCLUDED.total_amount,
+        paid_amount = EXCLUDED.paid_amount,
+        due_amount = EXCLUDED.due_amount,
+        currency = EXCLUDED.currency,
+        due_date = EXCLUDED.due_date,
+        status = EXCLUDED.status,
+        items = EXCLUDED.items,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `, [
+      inv.id,
+      inv.invoice_number,
+      inv.invoice_type || "STUDENT_FEE",
+      inv.recipient_name,
+      inv.recipient_email || null,
+      inv.recipient_phone || null,
+      Number(inv.total_amount) || 0,
+      Number(inv.paid_amount) || 0,
+      Number(inv.due_amount) || 0,
+      inv.currency || "NPR",
+      inv.due_date,
+      inv.status || "Sent",
+      typeof inv.items === "string" ? inv.items : JSON.stringify(inv.items || []),
+      inv.notes || null,
+      inv.student_id || null,
+      inv.university_id || null
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Persist] Invoice persist failed:", err.message);
     return false;
   }
 }
@@ -1087,6 +1360,21 @@ async function syncFromNeonToSQLite(db2) {
       `);
     } catch (migrErr) {
     }
+    const tombstones = await sql.query("SELECT * FROM deleted_records");
+    const tombstoneEntities = /* @__PURE__ */ new Set();
+    const tombstoneIdentifiers = /* @__PURE__ */ new Set();
+    if (tombstones && tombstones.length > 0) {
+      const insertTombstone = db2.prepare(`
+        INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of tombstones) {
+        insertTombstone.run(t.id, t.entity_type, t.entity_id, t.identifier, t.details, t.deleted_by, String(t.deleted_at));
+        tombstoneEntities.add(`${t.entity_type}:${t.entity_id}`);
+        if (t.identifier) tombstoneIdentifiers.add(String(t.identifier).toLowerCase().trim());
+      }
+      console.log(`[Neon Sync] Loaded ${tombstones.length} tombstone records from Neon.`);
+    }
     const users = await sql.query("SELECT * FROM users");
     if (users && users.length > 0) {
       const upsertUser = db2.prepare(`
@@ -1104,6 +1392,10 @@ async function syncFromNeonToSQLite(db2) {
           updated_at = excluded.updated_at
       `);
       for (const u of users) {
+        if (tombstoneEntities.has("user:" + u.id) || tombstoneIdentifiers.has(u.email?.toLowerCase())) {
+          db2.prepare("DELETE FROM users WHERE id = ? OR LOWER(email) = LOWER(?)").run(u.id, u.email);
+          continue;
+        }
         upsertUser.run(
           u.id,
           u.name,
@@ -1143,6 +1435,10 @@ async function syncFromNeonToSQLite(db2) {
           updated_at = excluded.updated_at
       `);
       for (const c of counselors) {
+        if (tombstoneEntities.has("counselor:" + c.id) || tombstoneIdentifiers.has(c.email?.toLowerCase())) {
+          db2.prepare("DELETE FROM counselors WHERE id = ? OR LOWER(email) = LOWER(?)").run(c.id, c.email);
+          continue;
+        }
         upsertCounselor.run(
           c.id,
           c.user_id,
@@ -1168,17 +1464,6 @@ async function syncFromNeonToSQLite(db2) {
         );
       }
       console.log(`[Neon Sync] Synced ${counselors.length} counselors from Neon.`);
-    }
-    const tombstones = await sql.query("SELECT * FROM deleted_records");
-    if (tombstones && tombstones.length > 0) {
-      const insertTombstone = db2.prepare(`
-        INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const t of tombstones) {
-        insertTombstone.run(t.id, t.entity_type, t.entity_id, t.identifier, t.details, t.deleted_by, String(t.deleted_at));
-      }
-      console.log(`[Neon Sync] Synced ${tombstones.length} tombstone records from Neon.`);
     }
     const leads = await sql.query("SELECT * FROM leads WHERE is_deleted = 0");
     if (leads && leads.length > 0) {
@@ -1209,6 +1494,10 @@ async function syncFromNeonToSQLite(db2) {
           updated_at = excluded.updated_at
       `);
       for (const l of leads) {
+        if (tombstoneEntities.has("lead:" + l.id) || l.phone && tombstoneIdentifiers.has(l.phone) || l.email && tombstoneIdentifiers.has(l.email.toLowerCase())) {
+          db2.prepare("DELETE FROM leads WHERE id = ?").run(l.id);
+          continue;
+        }
         upsertLead.run(
           l.id,
           l.lead_id || "LD-" + l.id,
@@ -1271,6 +1560,10 @@ async function syncFromNeonToSQLite(db2) {
         ON CONFLICT (id) DO UPDATE SET name = excluded.name, status = excluded.status
       `);
       for (const u of universities) {
+        if (tombstoneEntities.has("university:" + u.id)) {
+          db2.prepare("DELETE FROM universities WHERE id = ?").run(u.id);
+          continue;
+        }
         upsertUni.run(
           u.id,
           u.name,
@@ -1323,6 +1616,10 @@ async function syncFromNeonToSQLite(db2) {
           updated_at = excluded.updated_at
       `);
       for (const g of gsheets) {
+        if (tombstoneEntities.has("google_sheet:" + g.id)) {
+          db2.prepare("DELETE FROM google_sheets_connections WHERE id = ?").run(g.id);
+          continue;
+        }
         upsertGSheet.run(
           g.id,
           g.name,
@@ -1346,6 +1643,153 @@ async function syncFromNeonToSQLite(db2) {
         );
       }
       console.log(`[Neon Sync] Synced ${gsheets.length} Google Sheet connections from Neon.`);
+    }
+    try {
+      const emps = await sql.query("SELECT * FROM hr_employees");
+      if (emps && emps.length > 0) {
+        const upsertEmp = db2.prepare(`
+          INSERT INTO hr_employees (
+            id, employee_code, user_id, counselor_id, full_name, email, phone,
+            department, designation, employment_type, joining_date, monthly_salary,
+            currency, bank_name, account_number, pan_number, emergency_contact, status, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            phone = excluded.phone,
+            department = excluded.department,
+            designation = excluded.designation,
+            monthly_salary = excluded.monthly_salary,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const e of emps) {
+          if (tombstoneEntities.has("hr_employee:" + e.id) || tombstoneIdentifiers.has(e.email?.toLowerCase())) {
+            db2.prepare("DELETE FROM hr_employees WHERE id = ?").run(e.id);
+            continue;
+          }
+          upsertEmp.run(
+            e.id,
+            e.employee_code,
+            e.user_id,
+            e.counselor_id,
+            e.full_name,
+            e.email,
+            e.phone,
+            e.department,
+            e.designation,
+            e.employment_type,
+            e.joining_date,
+            Number(e.monthly_salary) || 0,
+            e.currency || "NPR",
+            e.bank_name,
+            e.account_number,
+            e.pan_number,
+            e.emergency_contact,
+            e.status || "Active",
+            String(e.created_at),
+            String(e.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${emps.length} HR employees from Neon.`);
+      }
+    } catch (empSyncErr) {
+    }
+    try {
+      const txns = await sql.query("SELECT * FROM finance_transactions");
+      if (txns && txns.length > 0) {
+        const upsertTxn = db2.prepare(`
+          INSERT INTO finance_transactions (
+            id, transaction_id, type, category, title, amount, currency,
+            transaction_date, payment_method, reference_number, student_id, student_name,
+            university_id, university_name, status, notes, recorded_by, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            type = excluded.type,
+            category = excluded.category,
+            title = excluded.title,
+            amount = excluded.amount,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const tx of txns) {
+          if (tombstoneEntities.has("finance_transaction:" + tx.id)) {
+            db2.prepare("DELETE FROM finance_transactions WHERE id = ?").run(tx.id);
+            continue;
+          }
+          upsertTxn.run(
+            tx.id,
+            tx.transaction_id,
+            tx.type,
+            tx.category,
+            tx.title,
+            Number(tx.amount) || 0,
+            tx.currency || "NPR",
+            tx.transaction_date,
+            tx.payment_method,
+            tx.reference_number,
+            tx.student_id,
+            tx.student_name,
+            tx.university_id,
+            tx.university_name,
+            tx.status || "Completed",
+            tx.notes,
+            tx.recorded_by,
+            String(tx.created_at),
+            String(tx.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${txns.length} finance transactions from Neon.`);
+      }
+    } catch (txnSyncErr) {
+    }
+    try {
+      const invs = await sql.query("SELECT * FROM finance_invoices");
+      if (invs && invs.length > 0) {
+        const upsertInv = db2.prepare(`
+          INSERT INTO finance_invoices (
+            id, invoice_number, invoice_type, recipient_name, recipient_email, recipient_phone,
+            total_amount, paid_amount, due_amount, currency, due_date, status, items, notes,
+            student_id, university_id, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            paid_amount = excluded.paid_amount,
+            due_amount = excluded.due_amount,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const inv of invs) {
+          if (tombstoneEntities.has("finance_invoice:" + inv.id)) {
+            db2.prepare("DELETE FROM finance_invoices WHERE id = ?").run(inv.id);
+            continue;
+          }
+          upsertInv.run(
+            inv.id,
+            inv.invoice_number,
+            inv.invoice_type,
+            inv.recipient_name,
+            inv.recipient_email,
+            inv.recipient_phone,
+            Number(inv.total_amount) || 0,
+            Number(inv.paid_amount) || 0,
+            Number(inv.due_amount) || 0,
+            inv.currency || "NPR",
+            inv.due_date,
+            inv.status || "Pending",
+            typeof inv.items === "string" ? inv.items : JSON.stringify(inv.items || []),
+            inv.notes,
+            inv.student_id,
+            inv.university_id,
+            String(inv.created_at),
+            String(inv.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${invs.length} finance invoices from Neon.`);
+      }
+    } catch (invSyncErr) {
     }
     console.log("\u2705 [Neon Sync] Synchronization complete!");
   } catch (err) {
@@ -4143,6 +4587,7 @@ init_leadDistributionEngine();
 
 // server/services/hrService.ts
 init_database();
+init_neon();
 function getEmployees() {
   try {
     return db.prepare(`
@@ -4210,7 +4655,11 @@ function createEmployee(data, performedBy = "Super Admin") {
     entityId: id,
     newValue: { code: employeeCode, name: data.full_name, department: data.department }
   });
-  return getEmployee(id);
+  const newEmp = getEmployee(id);
+  if (isNeonEnabled()) {
+    persistEmployeeToNeon(newEmp).catch((e) => console.warn("[Neon Sync] Employee defer:", e.message));
+  }
+  return newEmp;
 }
 function updateEmployee(id, data, performedBy = "Super Admin") {
   const existing = getEmployee(id);
@@ -4254,6 +4703,10 @@ function updateEmployee(id, data, performedBy = "Super Admin") {
     data.user_id !== void 0 ? data.user_id : existing.user_id,
     id
   );
+  const updatedEmp = getEmployee(id);
+  if (isNeonEnabled() && updatedEmp) {
+    persistEmployeeToNeon(updatedEmp).catch((e) => console.warn("[Neon Sync] Employee update defer:", e.message));
+  }
   logAudit({
     userName: performedBy,
     action: "UPDATE_EMPLOYEE",
@@ -4271,6 +4724,22 @@ function deleteEmployee(id, performedBy = "Super Admin") {
   db.prepare("DELETE FROM hr_leaves WHERE employee_id = ?").run(id);
   db.prepare("DELETE FROM hr_payroll WHERE employee_id = ?").run(id);
   db.prepare("DELETE FROM hr_employees WHERE id = ?").run(id);
+  const tombId = "DEL-EMP-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'hr_employee', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.email, JSON.stringify({ name: existing.full_name, code: existing.employee_code }), performedBy);
+  if (isNeonEnabled()) {
+    deleteEmployeeFromNeon(id).catch((e) => console.warn("[Neon Delete] Employee defer:", e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: "hr_employee",
+      entity_id: id,
+      identifier: existing.email,
+      details: JSON.stringify({ name: existing.full_name, code: existing.employee_code }),
+      deleted_by: performedBy
+    }).catch((e) => console.warn("[Neon Tombstone] Employee defer:", e.message));
+  }
   logAudit({
     userName: performedBy,
     action: "DELETE_EMPLOYEE",
@@ -4498,6 +4967,7 @@ function markPayrollPaid(id, paymentMethod = "Bank Transfer", remarks, performed
 
 // server/services/financeService.ts
 init_database();
+init_neon();
 function getTransactions(filters = {}) {
   try {
     let sql2 = "SELECT * FROM finance_transactions WHERE 1=1";
@@ -4569,7 +5039,11 @@ function createTransaction(data, performedBy = "Super Admin") {
     entityId: id,
     newValue: { type: data.type, title: data.title, amount: data.amount }
   });
-  return db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  const newTxn = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  if (isNeonEnabled() && newTxn) {
+    persistTransactionToNeon(newTxn).catch((e) => console.warn("[Neon Sync] Tx defer:", e.message));
+  }
+  return newTxn;
 }
 function updateTransaction(id, data, performedBy = "Super Admin") {
   const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
@@ -4609,12 +5083,39 @@ function updateTransaction(id, data, performedBy = "Super Admin") {
     data.notes !== void 0 ? data.notes : existing.notes,
     id
   );
+  const updatedTx = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
+  if (isNeonEnabled() && updatedTx) {
+    persistTransactionToNeon(updatedTx).catch((e) => console.warn("[Neon Sync] Tx update defer:", e.message));
+  }
   return true;
 }
 function deleteTransaction(id, performedBy = "Super Admin") {
   const existing = db.prepare("SELECT * FROM finance_transactions WHERE id = ?").get(id);
   if (!existing) return false;
   db.prepare("DELETE FROM finance_transactions WHERE id = ?").run(id);
+  const tombId = "DEL-TX-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'finance_transaction', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.transaction_id || id, JSON.stringify({ title: existing.title, amount: existing.amount }), performedBy);
+  if (isNeonEnabled()) {
+    deleteTransactionFromNeon(id).catch((e) => console.warn("[Neon Delete] Tx defer:", e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: "finance_transaction",
+      entity_id: id,
+      identifier: existing.transaction_id || id,
+      details: JSON.stringify({ title: existing.title, amount: existing.amount }),
+      deleted_by: performedBy
+    }).catch((e) => console.warn("[Neon Tombstone] Tx defer:", e.message));
+  }
+  logAudit({
+    userName: performedBy,
+    action: "DELETE_FINANCE_TRANSACTION",
+    entity: "finance_transaction",
+    entityId: id,
+    oldValue: existing
+  });
   return true;
 }
 function getInvoices(filters = {}) {
@@ -4693,7 +5194,40 @@ function createInvoice(data, performedBy = "Super Admin") {
     entityId: id,
     newValue: { invoiceNumber, recipient: data.recipient_name, total }
   });
-  return getInvoices({}).find((i) => i.id === id);
+  const createdInv = getInvoices({}).find((i) => i.id === id);
+  if (isNeonEnabled() && createdInv) {
+    persistInvoiceToNeon(createdInv).catch((e) => console.warn("[Neon Sync] Invoice defer:", e.message));
+  }
+  return createdInv;
+}
+function deleteInvoice(id, performedBy = "Super Admin") {
+  const existing = db.prepare("SELECT * FROM finance_invoices WHERE id = ?").get(id);
+  if (!existing) return false;
+  db.prepare("DELETE FROM finance_invoices WHERE id = ?").run(id);
+  const tombId = "DEL-INV-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'finance_invoice', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.invoice_number || id, JSON.stringify({ recipient: existing.recipient_name, total: existing.total_amount }), performedBy);
+  if (isNeonEnabled()) {
+    deleteInvoiceFromNeon(id).catch((e) => console.warn("[Neon Delete] Invoice defer:", e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: "finance_invoice",
+      entity_id: id,
+      identifier: existing.invoice_number || id,
+      details: JSON.stringify({ recipient: existing.recipient_name, total: existing.total_amount }),
+      deleted_by: performedBy
+    }).catch((e) => console.warn("[Neon Tombstone] Invoice defer:", e.message));
+  }
+  logAudit({
+    userName: performedBy,
+    action: "DELETE_FINANCE_INVOICE",
+    entity: "finance_invoice",
+    entityId: id,
+    oldValue: existing
+  });
+  return true;
 }
 function recordInvoicePayment(invoiceId, amount, paymentMethod = "Bank Transfer", referenceNumber, performedBy = "Super Admin") {
   const inv = db.prepare("SELECT * FROM finance_invoices WHERE id = ?").get(invoiceId);
@@ -5361,159 +5895,6 @@ Gems Group Services`
   }
 }
 function ensureDiverseCourseLeads() {
-  try {
-    const btechCount = db.prepare("SELECT count(*) as count FROM leads WHERE LOWER(COALESCE(preferred_course, '')) LIKE '%b.tech%' OR LOWER(COALESCE(preferred_course, '')) LIKE '%btech%'").get().count;
-    if (btechCount === 0) {
-      const insertLead = db.prepare(`
-        INSERT OR REPLACE INTO leads (
-          id, lead_id, student_name, first_name, last_name, email, phone, whatsapp_number,
-          preferred_course, preferred_university, city, country, lead_status, lead_temperature,
-          assigned_counselor_id, assigned_counselor_name, lead_source, is_deleted, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))
-      `);
-      const sampleLeads = [
-        {
-          id: "lead-btech-rohan",
-          lead_id: "L-2026-101",
-          student_name: "Rohan Shrestha",
-          first_name: "Rohan",
-          last_name: "Shrestha",
-          email: "rohan.shrestha99@gmail.com",
-          phone: "+977 9801239901",
-          whatsapp_number: "+977 9801239901",
-          preferred_course: "B.Tech Computer Science & Engineering",
-          preferred_university: "Sharda University",
-          city: "Kathmandu",
-          country: "Nepal",
-          lead_status: "New Lead",
-          lead_temperature: "HOT",
-          assigned_counselor_id: "c-counselor-1",
-          assigned_counselor_name: "Suman Sharma",
-          source: "Meta Lead Ads"
-        },
-        {
-          id: "lead-btech-ankit",
-          lead_id: "L-2026-102",
-          student_name: "Ankit Joshi",
-          first_name: "Ankit",
-          last_name: "Joshi",
-          email: "ankit.joshi2026@gmail.com",
-          phone: "+977 9801239902",
-          whatsapp_number: "+977 9801239902",
-          preferred_course: "B.Tech AI & Data Science",
-          preferred_university: "Chandigarh University",
-          city: "Pokhara",
-          country: "Nepal",
-          lead_status: "Contacted",
-          lead_temperature: "WARM",
-          assigned_counselor_id: "c-counselor-1",
-          assigned_counselor_name: "Suman Sharma",
-          source: "Google Search"
-        },
-        {
-          id: "lead-mbbs-sneha",
-          lead_id: "L-2026-103",
-          student_name: "Sneha Adhikari",
-          first_name: "Sneha",
-          last_name: "Adhikari",
-          email: "sneha.adhikari.med@gmail.com",
-          phone: "+977 9801239903",
-          whatsapp_number: "+977 9801239903",
-          preferred_course: "MBBS",
-          preferred_university: "Parul University",
-          city: "Lalitpur",
-          country: "Nepal",
-          lead_status: "Counseling Scheduled",
-          lead_temperature: "HOT",
-          assigned_counselor_id: "c-counselor-2",
-          assigned_counselor_name: "Dr. Anjali Thapa",
-          source: "Education Fair"
-        },
-        {
-          id: "lead-nursing-pooja",
-          lead_id: "L-2026-104",
-          student_name: "Pooja Tamang",
-          first_name: "Pooja",
-          last_name: "Tamang",
-          email: "pooja.tamang77@gmail.com",
-          phone: "+977 9801239904",
-          whatsapp_number: "+977 9801239904",
-          preferred_course: "B.Sc Nursing",
-          preferred_university: "Sharda University",
-          city: "Dharan",
-          country: "Nepal",
-          lead_status: "New Lead",
-          lead_temperature: "WARM",
-          assigned_counselor_id: "c-counselor-2",
-          assigned_counselor_name: "Dr. Anjali Thapa",
-          source: "Direct Walk-in"
-        },
-        {
-          id: "lead-bca-bikram",
-          lead_id: "L-2026-105",
-          student_name: "Bikram Thapa",
-          first_name: "Bikram",
-          last_name: "Thapa",
-          email: "bikram.thapa.it@gmail.com",
-          phone: "+977 9801239905",
-          whatsapp_number: "+977 9801239905",
-          preferred_course: "BCA (Cloud Computing)",
-          preferred_university: "Chandigarh University",
-          city: "Kathmandu",
-          country: "Nepal",
-          lead_status: "Interested",
-          lead_temperature: "HOT",
-          assigned_counselor_id: "c-counselor-1",
-          assigned_counselor_name: "Suman Sharma",
-          source: "Meta Lead Ads"
-        },
-        {
-          id: "lead-bba-manish",
-          lead_id: "L-2026-106",
-          student_name: "Manish Shah",
-          first_name: "Manish",
-          last_name: "Shah",
-          email: "manish.shah.nepal@gmail.com",
-          phone: "+977 9801239906",
-          whatsapp_number: "+977 9801239906",
-          preferred_course: "BBA Digital Marketing",
-          preferred_university: "Parul University",
-          city: "Birgunj",
-          country: "Nepal",
-          lead_status: "New Lead",
-          lead_temperature: "WARM",
-          assigned_counselor_id: "c-counselor-1",
-          assigned_counselor_name: "Suman Sharma",
-          source: "Meta Lead Ads"
-        }
-      ];
-      for (const l of sampleLeads) {
-        insertLead.run(
-          l.id,
-          l.lead_id,
-          l.student_name,
-          l.first_name,
-          l.last_name,
-          l.email,
-          l.phone,
-          l.whatsapp_number,
-          l.preferred_course,
-          l.preferred_university,
-          l.city,
-          l.country,
-          l.lead_status,
-          l.lead_temperature,
-          l.assigned_counselor_id,
-          l.assigned_counselor_name,
-          l.source
-        );
-      }
-      console.log("\u2705 Diverse course sample leads seeded for Bulk Outreach Engine");
-    }
-  } catch (err) {
-    console.warn("ensureDiverseCourseLeads notice:", err.message);
-  }
 }
 
 // server/routes/api.ts
@@ -6313,6 +6694,13 @@ apiRouter.delete("/counselors/:id", async (req, res) => {
         newValue: { reassignedTo: targetCounselor.name, count: activeLeadCount }
       });
     }
+    db.prepare("DELETE FROM lead_assignments WHERE new_counselor_id = ? OR previous_counselor_id = ?").run(req.params.id, req.params.id);
+    db.prepare("DELETE FROM notifications WHERE counselor_id = ?").run(req.params.id);
+    db.prepare("UPDATE students SET counselor_id = NULL, counselor_name = NULL WHERE counselor_id = ?").run(req.params.id);
+    db.prepare("UPDATE applications SET counselor_id = NULL, counselor_name = NULL WHERE counselor_id = ?").run(req.params.id);
+    db.prepare("UPDATE followups SET counselor_id = NULL WHERE counselor_id = ?").run(req.params.id);
+    db.prepare("DELETE FROM hr_employees WHERE counselor_id = ? OR user_id = ?").run(req.params.id, counselor.user_id);
+    db.prepare("DELETE FROM lead_routing_rules WHERE counselor_id = ?").run(req.params.id);
     db.prepare("DELETE FROM users WHERE email = ? OR id = ?").run(counselor.email, counselor.user_id);
     db.prepare("DELETE FROM counselors WHERE id = ?").run(req.params.id);
     if (isNeonEnabled()) {
@@ -6454,6 +6842,18 @@ apiRouter.put("/followups/:id/complete", (req, res) => {
 });
 apiRouter.delete("/followups/:id", (req, res) => {
   db.prepare("DELETE FROM followups WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-FLW-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "followup",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
+  if (isNeonEnabled()) {
+    deleteFollowupFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Followup defer:", e.message));
+  }
   res.json({ success: true, message: "Follow-up deleted permanently." });
 });
 apiRouter.get("/applications", (req, res) => {
@@ -6560,6 +6960,18 @@ apiRouter.put("/applications/:id", (req, res) => {
 });
 apiRouter.delete("/applications/:id", (req, res) => {
   db.prepare("DELETE FROM applications WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-APP-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "application",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
+  if (isNeonEnabled()) {
+    deleteApplicationFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Application defer:", e.message));
+  }
   res.json({ success: true, message: "Application deleted permanently." });
 });
 apiRouter.get("/students", (req, res) => {
@@ -6599,6 +7011,18 @@ apiRouter.get("/students/:id", (req, res) => {
 });
 apiRouter.delete("/students/:id", (req, res) => {
   db.prepare("DELETE FROM students WHERE id = ?").run(req.params.id);
+  const tombId = "DEL-STU-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+    tombId,
+    "student",
+    req.params.id,
+    req.params.id,
+    null,
+    "User"
+  );
+  if (isNeonEnabled()) {
+    deleteStudentFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Student defer:", e.message));
+  }
   res.json({ success: true, message: "Student record deleted permanently." });
 });
 apiRouter.get("/universities", (req, res) => {
@@ -6670,6 +7094,9 @@ apiRouter.delete("/universities/:id", (req, res) => {
     null,
     "User"
   );
+  if (isNeonEnabled()) {
+    deleteUniversityFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] University defer:", e.message));
+  }
   res.json({ success: true });
 });
 apiRouter.get("/courses", (req, res) => {
@@ -6773,6 +7200,9 @@ apiRouter.delete("/courses/:id", (req, res) => {
     null,
     "User"
   );
+  if (isNeonEnabled()) {
+    deleteCourseFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Course defer:", e.message));
+  }
   res.json({ success: true });
 });
 apiRouter.get("/university-courses", (req, res) => {
@@ -7031,6 +7461,9 @@ apiRouter.delete("/university-courses/:id", (req, res) => {
     null,
     "User"
   );
+  if (isNeonEnabled()) {
+    deleteUniversityCourseFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Uni course defer:", e.message));
+  }
   res.json({ success: true });
 });
 apiRouter.get("/documents", (req, res) => {
@@ -7734,6 +8167,9 @@ apiRouter.delete("/lead-routing/rules/:id", (req, res) => {
   try {
     const success = deleteRoutingRule(req.params.id, req.query.performedBy || "Super Admin");
     if (!success) return res.status(404).json({ error: "Routing rule not found" });
+    if (isNeonEnabled()) {
+      deleteRoutingRuleFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Rule defer:", e.message));
+    }
     res.json({ success: true, message: "Routing rule deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to delete routing rule" });
@@ -7965,6 +8401,15 @@ apiRouter.post("/finance/invoices", (req, res) => {
     res.status(500).json({ error: err.message || "Failed to create invoice" });
   }
 });
+apiRouter.delete("/finance/invoices/:id", (req, res) => {
+  try {
+    const success = deleteInvoice(req.params.id, req.query.performedBy || "Super Admin");
+    if (!success) return res.status(404).json({ error: "Invoice not found" });
+    res.json({ success: true, message: "Invoice deleted permanently" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete invoice" });
+  }
+});
 apiRouter.post("/finance/invoices/:id/pay", (req, res) => {
   try {
     const { amount, paymentMethod, referenceNumber, performedBy } = req.body;
@@ -8030,6 +8475,9 @@ apiRouter.delete("/email/templates/:id", (req, res) => {
   try {
     const performedBy = req.query.performedBy || req.body?.performedBy || "Super Admin";
     const success = deleteEmailTemplate(req.params.id, performedBy);
+    if (isNeonEnabled()) {
+      deleteMessageTemplateFromNeon(req.params.id).catch((e) => console.warn("[Neon Delete] Template defer:", e.message));
+    }
     res.json({ success });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to delete email template" });
@@ -8239,321 +8687,17 @@ function seedDatabase() {
     insertSetting.run("duplicate_check_strictness", "Strict", "Duplicate detection rules (Phone, WhatsApp, Email, FB Lead ID)");
     insertSetting.run("auto_create_first_followup", "true", "Automatically schedule 24-hr follow-up on new lead creation");
     insertSetting.run("auto_convert_student_on_confirm", "true", "Automatically generate student record when lead status hits Admission Confirmed");
-    const counselorCount = db.prepare("SELECT count(*) as count FROM counselors").get().count;
-    if (counselorCount === 0) {
-      const insertUser2 = db.prepare(`
-        INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-      `);
-      const insertCounselor = db.prepare(`
-        INSERT OR REPLACE INTO counselors (
-          id, user_id, name, username, email, phone, role, specialization_country, assigned_cities,
-          max_capacity, current_active_leads, total_assigned_leads, total_admissions, conversion_rate,
-          is_active, status, joining_date, specialization_courses, specialization_universities, daily_lead_quota
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5, 20, 4, 20.0, 1, 'Active', ?, ?, ?, ?)
-      `);
-      insertUser2.run(
-        "u-counselor-1",
-        "Suman Sharma",
-        "counselor@gemsgroupservices.com",
-        "counselor123",
-        "Counselor",
-        "+977 9801122334",
-        JSON.stringify(["dashboard", "leads_view", "leads_create", "leads_edit", "pipeline", "applications", "students", "universities", "documents"])
-      );
-      insertCounselor.run(
-        "c-counselor-1",
-        "u-counselor-1",
-        "Suman Sharma",
-        "suman",
-        "counselor@gemsgroupservices.com",
-        "+977 9801122334",
-        "Counselor",
-        "Nepal & North India",
-        JSON.stringify(["Kathmandu", "Pokhara", "Janakpur"]),
-        100,
-        "2025-01-15",
-        JSON.stringify(["B.Tech", "BE", "BCA", "Computer Science", "Data Science", "IT"]),
-        JSON.stringify(["Sharda University", "Chandigarh University", "Parul University"]),
-        25
-      );
-      insertUser2.run(
-        "u-counselor-2",
-        "Dr. Anjali Thapa",
-        "medical@gemsgroupservices.com",
-        "counselor123",
-        "Counselor",
-        "+977 9812233445",
-        JSON.stringify(["dashboard", "leads_view", "leads_create", "leads_edit", "pipeline", "applications", "students", "universities", "documents"])
-      );
-      insertCounselor.run(
-        "c-counselor-2",
-        "u-counselor-2",
-        "Dr. Anjali Thapa",
-        "anjali",
-        "medical@gemsgroupservices.com",
-        "+977 9812233445",
-        "Counselor",
-        "Nepal & Bangladesh",
-        JSON.stringify(["Kathmandu", "Biratnagar", "Dharan"]),
-        80,
-        "2025-02-01",
-        JSON.stringify(["MBBS", "BDS", "B.Sc Nursing", "Pharmacy", "BAMS", "MD"]),
-        JSON.stringify(["Parul University", "Graphic Era University", "Sharda University"]),
-        20
-      );
-      insertUser2.run(
-        "u-marketing-1",
-        "Rajesh Verma",
-        "marketing@gemsgroupservices.com",
-        "marketing123",
-        "Marketing Manager",
-        "+977 9823344556",
-        JSON.stringify(["dashboard", "leads_view", "leads_create", "campaigns", "reports", "integrations"])
-      );
-      insertCounselor.run(
-        "c-marketing-1",
-        "u-marketing-1",
-        "Rajesh Verma",
-        "rajesh",
-        "marketing@gemsgroupservices.com",
-        "+977 9823344556",
-        "Marketing Manager",
-        "Digital & Field Campaigns",
-        JSON.stringify(["Kathmandu", "Chitwan"]),
-        50,
-        "2025-01-10",
-        "[]",
-        "[]",
-        10
-      );
-      insertUser2.run(
-        "u-finance-1",
-        "Pooja Karki",
-        "finance@gemsgroupservices.com",
-        "finance123",
-        "Accountant",
-        "+977 9834455667",
-        JSON.stringify(["dashboard", "students", "finance_management", "hr_management", "reports"])
-      );
-      insertCounselor.run(
-        "c-finance-1",
-        "u-finance-1",
-        "Pooja Karki",
-        "pooja",
-        "finance@gemsgroupservices.com",
-        "+977 9834455667",
-        "Accountant",
-        "General Accounts",
-        "[]",
-        30,
-        "2025-01-20",
-        "[]",
-        "[]",
-        10
-      );
-      const insertRule = db.prepare(`
-        INSERT OR REPLACE INTO lead_routing_rules (
-          id, name, course_keywords, university_keywords, target_cities,
-          counselor_id, counselor_name, priority, max_daily_leads, is_active, description
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertRule.run(
-        "rule-eng",
-        "Engineering & Technology Lead Routing",
-        JSON.stringify(["B.Tech", "BE", "BCA", "Computer Science", "Software", "AI", "Robotics"]),
-        JSON.stringify(["Sharda", "Chandigarh", "Parul"]),
-        JSON.stringify(["Kathmandu", "Pokhara", "Janakpur"]),
-        "c-counselor-1",
-        "Suman Sharma",
-        10,
-        25,
-        1,
-        "Directs all high-value engineering, BCA, and computer science aspirants to Suman Sharma"
-      );
-      insertRule.run(
-        "rule-med",
-        "Medical & Healthcare Admissions Routing",
-        JSON.stringify(["MBBS", "BDS", "Nursing", "B.Sc Nursing", "Pharmacy", "BAMS"]),
-        JSON.stringify(["Parul", "Graphic Era", "Sharda"]),
-        JSON.stringify(["Kathmandu", "Biratnagar", "Dharan"]),
-        "c-counselor-2",
-        "Dr. Anjali Thapa",
-        10,
-        20,
-        1,
-        "Routes all medical, nursing, and dental applicants to Dr. Anjali Thapa"
-      );
-      const insertEmp = db.prepare(`
-        INSERT OR REPLACE INTO hr_employees (
-          id, employee_code, user_id, counselor_id, full_name, email, phone,
-          department, designation, employment_type, joining_date, monthly_salary, currency,
-          bank_name, account_number, pan_number, status
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertEmp.run(
-        "emp-1",
-        "EMP-1001",
-        "u-counselor-1",
-        "c-counselor-1",
-        "Suman Sharma",
-        "counselor@gemsgroupservices.com",
-        "+977 9801122334",
-        "Counseling",
-        "Senior Admission Counselor",
-        "Full-time",
-        "2025-01-15",
-        55e3,
-        "NPR",
-        "Nabil Bank Ltd",
-        "01200175001234",
-        "PAN-987654321",
-        "Active"
-      );
-      insertEmp.run(
-        "emp-2",
-        "EMP-1002",
-        "u-counselor-2",
-        "c-counselor-2",
-        "Dr. Anjali Thapa",
-        "medical@gemsgroupservices.com",
-        "+977 9812233445",
-        "Counseling",
-        "Medical Admissions Advisor",
-        "Full-time",
-        "2025-02-01",
-        65e3,
-        "NPR",
-        "Global IME Bank",
-        "2901010004567",
-        "PAN-876543210",
-        "Active"
-      );
-      insertEmp.run(
-        "emp-3",
-        "EMP-1003",
-        "u-marketing-1",
-        "c-marketing-1",
-        "Rajesh Verma",
-        "marketing@gemsgroupservices.com",
-        "+977 9823344556",
-        "Marketing",
-        "Marketing Manager",
-        "Full-time",
-        "2025-01-10",
-        6e4,
-        "NPR",
-        "NIC Asia Bank",
-        "1092003847291",
-        "PAN-765432109",
-        "Active"
-      );
-      insertEmp.run(
-        "emp-4",
-        "EMP-1004",
-        "u-finance-1",
-        "c-finance-1",
-        "Pooja Karki",
-        "finance@gemsgroupservices.com",
-        "+977 9834455667",
-        "Finance & Accounts",
-        "Accounts Officer",
-        "Full-time",
-        "2025-01-20",
-        48e3,
-        "NPR",
-        "Siddhartha Bank",
-        "003150098234",
-        "PAN-654321098",
-        "Active"
-      );
-      const todayStr = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      const insertAtt = db.prepare(`
-        INSERT OR IGNORE INTO hr_attendance (id, employee_id, date, status, check_in_time, check_out_time, work_mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertAtt.run("att-1", "emp-1", todayStr, "Present", "09:45 AM", "06:15 PM", "Office");
-      insertAtt.run("att-2", "emp-2", todayStr, "Present", "09:30 AM", "06:00 PM", "Office");
-      insertAtt.run("att-3", "emp-3", todayStr, "Present", "10:00 AM", "06:30 PM", "Field Work");
-      insertAtt.run("att-4", "emp-4", todayStr, "Present", "09:15 AM", "05:45 PM", "Office");
-      const insertTx = db.prepare(`
-        INSERT OR REPLACE INTO finance_transactions (
-          id, transaction_id, type, category, title, amount, currency, transaction_date,
-          payment_method, reference_number, status, recorded_by
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertTx.run(
-        "tx-1",
-        "TXN-2026-0001",
-        "INCOME",
-        "University Commission",
-        "Quarterly admission commission payout from Sharda University for B.Tech batch",
-        185e3,
-        "INR",
-        "2026-10-15",
-        "Bank Transfer",
-        "UTR-SHARDA-99812",
-        "Completed",
-        "System"
-      );
-      insertTx.run(
-        "tx-2",
-        "TXN-2026-0002",
-        "INCOME",
-        "Student Fee",
-        "Counseling registration and university document processing fee",
-        25e3,
-        "NPR",
-        "2026-10-20",
-        "eSewa",
-        "ESEWA-883192",
-        "Completed",
-        "Pooja Karki"
-      );
-      insertTx.run(
-        "tx-3",
-        "TXN-2026-0003",
-        "EXPENSE",
-        "Digital Ads (Meta/Google)",
-        "Meta Lead Ads and Google Search ad campaign for Kathmandu & Pokhara students",
-        35e3,
-        "INR",
-        "2026-10-18",
-        "Bank Transfer",
-        "META-ADS-INV-7721",
-        "Completed",
-        "Rajesh Verma"
-      );
-      insertTx.run(
-        "tx-4",
-        "TXN-2026-0004",
-        "EXPENSE",
-        "Office Rent",
-        "Gems Group Services head office monthly rental and high-speed internet",
-        4e4,
-        "NPR",
-        "2026-10-01",
-        "Bank Transfer",
-        "RENT-OCT-2026",
-        "Completed",
-        "Pooja Karki"
-      );
-    }
     logAudit({
       userId: "u-super",
       userName: "System Administrator",
       action: "SYSTEM_INIT",
       entity: "SYSTEM",
       entityId: "system",
-      newValue: "Clean production schema initialized with Super Admin account and core staff structure"
+      newValue: "Clean production schema initialized with Super Admin account"
     });
   });
   runTx();
-  console.log("\u2705 Clean production database initialization complete! Super Admin, Counselors, and Rules initialized.");
+  console.log("\u2705 Clean production database initialization complete! Super Admin initialized.");
 }
 if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")) {
   initDatabase();

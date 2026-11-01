@@ -30,6 +30,17 @@ import {
   persistDeletedRecordToNeon, 
   deleteLeadFromNeon, 
   deleteCounselorAndUserFromNeon,
+  deleteEmployeeFromNeon,
+  deleteTransactionFromNeon,
+  deleteInvoiceFromNeon,
+  deleteStudentFromNeon,
+  deleteApplicationFromNeon,
+  deleteFollowupFromNeon,
+  deleteUniversityFromNeon,
+  deleteCourseFromNeon,
+  deleteUniversityCourseFromNeon,
+  deleteRoutingRuleFromNeon,
+  deleteMessageTemplateFromNeon,
   persistUniversityCourseToNeon,
   findGoogleSheetInNeon,
   getAllGoogleSheetsFromNeon 
@@ -67,10 +78,12 @@ import {
   deleteTransaction,
   getInvoices,
   createInvoice,
+  deleteInvoice,
   recordInvoicePayment,
   getFinanceOverview,
   getUniversityCommissionsSummary
 } from '../services/financeService.ts';
+
 
 import {
   getEmailTemplates,
@@ -967,6 +980,15 @@ apiRouter.delete('/counselors/:id', async (req: Request, res: Response) => {
       });
     }
 
+    // Clean referencing records to avoid foreign key errors
+    db.prepare('DELETE FROM lead_assignments WHERE new_counselor_id = ? OR previous_counselor_id = ?').run(req.params.id, req.params.id);
+    db.prepare('DELETE FROM notifications WHERE counselor_id = ?').run(req.params.id);
+    db.prepare('UPDATE students SET counselor_id = NULL, counselor_name = NULL WHERE counselor_id = ?').run(req.params.id);
+    db.prepare('UPDATE applications SET counselor_id = NULL, counselor_name = NULL WHERE counselor_id = ?').run(req.params.id);
+    db.prepare('UPDATE followups SET counselor_id = NULL WHERE counselor_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM hr_employees WHERE counselor_id = ? OR user_id = ?').run(req.params.id, counselor.user_id);
+    db.prepare('DELETE FROM lead_routing_rules WHERE counselor_id = ?').run(req.params.id);
+
     // Delete both user login and counselor profile from local SQLite
     db.prepare('DELETE FROM users WHERE email = ? OR id = ?').run(counselor.email, counselor.user_id);
     db.prepare('DELETE FROM counselors WHERE id = ?').run(req.params.id);
@@ -1139,6 +1161,13 @@ apiRouter.put('/followups/:id/complete', (req: Request, res: Response) => {
 
 apiRouter.delete('/followups/:id', (req: Request, res: Response) => {
   db.prepare('DELETE FROM followups WHERE id = ?').run(req.params.id);
+  const tombId = 'DEL-FLW-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'followup', req.params.id, req.params.id, null, 'User'
+  );
+  if (isNeonEnabled()) {
+    deleteFollowupFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Followup defer:', e.message));
+  }
   res.json({ success: true, message: 'Follow-up deleted permanently.' });
 });
 
@@ -1259,6 +1288,13 @@ apiRouter.put('/applications/:id', (req: Request, res: Response) => {
 
 apiRouter.delete('/applications/:id', (req: Request, res: Response) => {
   db.prepare('DELETE FROM applications WHERE id = ?').run(req.params.id);
+  const tombId = 'DEL-APP-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'application', req.params.id, req.params.id, null, 'User'
+  );
+  if (isNeonEnabled()) {
+    deleteApplicationFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Application defer:', e.message));
+  }
   res.json({ success: true, message: 'Application deleted permanently.' });
 });
 
@@ -1311,6 +1347,13 @@ apiRouter.get('/students/:id', (req: Request, res: Response) => {
 
 apiRouter.delete('/students/:id', (req: Request, res: Response) => {
   db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
+  const tombId = 'DEL-STU-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+    tombId, 'student', req.params.id, req.params.id, null, 'User'
+  );
+  if (isNeonEnabled()) {
+    deleteStudentFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Student defer:', e.message));
+  }
   res.json({ success: true, message: 'Student record deleted permanently.' });
 });
 
@@ -1394,6 +1437,10 @@ apiRouter.delete('/universities/:id', (req: Request, res: Response) => {
   db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
     tombId, 'university', req.params.id, req.params.id, null, 'User'
   );
+
+  if (isNeonEnabled()) {
+    deleteUniversityFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] University defer:', e.message));
+  }
 
   res.json({ success: true });
 });
@@ -1492,6 +1539,10 @@ apiRouter.delete('/courses/:id', (req: Request, res: Response) => {
   db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
     tombId, 'course', req.params.id, req.params.id, null, 'User'
   );
+
+  if (isNeonEnabled()) {
+    deleteCourseFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Course defer:', e.message));
+  }
 
   res.json({ success: true });
 });
@@ -1755,6 +1806,10 @@ apiRouter.delete('/university-courses/:id', (req: Request, res: Response) => {
   db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
     tombId, 'university_course', req.params.id, req.params.id, null, 'User'
   );
+
+  if (isNeonEnabled()) {
+    deleteUniversityCourseFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Uni course defer:', e.message));
+  }
 
   res.json({ success: true });
 });
@@ -2590,6 +2645,9 @@ apiRouter.delete('/lead-routing/rules/:id', (req: Request, res: Response) => {
   try {
     const success = deleteRoutingRule(req.params.id, (req.query.performedBy as string) || 'Super Admin');
     if (!success) return res.status(404).json({ error: 'Routing rule not found' });
+    if (isNeonEnabled()) {
+      deleteRoutingRuleFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Rule defer:', e.message));
+    }
     res.json({ success: true, message: 'Routing rule deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to delete routing rule' });
@@ -2849,6 +2907,16 @@ apiRouter.post('/finance/invoices', (req: Request, res: Response) => {
   }
 });
 
+apiRouter.delete('/finance/invoices/:id', (req: Request, res: Response) => {
+  try {
+    const success = deleteInvoice(req.params.id, (req.query.performedBy as string) || 'Super Admin');
+    if (!success) return res.status(404).json({ error: 'Invoice not found' });
+    res.json({ success: true, message: 'Invoice deleted permanently' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete invoice' });
+  }
+});
+
 apiRouter.post('/finance/invoices/:id/pay', (req: Request, res: Response) => {
   try {
     const { amount, paymentMethod, referenceNumber, performedBy } = req.body;
@@ -2923,6 +2991,9 @@ apiRouter.delete('/email/templates/:id', (req: Request, res: Response) => {
   try {
     const performedBy = (req.query.performedBy as string) || req.body?.performedBy || 'Super Admin';
     const success = deleteEmailTemplate(req.params.id, performedBy);
+    if (isNeonEnabled()) {
+      deleteMessageTemplateFromNeon(req.params.id).catch(e => console.warn('[Neon Delete] Template defer:', e.message));
+    }
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to delete email template' });

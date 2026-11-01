@@ -511,6 +511,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  deleteFinanceInvoice: (id: string) =>
+    fetchJson<any>(`/finance/invoices/${id}`, {
+      method: 'DELETE',
+    }),
   recordInvoicePayment: (invoiceId: string, data: { amount: number; paymentMethod?: string; referenceNumber?: string }) =>
     fetchJson<any>(`/finance/invoices/${invoiceId}/pay`, {
       method: 'POST',

@@ -342,9 +342,307 @@ export async function deleteCounselorAndUserFromNeon(counselorId: string, email?
       await sql.query(`DELETE FROM users WHERE LOWER(email) = LOWER($1) OR id = $2`, [email || '', userId || '']);
     }
     await sql.query(`DELETE FROM counselors WHERE id = $1`, [counselorId]);
+    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR user_id = $2`, [counselorId, userId || '']);
+    await sql.query(`DELETE FROM lead_routing_rules WHERE counselor_id = $1`, [counselorId]);
+    await sql.query(`UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id = $1`, [counselorId]);
     return true;
   } catch (err: any) {
     console.error('[Neon Delete] Counselor/User deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete HR employee and related records permanently from Neon
+ */
+export async function deleteEmployeeFromNeon(employeeId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM hr_attendance WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_leaves WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_payroll WHERE employee_id = $1`, [employeeId]);
+    await sql.query(`DELETE FROM hr_employees WHERE id = $1`, [employeeId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Employee deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Finance Transaction permanently from Neon
+ */
+export async function deleteTransactionFromNeon(transactionId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM finance_transactions WHERE id = $1`, [transactionId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Finance transaction deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Finance Invoice permanently from Neon
+ */
+export async function deleteInvoiceFromNeon(invoiceId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM finance_invoices WHERE id = $1`, [invoiceId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Finance invoice deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Student permanently from Neon
+ */
+export async function deleteStudentFromNeon(studentId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM students WHERE id = $1`, [studentId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Student deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Application permanently from Neon
+ */
+export async function deleteApplicationFromNeon(appId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM applications WHERE id = $1`, [appId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Application deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Followup permanently from Neon
+ */
+export async function deleteFollowupFromNeon(followupId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM followups WHERE id = $1`, [followupId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Followup deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete University permanently from Neon
+ */
+export async function deleteUniversityFromNeon(uniId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE university_id = $1`, [uniId]);
+    await sql.query(`DELETE FROM courses WHERE university_id = $1`, [uniId]);
+    await sql.query(`DELETE FROM universities WHERE id = $1`, [uniId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] University deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Course permanently from Neon
+ */
+export async function deleteCourseFromNeon(courseId: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE course_id = $1`, [courseId]);
+    await sql.query(`DELETE FROM courses WHERE id = $1`, [courseId]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Course deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete University Course Fee Structure permanently from Neon
+ */
+export async function deleteUniversityCourseFromNeon(id: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM university_courses WHERE id = $1`, [id]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] University course deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Routing Rule permanently from Neon
+ */
+export async function deleteRoutingRuleFromNeon(id: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM lead_routing_rules WHERE id = $1`, [id]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Routing rule deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete Message Template permanently from Neon
+ */
+export async function deleteMessageTemplateFromNeon(id: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`DELETE FROM message_templates WHERE id = $1`, [id]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] Message template deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Persist HR Employee to Neon
+ */
+export async function persistEmployeeToNeon(emp: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO hr_employees (
+        id, employee_code, user_id, counselor_id, full_name, email, phone,
+        department, designation, employment_type, joining_date, monthly_salary,
+        currency, bank_name, account_number, pan_number, emergency_contact, status, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        full_name = EXCLUDED.full_name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        department = EXCLUDED.department,
+        designation = EXCLUDED.designation,
+        employment_type = EXCLUDED.employment_type,
+        joining_date = EXCLUDED.joining_date,
+        monthly_salary = EXCLUDED.monthly_salary,
+        currency = EXCLUDED.currency,
+        bank_name = EXCLUDED.bank_name,
+        account_number = EXCLUDED.account_number,
+        pan_number = EXCLUDED.pan_number,
+        emergency_contact = EXCLUDED.emergency_contact,
+        status = EXCLUDED.status,
+        user_id = EXCLUDED.user_id,
+        counselor_id = EXCLUDED.counselor_id,
+        updated_at = NOW()
+    `, [
+      emp.id, emp.employee_code, emp.user_id || null, emp.counselor_id || null,
+      emp.full_name, emp.email, emp.phone, emp.department || 'Counseling',
+      emp.designation || 'Education Counselor', emp.employment_type || 'Full-Time',
+      emp.joining_date || new Date().toISOString().split('T')[0],
+      Number(emp.monthly_salary) || 0, emp.currency || 'NPR',
+      emp.bank_name || null, emp.account_number || null, emp.pan_number || null,
+      emp.emergency_contact || null, emp.status || 'Active'
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Employee persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Persist Finance Transaction to Neon
+ */
+export async function persistTransactionToNeon(tx: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO finance_transactions (
+        id, transaction_id, type, category, title, amount, currency,
+        transaction_date, payment_method, reference_number, student_id, student_name,
+        university_id, university_name, status, notes, recorded_by, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        type = EXCLUDED.type,
+        category = EXCLUDED.category,
+        title = EXCLUDED.title,
+        amount = EXCLUDED.amount,
+        currency = EXCLUDED.currency,
+        transaction_date = EXCLUDED.transaction_date,
+        payment_method = EXCLUDED.payment_method,
+        reference_number = EXCLUDED.reference_number,
+        student_id = EXCLUDED.student_id,
+        student_name = EXCLUDED.student_name,
+        university_id = EXCLUDED.university_id,
+        university_name = EXCLUDED.university_name,
+        status = EXCLUDED.status,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `, [
+      tx.id, tx.transaction_id, tx.type || 'INCOME', tx.category || 'General',
+      tx.title, Number(tx.amount) || 0, tx.currency || 'NPR',
+      tx.transaction_date || new Date().toISOString().split('T')[0],
+      tx.payment_method || 'Bank Transfer', tx.reference_number || null,
+      tx.student_id || null, tx.student_name || null,
+      tx.university_id || null, tx.university_name || null,
+      tx.status || 'Completed', tx.notes || null, tx.recorded_by || 'Super Admin'
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Transaction persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Persist Finance Invoice to Neon
+ */
+export async function persistInvoiceToNeon(inv: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO finance_invoices (
+        id, invoice_number, invoice_type, recipient_name, recipient_email, recipient_phone,
+        total_amount, paid_amount, due_amount, currency, due_date, status, items, notes,
+        student_id, university_id, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        invoice_number = EXCLUDED.invoice_number,
+        invoice_type = EXCLUDED.invoice_type,
+        recipient_name = EXCLUDED.recipient_name,
+        recipient_email = EXCLUDED.recipient_email,
+        recipient_phone = EXCLUDED.recipient_phone,
+        total_amount = EXCLUDED.total_amount,
+        paid_amount = EXCLUDED.paid_amount,
+        due_amount = EXCLUDED.due_amount,
+        currency = EXCLUDED.currency,
+        due_date = EXCLUDED.due_date,
+        status = EXCLUDED.status,
+        items = EXCLUDED.items,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+    `, [
+      inv.id, inv.invoice_number, inv.invoice_type || 'STUDENT_FEE',
+      inv.recipient_name, inv.recipient_email || null, inv.recipient_phone || null,
+      Number(inv.total_amount) || 0, Number(inv.paid_amount) || 0, Number(inv.due_amount) || 0,
+      inv.currency || 'NPR', inv.due_date, inv.status || 'Sent',
+      typeof inv.items === 'string' ? inv.items : JSON.stringify(inv.items || []),
+      inv.notes || null, inv.student_id || null, inv.university_id || null
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Invoice persist failed:', err.message);
     return false;
   }
 }
@@ -530,7 +828,25 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       // Columns may already exist
     }
 
-    // 1. Sync Users
+    // 1. Sync Deleted Records (Tombstones) First - Prevents resurrecting any deleted records
+    const tombstones = await sql.query('SELECT * FROM deleted_records');
+    const tombstoneEntities = new Set<string>();
+    const tombstoneIdentifiers = new Set<string>();
+
+    if (tombstones && tombstones.length > 0) {
+      const insertTombstone = db.prepare(`
+        INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of tombstones) {
+        insertTombstone.run(t.id, t.entity_type, t.entity_id, t.identifier, t.details, t.deleted_by, String(t.deleted_at));
+        tombstoneEntities.add(`${t.entity_type}:${t.entity_id}`);
+        if (t.identifier) tombstoneIdentifiers.add(String(t.identifier).toLowerCase().trim());
+      }
+      console.log(`[Neon Sync] Loaded ${tombstones.length} tombstone records from Neon.`);
+    }
+
+    // 2. Sync Users (filtering tombstones)
     const users = await sql.query('SELECT * FROM users');
     if (users && users.length > 0) {
       const upsertUser = db.prepare(`
@@ -548,6 +864,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           updated_at = excluded.updated_at
       `);
       for (const u of users) {
+        if (tombstoneEntities.has('user:' + u.id) || tombstoneIdentifiers.has(u.email?.toLowerCase())) {
+          db.prepare('DELETE FROM users WHERE id = ? OR LOWER(email) = LOWER(?)').run(u.id, u.email);
+          continue;
+        }
         upsertUser.run(
           u.id, u.name, u.email, u.password_hash, u.role, u.phone, u.avatar_url,
           u.is_active, u.permissions ? (typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions)) : '[]',
@@ -557,7 +877,7 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       console.log(`[Neon Sync] Synced ${users.length} users from Neon.`);
     }
 
-    // 2. Sync Counselors
+    // 3. Sync Counselors (filtering tombstones)
     const counselors = await sql.query('SELECT * FROM counselors');
     if (counselors && counselors.length > 0) {
       const upsertCounselor = db.prepare(`
@@ -581,6 +901,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           updated_at = excluded.updated_at
       `);
       for (const c of counselors) {
+        if (tombstoneEntities.has('counselor:' + c.id) || tombstoneIdentifiers.has(c.email?.toLowerCase())) {
+          db.prepare('DELETE FROM counselors WHERE id = ? OR LOWER(email) = LOWER(?)').run(c.id, c.email);
+          continue;
+        }
         upsertCounselor.run(
           c.id, c.user_id, c.name, c.email, c.phone, c.specialization_country,
           typeof c.assigned_cities === 'string' ? c.assigned_cities : JSON.stringify(c.assigned_cities || []),
@@ -595,20 +919,7 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       console.log(`[Neon Sync] Synced ${counselors.length} counselors from Neon.`);
     }
 
-    // 3. Sync Deleted Records (Tombstones) - Prevents resurrected leads
-    const tombstones = await sql.query('SELECT * FROM deleted_records');
-    if (tombstones && tombstones.length > 0) {
-      const insertTombstone = db.prepare(`
-        INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const t of tombstones) {
-        insertTombstone.run(t.id, t.entity_type, t.entity_id, t.identifier, t.details, t.deleted_by, String(t.deleted_at));
-      }
-      console.log(`[Neon Sync] Synced ${tombstones.length} tombstone records from Neon.`);
-    }
-
-    // 4. Sync Leads
+    // 4. Sync Leads (filtering tombstones)
     const leads = await sql.query('SELECT * FROM leads WHERE is_deleted = 0');
     if (leads && leads.length > 0) {
       const upsertLead = db.prepare(`
@@ -638,6 +949,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           updated_at = excluded.updated_at
       `);
       for (const l of leads) {
+        if (tombstoneEntities.has('lead:' + l.id) || (l.phone && tombstoneIdentifiers.has(l.phone)) || (l.email && tombstoneIdentifiers.has(l.email.toLowerCase()))) {
+          db.prepare('DELETE FROM leads WHERE id = ?').run(l.id);
+          continue;
+        }
         upsertLead.run(
           l.id, l.lead_id || ('LD-' + l.id), l.student_name, l.first_name || l.student_name || 'Student', l.last_name || '', l.phone, l.whatsapp_number || l.phone, l.email,
           l.parent_name, l.school_college, l.passing_year, l.gender, l.date_of_birth, l.country || 'Nepal', l.state, l.city || 'Kathmandu',
@@ -654,7 +969,7 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       console.log(`[Neon Sync] Synced ${leads.length} active leads from Neon.`);
     }
 
-    // 5. Sync Universities & Courses & University Courses
+    // 5. Sync Universities
     const universities = await sql.query('SELECT * FROM universities');
     if (universities && universities.length > 0) {
       const upsertUni = db.prepare(`
@@ -663,6 +978,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
         ON CONFLICT (id) DO UPDATE SET name = excluded.name, status = excluded.status
       `);
       for (const u of universities) {
+        if (tombstoneEntities.has('university:' + u.id)) {
+          db.prepare('DELETE FROM universities WHERE id = ?').run(u.id);
+          continue;
+        }
         upsertUni.run(
           u.id, u.name, u.short_name, u.campus, u.city, u.state, u.country, u.university_type,
           u.accreditation, u.ranking, u.website, u.contact, u.description, u.status, u.is_active,
@@ -702,6 +1021,10 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           updated_at = excluded.updated_at
       `);
       for (const g of gsheets) {
+        if (tombstoneEntities.has('google_sheet:' + g.id)) {
+          db.prepare('DELETE FROM google_sheets_connections WHERE id = ?').run(g.id);
+          continue;
+        }
         upsertGSheet.run(
           g.id, g.name, g.sheet_url, g.spreadsheet_id, g.gid, g.sheet_name,
           g.campaign_tag, g.target_city, g.source_label, g.status || 'ACTIVE',
@@ -713,6 +1036,112 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       }
       console.log(`[Neon Sync] Synced ${gsheets.length} Google Sheet connections from Neon.`);
     }
+
+    // 7. Sync HR Employees (filtering tombstones)
+    try {
+      const emps = await sql.query('SELECT * FROM hr_employees');
+      if (emps && emps.length > 0) {
+        const upsertEmp = db.prepare(`
+          INSERT INTO hr_employees (
+            id, employee_code, user_id, counselor_id, full_name, email, phone,
+            department, designation, employment_type, joining_date, monthly_salary,
+            currency, bank_name, account_number, pan_number, emergency_contact, status, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            phone = excluded.phone,
+            department = excluded.department,
+            designation = excluded.designation,
+            monthly_salary = excluded.monthly_salary,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const e of emps) {
+          if (tombstoneEntities.has('hr_employee:' + e.id) || tombstoneIdentifiers.has(e.email?.toLowerCase())) {
+            db.prepare('DELETE FROM hr_employees WHERE id = ?').run(e.id);
+            continue;
+          }
+          upsertEmp.run(
+            e.id, e.employee_code, e.user_id, e.counselor_id, e.full_name, e.email, e.phone,
+            e.department, e.designation, e.employment_type, e.joining_date, Number(e.monthly_salary) || 0,
+            e.currency || 'NPR', e.bank_name, e.account_number, e.pan_number, e.emergency_contact,
+            e.status || 'Active', String(e.created_at), String(e.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${emps.length} HR employees from Neon.`);
+      }
+    } catch (empSyncErr: any) {}
+
+    // 8. Sync Finance Transactions (filtering tombstones)
+    try {
+      const txns = await sql.query('SELECT * FROM finance_transactions');
+      if (txns && txns.length > 0) {
+        const upsertTxn = db.prepare(`
+          INSERT INTO finance_transactions (
+            id, transaction_id, type, category, title, amount, currency,
+            transaction_date, payment_method, reference_number, student_id, student_name,
+            university_id, university_name, status, notes, recorded_by, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            type = excluded.type,
+            category = excluded.category,
+            title = excluded.title,
+            amount = excluded.amount,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const tx of txns) {
+          if (tombstoneEntities.has('finance_transaction:' + tx.id)) {
+            db.prepare('DELETE FROM finance_transactions WHERE id = ?').run(tx.id);
+            continue;
+          }
+          upsertTxn.run(
+            tx.id, tx.transaction_id, tx.type, tx.category, tx.title, Number(tx.amount) || 0,
+            tx.currency || 'NPR', tx.transaction_date, tx.payment_method, tx.reference_number,
+            tx.student_id, tx.student_name, tx.university_id, tx.university_name,
+            tx.status || 'Completed', tx.notes, tx.recorded_by, String(tx.created_at), String(tx.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${txns.length} finance transactions from Neon.`);
+      }
+    } catch (txnSyncErr: any) {}
+
+    // 9. Sync Finance Invoices (filtering tombstones)
+    try {
+      const invs = await sql.query('SELECT * FROM finance_invoices');
+      if (invs && invs.length > 0) {
+        const upsertInv = db.prepare(`
+          INSERT INTO finance_invoices (
+            id, invoice_number, invoice_type, recipient_name, recipient_email, recipient_phone,
+            total_amount, paid_amount, due_amount, currency, due_date, status, items, notes,
+            student_id, university_id, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            paid_amount = excluded.paid_amount,
+            due_amount = excluded.due_amount,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `);
+        for (const inv of invs) {
+          if (tombstoneEntities.has('finance_invoice:' + inv.id)) {
+            db.prepare('DELETE FROM finance_invoices WHERE id = ?').run(inv.id);
+            continue;
+          }
+          upsertInv.run(
+            inv.id, inv.invoice_number, inv.invoice_type, inv.recipient_name, inv.recipient_email, inv.recipient_phone,
+            Number(inv.total_amount) || 0, Number(inv.paid_amount) || 0, Number(inv.due_amount) || 0,
+            inv.currency || 'NPR', inv.due_date, inv.status || 'Pending',
+            typeof inv.items === 'string' ? inv.items : JSON.stringify(inv.items || []),
+            inv.notes, inv.student_id, inv.university_id, String(inv.created_at), String(inv.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${invs.length} finance invoices from Neon.`);
+      }
+    } catch (invSyncErr: any) {}
 
     console.log('✅ [Neon Sync] Synchronization complete!');
   } catch (err: any) {

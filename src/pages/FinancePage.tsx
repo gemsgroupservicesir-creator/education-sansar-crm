@@ -18,7 +18,8 @@ import {
   X,
   TrendingUp,
   FileText,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import { api } from '../services/api';
 import {
@@ -217,6 +218,34 @@ export const FinancePage: React.FC = () => {
       loadTransactions();
     } catch (err: any) {
       addToast(err.message || 'Failed to record payment', 'error');
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string, title: string) => {
+    if (!confirm(`Are you sure you want to permanently delete transaction "${title}"? This will remove it from both local SQLite and Neon PostgreSQL.`)) {
+      return;
+    }
+    try {
+      await api.deleteFinanceTransaction(id);
+      addToast(`Transaction "${title}" deleted permanently!`, 'success');
+      loadTransactions();
+      loadOverview();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to delete transaction', 'error');
+    }
+  };
+
+  const handleDeleteInvoice = async (id: string, invoiceNumber: string) => {
+    if (!confirm(`Are you sure you want to permanently delete invoice "${invoiceNumber}"? This will remove it from both local SQLite and Neon PostgreSQL.`)) {
+      return;
+    }
+    try {
+      await api.deleteFinanceInvoice(id);
+      addToast(`Invoice "${invoiceNumber}" deleted permanently!`, 'success');
+      loadInvoices();
+      loadOverview();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to delete invoice', 'error');
     }
   };
 
@@ -505,12 +534,13 @@ export const FinancePage: React.FC = () => {
                     <th className="py-3 px-4">Description</th>
                     <th className="py-3 px-4">Payment Method</th>
                     <th className="py-3 px-4 text-right">Amount</th>
+                    {canManageFinance && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-400">
+                      <td colSpan={canManageFinance ? 7 : 6} className="text-center py-8 text-slate-400">
                         No transactions found. Click "Record Transaction" to add entries.
                       </td>
                     </tr>
@@ -545,6 +575,17 @@ export const FinancePage: React.FC = () => {
                         }`}>
                           {t.type === 'INCOME' ? '+' : '-'} {t.currency} {Number(t.amount).toLocaleString()}
                         </td>
+                        {canManageFinance && (
+                          <td className="py-3.5 px-4 text-right">
+                            <button
+                              onClick={() => handleDeleteTransaction(t.id, t.title)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Transaction Permanently"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -650,6 +691,15 @@ export const FinancePage: React.FC = () => {
                                 className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold"
                               >
                                 Collect Fee
+                              </button>
+                            )}
+                            {canManageFinance && (
+                              <button
+                                onClick={() => handleDeleteInvoice(inv.id, inv.invoice_number)}
+                                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Delete Invoice Permanently"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>

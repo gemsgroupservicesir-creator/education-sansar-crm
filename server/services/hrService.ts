@@ -1,4 +1,5 @@
 import { db, logAudit } from '../db/database.ts';
+import { isNeonEnabled, persistEmployeeToNeon, deleteEmployeeFromNeon, persistDeletedRecordToNeon } from '../db/neon.ts';
 
 export interface Employee {
   id: string;
@@ -99,7 +100,12 @@ export function createEmployee(data: Partial<Employee>, performedBy: string = 'S
     newValue: { code: employeeCode, name: data.full_name, department: data.department }
   });
 
-  return getEmployee(id)!;
+  const newEmp = getEmployee(id)!;
+  if (isNeonEnabled()) {
+    persistEmployeeToNeon(newEmp).catch(e => console.warn('[Neon Sync] Employee defer:', e.message));
+  }
+
+  return newEmp;
 }
 
 export function updateEmployee(id: string, data: Partial<Employee>, performedBy: string = 'Super Admin'): boolean {
@@ -146,6 +152,11 @@ export function updateEmployee(id: string, data: Partial<Employee>, performedBy:
     id
   );
 
+  const updatedEmp = getEmployee(id);
+  if (isNeonEnabled() && updatedEmp) {
+    persistEmployeeToNeon(updatedEmp).catch(e => console.warn('[Neon Sync] Employee update defer:', e.message));
+  }
+
   logAudit({
     userName: performedBy,
     action: 'UPDATE_EMPLOYEE',
@@ -166,6 +177,24 @@ export function deleteEmployee(id: string, performedBy: string = 'Super Admin'):
   db.prepare("DELETE FROM hr_leaves WHERE employee_id = ?").run(id);
   db.prepare("DELETE FROM hr_payroll WHERE employee_id = ?").run(id);
   db.prepare("DELETE FROM hr_employees WHERE id = ?").run(id);
+
+  const tombId = 'DEL-EMP-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+    VALUES (?, 'hr_employee', ?, ?, ?, ?, datetime('now'))
+  `).run(tombId, id, existing.email, JSON.stringify({ name: existing.full_name, code: existing.employee_code }), performedBy);
+
+  if (isNeonEnabled()) {
+    deleteEmployeeFromNeon(id).catch(e => console.warn('[Neon Delete] Employee defer:', e.message));
+    persistDeletedRecordToNeon({
+      id: tombId,
+      entity_type: 'hr_employee',
+      entity_id: id,
+      identifier: existing.email,
+      details: JSON.stringify({ name: existing.full_name, code: existing.employee_code }),
+      deleted_by: performedBy
+    }).catch(e => console.warn('[Neon Tombstone] Employee defer:', e.message));
+  }
 
   logAudit({
     userName: performedBy,
