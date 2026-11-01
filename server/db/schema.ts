@@ -415,7 +415,7 @@ CREATE TABLE IF NOT EXISTS messages (
   lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
   channel TEXT NOT NULL DEFAULT 'WhatsApp',
   recipient TEXT NOT NULL,
-  sender TEXT NOT NULL DEFAULT 'Education Sansar',
+  sender TEXT NOT NULL DEFAULT 'Gems Group Services',
   template_id TEXT REFERENCES message_templates(id),
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'Sent', -- 'Queued', 'Sent', 'Delivered', 'Failed'

@@ -9,7 +9,7 @@ function createWindow() {
     height: 920,
     minWidth: 1080,
     minHeight: 700,
-    title: 'Education Sansar CRM',
+    title: 'Gems Group Services CRM',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
@@ -67,9 +67,9 @@ function createAppMenu() {
 
   const template = [
     ...(isMac ? [{
-      label: 'Education Sansar',
+      label: 'Gems Group Services',
       submenu: [
-        { role: 'about', label: 'About Education Sansar CRM' },
+        { role: 'about', label: 'About Gems Group Services CRM' },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -77,7 +77,7 @@ function createAppMenu() {
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit', label: 'Quit Education Sansar' }
+        { role: 'quit', label: 'Quit Gems Group Services' }
       ]
     }] : []),
     {
@@ -143,7 +143,7 @@ function createAppMenu() {
         },
         {
           label: 'Support Hotline',
-          click: () => shell.openExternal('mailto:admin@educationsansar.com')
+          click: () => shell.openExternal('mailto:admin@gemsgroupservices.com')
         }
       ]
     }

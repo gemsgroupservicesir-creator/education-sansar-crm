@@ -17,12 +17,12 @@ export const SettingsPage: React.FC = () => {
 
   // Settings State
   const [settings, setSettings] = useState<Record<string, string>>({
-    company_name: 'Education Sansar',
+    company_name: 'Gems Group Services',
     company_tagline: 'Premier Education Counseling & University Admission Consultancy',
     company_address: 'Sector 94, Noida, Uttar Pradesh 201313',
     company_phone: '+91 120 4567890',
-    company_email: 'admissions@educationsansar.com',
-    company_website: 'https://educationsansar.com',
+    company_email: 'admissions@gemsgroupservices.com',
+    company_website: 'https://gemsgroupservices.com',
     lead_assignment_mode: 'ROUND_ROBIN',
     auto_followup_hours: '24',
     enable_whatsapp_auto_welcome: '1',
@@ -62,6 +62,7 @@ export const SettingsPage: React.FC = () => {
   const hasSuperAdminRights = Boolean(
     isSuperAdmin || 
     user?.role === 'Super Admin' || 
+    user?.email === 'admin@gemsgroupservices.com' ||
     user?.email === 'admin@educationsansar.com'
   );
 
@@ -118,7 +119,7 @@ export const SettingsPage: React.FC = () => {
                 )}
               </div>
               <p className="text-sm text-gray-500">
-                Education Sansar corporate profile, lead routing engine, RBAC, and audit logs
+                Gems Group Services corporate profile, lead routing engine, RBAC, and audit logs
               </p>
             </div>
           </div>

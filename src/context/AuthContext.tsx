@@ -27,7 +27,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('sansar_user');
+      const saved = localStorage.getItem('gems_user') || localStorage.getItem('sansar_user');
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -38,9 +38,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (user) {
+      localStorage.setItem('gems_user', JSON.stringify(user));
       localStorage.setItem('sansar_user', JSON.stringify(user));
       setCurrentRole(user.role);
     } else {
+      localStorage.removeItem('gems_user');
       localStorage.removeItem('sansar_user');
     }
   }, [user]);
@@ -100,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fallbackUser: User = {
       id: role === 'Counselor' ? 'u-c1' : 'u-super',
       name: role === 'Counselor' ? 'Aarav Sharma' : 'Bikash Karki',
-      email: role === 'Counselor' ? 'aarav@educationsansar.com' : 'admin@educationsansar.com',
+      email: role === 'Counselor' ? 'aarav@gemsgroupservices.com' : 'admin@gemsgroupservices.com',
       role: role,
       phone: '+977 9801234567',
       is_active: 1,
@@ -109,12 +111,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setUser(fallbackUser);
     setCurrentRole(fallbackUser.role);
+    localStorage.setItem('gems_user', JSON.stringify(fallbackUser));
     localStorage.setItem('sansar_user', JSON.stringify(fallbackUser));
     return fallbackUser;
   };
 
   const logout = () => {
     setUser(null);
+    localStorage.removeItem('gems_user');
     localStorage.removeItem('sansar_user');
   };
 
@@ -124,6 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     currentRole === 'Admin' ||
     user?.role === 'Super Admin' ||
     user?.role === 'Admin' ||
+    user?.email === 'admin@gemsgroupservices.com' ||
     user?.email === 'admin@educationsansar.com' ||
     (user?.email?.toLowerCase().includes('prakash') ?? false);
 

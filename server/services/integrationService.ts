@@ -33,6 +33,8 @@ export function verifyMetaWebhook(mode: string, token: string, challenge: string
   // Accept configured token, or standard default tokens for seamless zero-friction verification
   const validTokens = [
     configuredToken,
+    'gems_group_services_meta_verify_2026',
+    'gems_group_services_meta_verify_token_2026',
     'education_sansar_meta_verify_2026',
     'education_sansar_meta_verify_token_2026'
   ].filter(Boolean);
@@ -349,7 +351,7 @@ export function sendWhatsAppMessage(params: {
   // Record in messages table
   db.prepare(`
     INSERT INTO messages (id, lead_id, channel, recipient, sender, template_id, content, status)
-    VALUES (?, ?, 'WhatsApp', ?, 'Education Sansar', ?, ?, ?)
+    VALUES (?, ?, 'WhatsApp', ?, 'Gems Group Services', ?, ?, ?)
   `).run(messageId, params.leadId || null, params.recipientPhone, params.templateId || null, messageBody, status);
 
   // If linked to lead, log in activity
@@ -739,7 +741,7 @@ export function exportLeadToGoogleSheet(leadId: string, performedBy: string = 'U
 export function getGoogleAppsScriptTemplate(baseUrl: string) {
   const webhookUrl = `${baseUrl}/api/integrations/google-sheets/webhook`;
   return `/**
- * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
+ * Gems Group Services CRM - Google Sheets Real-Time Inbound Sync Script
  * 
  * Standard Column Headers (Row 1):
  * 1. full_name
@@ -836,7 +838,7 @@ function testSendLastRow() {
 }
 
 /**
- * Core function to send row data to Education Sansar CRM webhook
+ * Core function to send row data to Gems Group Services CRM webhook
  */
 function sendRowToCRM(sheet, rowNumber) {
   const lastCol = sheet.getLastColumn();

@@ -4,11 +4,11 @@ set -e
 export PATH="/opt/homebrew/bin:$PATH"
 
 # ==============================================================================
-# Education Sansar CRM — Google Cloud Run Automated Deployment Script
+# Gems Group Services CRM — Google Cloud Run Automated Deployment Script
 # ==============================================================================
 
 echo "================================================================="
-echo "  🚀 Deploying Education Sansar CRM to Google Cloud Run"
+echo "  🚀 Deploying Gems Group Services CRM to Google Cloud Run"
 echo "================================================================="
 
 # 1. Verify gcloud installation
@@ -80,10 +80,10 @@ gcloud run deploy "$SERVICE_NAME" \
 echo ""
 echo "================================================================="
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$CURRENT_PROJECT" --format="value(status.url)")
-echo "🎉 SUCCESS! Education Sansar CRM is LIVE at:"
+echo "🎉 SUCCESS! Gems Group Services CRM is LIVE at:"
 echo "   🌐 $SERVICE_URL"
 echo ""
 echo "Super Admin Credentials:"
-echo "   📧 Email:    admin@educationsansar.com"
+echo "   📧 Email:    admin@gemsgroupservices.com"
 echo "   🔑 Password: admin123"
 echo "================================================================="

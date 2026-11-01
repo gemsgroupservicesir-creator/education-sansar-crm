@@ -283,7 +283,7 @@ export async function initPostgres() {
       lead_id TEXT,
       channel TEXT NOT NULL DEFAULT 'WhatsApp',
       recipient TEXT NOT NULL,
-      sender TEXT NOT NULL DEFAULT 'Education Sansar',
+      sender TEXT NOT NULL DEFAULT 'Gems Group Services',
       template_id TEXT,
       content TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'Sent',
@@ -432,12 +432,12 @@ export async function initPostgres() {
   const templates = [
     [
       'tmpl-1', 'Lead Welcome & Introduction', 'WhatsApp', 'WELCOME', null,
-      'Namaste {{student_name}}! Welcome to Education Sansar. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!',
+      'Namaste {{student_name}}! Welcome to Gems Group Services. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!',
       '["student_name", "preferred_course", "preferred_university", "counselor_name", "counselor_phone"]', 1
     ],
     [
       'tmpl-2', 'Counselor Personal Introduction', 'WhatsApp', 'COUNSELOR_INTRO', null,
-      'Hello {{student_name}}, this is {{counselor_name}} from Education Sansar. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?',
+      'Hello {{student_name}}, this is {{counselor_name}} from Gems Group Services. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?',
       '["student_name", "counselor_name", "preferred_university", "follow_up_time"]', 1
     ]
   ];
@@ -452,10 +452,10 @@ export async function initPostgres() {
 
   // Seed System Settings
   const settings = [
-    ['company_name', 'Education Sansar', 'Official company legal name'],
+    ['company_name', 'Gems Group Services', 'Official company legal name'],
     ['company_address', 'Sector 94, Noida, Uttar Pradesh 201313', 'Main office address'],
     ['company_phone', '+91 98100 12345 / +977 98012 34567', 'Official hotline phone'],
-    ['company_email', 'admissions@educationsansar.com', 'Official admissions email'],
+    ['company_email', 'admissions@gemsgroupservices.com', 'Official admissions email'],
     ['assignment_mode', 'Round Robin', 'Lead assignment strategy'],
     ['duplicate_check_strictness', 'Strict', 'Duplicate detection rules']
   ];

@@ -680,7 +680,7 @@ export const CounselorsPage: React.FC = () => {
                     type="email"
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
-                    placeholder="staff@educationsansar.com"
+                    placeholder="staff@gemsgroupservices.com"
                     className="w-full p-2 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

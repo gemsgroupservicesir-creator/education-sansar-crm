@@ -297,7 +297,7 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
 
   db.prepare(`
     INSERT INTO followups (id, lead_id, counselor_id, follow_up_date, follow_up_time, type, priority, notes, status, created_by)
-    VALUES (?, ?, ?, ?, '11:00', 'Call', 'HIGH', 'First outreach call to introduce Education Sansar counseling services', 'Pending', ?)
+    VALUES (?, ?, ?, ?, '11:00', 'Call', 'HIGH', 'First outreach call to introduce Gems Group Services counseling services', 'Pending', ?)
   `).run(fupId, id, counselorId || null, fupDateStr, performedBy);
 
   // Queue automated welcome message in activity

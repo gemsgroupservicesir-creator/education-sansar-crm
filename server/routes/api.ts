@@ -138,16 +138,16 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
 
     // 3. Convenience fallbacks for common aliases & test accounts
     if (!user && (identifier === 'admin' || identifier === 'superadmin' || identifier.includes('admin@'))) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'admin@educationsansar.com' AND is_active = 1").get() as any;
+      user = db.prepare("SELECT * FROM users WHERE (email = 'admin@gemsgroupservices.com' OR email = 'admin@educationsansar.com') AND is_active = 1").get() as any;
     }
     if (!user && identifier.includes('aarav')) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'aarav@educationsansar.com' AND is_active = 1").get() as any;
+      user = db.prepare("SELECT * FROM users WHERE (email = 'aarav@gemsgroupservices.com' OR email = 'aarav@educationsansar.com') AND is_active = 1").get() as any;
     }
     if (!user && identifier.includes('priya')) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'priya@educationsansar.com' AND is_active = 1").get() as any;
+      user = db.prepare("SELECT * FROM users WHERE (email = 'priya@gemsgroupservices.com' OR email = 'priya@educationsansar.com') AND is_active = 1").get() as any;
     }
     if (!user && identifier.includes('sunil')) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'sunil@educationsansar.com' AND is_active = 1").get() as any;
+      user = db.prepare("SELECT * FROM users WHERE (email = 'sunil@gemsgroupservices.com' OR email = 'sunil@educationsansar.com') AND is_active = 1").get() as any;
     }
     if (!user && identifier.includes('counselor')) {
       user = db.prepare("SELECT * FROM users WHERE role = 'Counselor' AND is_active = 1 LIMIT 1").get() as any;
@@ -2416,7 +2416,7 @@ apiRouter.get('/export/:entity', (req: Request, res: Response) => {
     ).join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_leads.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="gems_group_services_leads.csv"');
     return res.send(csvHeader + csvRows);
   }
 
@@ -2428,7 +2428,7 @@ apiRouter.get('/export/:entity', (req: Request, res: Response) => {
     ).join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_students.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="gems_group_services_students.csv"');
     return res.send(csvHeader + csvRows);
   }
 
@@ -2440,7 +2440,7 @@ apiRouter.get('/export/:entity', (req: Request, res: Response) => {
     ).join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="education_sansar_applications.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="gems_group_services_applications.csv"');
     return res.send(csvHeader + csvRows);
   }
 

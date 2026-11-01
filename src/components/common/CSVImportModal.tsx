@@ -36,7 +36,7 @@ export const CSVImportModal: React.FC<CSVImportModalProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'education_sansar_leads_template.csv';
+    a.download = 'gems_group_services_leads_template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };

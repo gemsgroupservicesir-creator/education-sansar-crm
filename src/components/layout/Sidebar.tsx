@@ -96,13 +96,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/80 bg-slate-950/40 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-700 via-blue-600 to-sky-400 flex items-center justify-center shadow-lg shadow-blue-900/30 text-white font-bold text-lg shrink-0">
-              ES
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-700 via-blue-600 to-sky-400 flex items-center justify-center shadow-lg shadow-blue-900/30 text-white font-bold text-sm tracking-tight shrink-0">
+              GGS
             </div>
             {!isCollapsed && (
               <div className="min-w-0 animate-in fade-in duration-200">
                 <h1 className="font-bold text-sm tracking-wide text-white flex items-center gap-1.5 truncate">
-                  Education Sansar
+                  Gems Group Services
                   <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-300 border border-blue-500/20">
                     CRM
                   </span>

@@ -1068,9 +1068,9 @@ export const FinancePage: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                  ES
+                  GGS
                 </div>
-                <h3 className="text-sm font-bold text-slate-900">Education Sansar Consultancy</h3>
+                <h3 className="text-sm font-bold text-slate-900">Gems Group Services</h3>
               </div>
               <button onClick={() => setPrintInvoice(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />

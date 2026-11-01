@@ -28,7 +28,7 @@ export const LoginPage: React.FC = () => {
   const { showToast } = useNotifications();
 
   // Sign In state
-  const [identifier, setIdentifier] = useState('admin@educationsansar.com');
+  const [identifier, setIdentifier] = useState('admin@gemsgroupservices.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -65,7 +65,7 @@ export const LoginPage: React.FC = () => {
   };
 
   const handleQuickAdmin = () => {
-    setIdentifier('admin@educationsansar.com');
+    setIdentifier('admin@gemsgroupservices.com');
     setPassword('admin123');
     setError(null);
   };
@@ -89,7 +89,7 @@ export const LoginPage: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xl font-black tracking-tight text-white">
-                  Education Sansar
+                  Gems Group Services
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-400/20 text-sky-200 border border-sky-400/30">
                   CRM 2.0
@@ -180,7 +180,7 @@ export const LoginPage: React.FC = () => {
             <Landmark className="w-5 h-5" />
           </div>
           <div>
-            <span className="font-bold text-slate-900 text-base">Education Sansar</span>
+            <span className="font-bold text-slate-900 text-base">Gems Group Services</span>
             <span className="text-xs block text-slate-500">Admission Consultancy CRM</span>
           </div>
         </div>
@@ -221,7 +221,7 @@ export const LoginPage: React.FC = () => {
                 onClick={handleQuickAdmin}
                 className="w-full py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
               >
-                <span>⚡ Quick Fill: Super Admin (admin@educationsansar.com)</span>
+                <span>⚡ Quick Fill: Super Admin (admin@gemsgroupservices.com)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -242,7 +242,7 @@ export const LoginPage: React.FC = () => {
                   required
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="admin@educationsansar.com or username"
+                  placeholder="admin@gemsgroupservices.com or username"
                   autoComplete="username"
                   className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl border border-slate-300 bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-2xs font-medium"
                 />
@@ -334,9 +334,9 @@ export const LoginPage: React.FC = () => {
 
         {/* Footer */}
         <div className="pt-6 border-t border-slate-200/80 text-center text-xs text-slate-400 space-y-1">
-          <p>© 2026 Education Sansar Consultancy CRM · All rights reserved.</p>
+          <p>© 2026 Gems Group Services CRM · All rights reserved.</p>
           <p className="text-[11px] text-slate-400">
-            Need help? Contact system administrator at <span className="font-semibold text-slate-600">admin@educationsansar.com</span>
+            Need help? Contact system administrator at <span className="font-semibold text-slate-600">admin@gemsgroupservices.com</span>
           </p>
         </div>
       </div>

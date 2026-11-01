@@ -446,7 +446,7 @@ CREATE TABLE IF NOT EXISTS messages (
   lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
   channel TEXT NOT NULL DEFAULT 'WhatsApp',
   recipient TEXT NOT NULL,
-  sender TEXT NOT NULL DEFAULT 'Education Sansar',
+  sender TEXT NOT NULL DEFAULT 'Gems Group Services',
   template_id TEXT REFERENCES message_templates(id),
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'Sent', -- 'Queued', 'Sent', 'Delivered', 'Failed'
@@ -2236,7 +2236,7 @@ function createLead(data, performedBy = "System") {
   const fupId = "fup-" + Date.now();
   db.prepare(`
     INSERT INTO followups (id, lead_id, counselor_id, follow_up_date, follow_up_time, type, priority, notes, status, created_by)
-    VALUES (?, ?, ?, ?, '11:00', 'Call', 'HIGH', 'First outreach call to introduce Education Sansar counseling services', 'Pending', ?)
+    VALUES (?, ?, ?, ?, '11:00', 'Call', 'HIGH', 'First outreach call to introduce Gems Group Services counseling services', 'Pending', ?)
   `).run(fupId, id, counselorId || null, fupDateStr, performedBy);
   logLeadActivity({
     leadId: id,
@@ -2531,6 +2531,8 @@ function verifyMetaWebhook(mode, token, challenge) {
   const configuredToken = cfg.verifyToken || process.env.META_WEBHOOK_VERIFY_TOKEN;
   const validTokens = [
     configuredToken,
+    "gems_group_services_meta_verify_2026",
+    "gems_group_services_meta_verify_token_2026",
     "education_sansar_meta_verify_2026",
     "education_sansar_meta_verify_token_2026"
   ].filter(Boolean);
@@ -2760,7 +2762,7 @@ function sendWhatsAppMessage(params) {
   const status = isConnected ? "Delivered" : "Queued";
   db.prepare(`
     INSERT INTO messages (id, lead_id, channel, recipient, sender, template_id, content, status)
-    VALUES (?, ?, 'WhatsApp', ?, 'Education Sansar', ?, ?, ?)
+    VALUES (?, ?, 'WhatsApp', ?, 'Gems Group Services', ?, ?, ?)
   `).run(messageId, params.leadId || null, params.recipientPhone, params.templateId || null, messageBody, status);
   if (params.leadId) {
     logLeadActivity({
@@ -3104,7 +3106,7 @@ function exportLeadToGoogleSheet(leadId, performedBy = "User") {
 function getGoogleAppsScriptTemplate(baseUrl) {
   const webhookUrl = `${baseUrl}/api/integrations/google-sheets/webhook`;
   return `/**
- * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
+ * Gems Group Services CRM - Google Sheets Real-Time Inbound Sync Script
  * 
  * Standard Column Headers (Row 1):
  * 1. full_name
@@ -3201,7 +3203,7 @@ function testSendLastRow() {
 }
 
 /**
- * Core function to send row data to Education Sansar CRM webhook
+ * Core function to send row data to Gems Group Services CRM webhook
  */
 function sendRowToCRM(sheet, rowNumber) {
   const lastCol = sheet.getLastColumn();
@@ -4990,12 +4992,12 @@ function previewEmailResolution(subject, content, sampleData) {
     preferred_university: "Sharda University",
     city: "Kathmandu",
     counselor_name: "Suman Sharma",
-    counselor_email: "counselor@educationsansar.com",
+    counselor_email: "counselor@gemsgroupservices.com",
     counselor_phone: "+977 9801122334",
     application_id: "APP-2026-0812",
     deadline: "15th November 2026",
     portal_url: "https://education-sansar-crm.vercel.app",
-    company_name: "Education Sansar",
+    company_name: "Gems Group Services",
     year: "2026"
   };
   const mergeData = { ...fallbackData, ...sampleData || {} };
@@ -5129,13 +5131,13 @@ function sendBulkEmailCampaign(params) {
           preferred_course: lead.preferred_course || "Chosen Program",
           preferred_university: lead.preferred_university || "Partner University",
           city: lead.city || "Nepal",
-          counselor_name: lead.counselor_name || "Education Sansar Advisor",
-          counselor_email: lead.counselor_email || "admissions@educationsansar.com",
+          counselor_name: lead.counselor_name || "Gems Group Services Advisor",
+          counselor_email: lead.counselor_email || "admissions@gemsgroupservices.com",
           counselor_phone: lead.counselor_phone || "+91 98100 12345",
           application_id: "APP-" + lead.id.substring(0, 8).toUpperCase(),
           deadline: "30th November 2026",
           portal_url: "https://education-sansar-crm.vercel.app",
-          company_name: "Education Sansar",
+          company_name: "Gems Group Services",
           year: "2026"
         };
         const resolvedSubject = resolveMergeTags(params.subject, mergeVars);
@@ -5151,7 +5153,7 @@ function sendBulkEmailCampaign(params) {
           msgId,
           lead.id,
           lead.email,
-          params.sent_by || "Education Sansar Admissions",
+          params.sent_by || "Gems Group Services Admissions",
           validTemplateId,
           resolvedBody,
           metadata,
@@ -5243,7 +5245,7 @@ function ensureInitialCourseEmailTemplatesSeed() {
       target_universities: ["Sharda University", "Chandigarh University", "Parul University"],
       content: `Dear {{student_name}},
 
-Namaste! Greetings from Education Sansar.
+Namaste! Greetings from Gems Group Services.
 
 We have reviewed your profile and academic interests for {{preferred_course}} at {{preferred_university}}. Based on your academic background, you qualify for an Exclusive Nepal Merit Scholarship (up to 50% tuition fee waiver) for the 2026 Academic Batch.
 
@@ -5264,7 +5266,7 @@ Feel free to reply directly to this email or connect with your advisor on WhatsA
 Warm Regards,
 {{counselor_name}}
 Senior Admissions Advisor
-Education Sansar | Sector 94, Noida
+Gems Group Services | Sector 94, Noida
 Hotline: +91 98100 12345 / +977 98012 34567`
     },
     {
@@ -5280,7 +5282,7 @@ Hotline: +91 98100 12345 / +977 98012 34567`
 
 Congratulations on taking the first step toward your medical career!
 
-We are pleased to guide you regarding admissions for {{preferred_course}} at {{preferred_university}}. As an authorized recruitment partner, Education Sansar assists you through NMC / WHO recognized institutions with clinical hospital training.
+We are pleased to guide you regarding admissions for {{preferred_course}} at {{preferred_university}}. As an authorized recruitment partner, Gems Group Services assists you through NMC / WHO recognized institutions with clinical hospital training.
 
 Essential Admission Overview:
 - Course: {{preferred_course}}
@@ -5297,7 +5299,7 @@ Please reply with your latest academic transcripts and NEET scorecard to finaliz
 
 Best Wishes,
 Medical Admissions Advisory Board
-Education Sansar`
+Gems Group Services`
     },
     {
       id: "tmpl-mba-business",
@@ -5325,7 +5327,7 @@ Connect with your personal counselor {{counselor_name}} ({{counselor_phone}}) or
 
 Sincerely,
 Admissions Directorate
-Education Sansar`
+Gems Group Services`
     },
     {
       id: "tmpl-fee-deadline",
@@ -5351,7 +5353,7 @@ If you have already transferred the fee, please share the deposit voucher with {
 
 Sincerely,
 Accounts & Student Services
-Education Sansar`
+Gems Group Services`
     }
   ];
   for (const t of templates) {
@@ -5557,16 +5559,16 @@ apiRouter.post("/auth/login", async (req, res) => {
       }
     }
     if (!user && (identifier === "admin" || identifier === "superadmin" || identifier.includes("admin@"))) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'admin@educationsansar.com' AND is_active = 1").get();
+      user = db.prepare("SELECT * FROM users WHERE (email = 'admin@gemsgroupservices.com' OR email = 'admin@educationsansar.com') AND is_active = 1").get();
     }
     if (!user && identifier.includes("aarav")) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'aarav@educationsansar.com' AND is_active = 1").get();
+      user = db.prepare("SELECT * FROM users WHERE (email = 'aarav@gemsgroupservices.com' OR email = 'aarav@educationsansar.com') AND is_active = 1").get();
     }
     if (!user && identifier.includes("priya")) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'priya@educationsansar.com' AND is_active = 1").get();
+      user = db.prepare("SELECT * FROM users WHERE (email = 'priya@gemsgroupservices.com' OR email = 'priya@educationsansar.com') AND is_active = 1").get();
     }
     if (!user && identifier.includes("sunil")) {
-      user = db.prepare("SELECT * FROM users WHERE email = 'sunil@educationsansar.com' AND is_active = 1").get();
+      user = db.prepare("SELECT * FROM users WHERE (email = 'sunil@gemsgroupservices.com' OR email = 'sunil@educationsansar.com') AND is_active = 1").get();
     }
     if (!user && identifier.includes("counselor")) {
       user = db.prepare("SELECT * FROM users WHERE role = 'Counselor' AND is_active = 1 LIMIT 1").get();
@@ -7583,7 +7585,7 @@ apiRouter.get("/export/:entity", (req, res) => {
       (l) => `"${l.lead_id}","${l.student_name}","${l.phone}","${l.whatsapp_number}","${l.email}","${l.city}","${l.country}","${l.preferred_course}","${l.preferred_university}","${l.lead_status}","${l.lead_temperature}","${l.assigned_counselor_name || "Unassigned"}","${l.lead_source}","${l.created_at}"`
     ).join("\n");
     res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="education_sansar_leads.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="gems_group_services_leads.csv"');
     return res.send(csvHeader + csvRows);
   }
   if (entity === "students") {
@@ -7593,7 +7595,7 @@ apiRouter.get("/export/:entity", (req, res) => {
       (s) => `"${s.student_id}","${s.student_name}","${s.phone}","${s.email}","${s.university}","${s.course}","${s.admission_date}",${s.fee_paid},"${s.counselor_name || ""}","${s.city}","${s.country}"`
     ).join("\n");
     res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="education_sansar_students.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="gems_group_services_students.csv"');
     return res.send(csvHeader + csvRows);
   }
   if (entity === "applications") {
@@ -7603,7 +7605,7 @@ apiRouter.get("/export/:entity", (req, res) => {
       (a) => `"${a.application_id}","${a.student_name}","${a.university_name}","${a.course_name}","${a.application_date}","${a.application_status}",${a.application_fee},"${a.payment_status}","${a.counselor_name || ""}"`
     ).join("\n");
     res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", 'attachment; filename="education_sansar_applications.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="gems_group_services_applications.csv"');
     return res.send(csvHeader + csvRows);
   }
   res.status(400).json({ error: "Unknown export entity" });
@@ -8088,7 +8090,7 @@ init_database();
 // server/db/seed.ts
 init_database();
 function seedDatabase() {
-  console.log("\u{1F331} Initializing clean Education Sansar CRM database schema & Super Admin...");
+  console.log("\u{1F331} Initializing clean Gems Group Services CRM database schema & Super Admin...");
   const runTx = db.transaction(() => {
     const insertRole = db.prepare("INSERT OR IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)");
     const roles = [
@@ -8109,7 +8111,7 @@ function seedDatabase() {
     insertUser.run(
       "u-super",
       "System Administrator",
-      "admin@educationsansar.com",
+      "admin@gemsgroupservices.com",
       "admin123",
       "Super Admin",
       "+977 9801234567",
@@ -8126,7 +8128,7 @@ function seedDatabase() {
         "WhatsApp",
         "WELCOME",
         null,
-        "Namaste {{student_name}}! Welcome to Education Sansar. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!",
+        "Namaste {{student_name}}! Welcome to Gems Group Services. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!",
         '["student_name", "preferred_course", "preferred_university", "counselor_name", "counselor_phone"]',
         1
       ],
@@ -8136,7 +8138,7 @@ function seedDatabase() {
         "WhatsApp",
         "COUNSELOR_INTRO",
         null,
-        "Hello {{student_name}}, this is {{counselor_name}} from Education Sansar. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?",
+        "Hello {{student_name}}, this is {{counselor_name}} from Gems Group Services. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?",
         '["student_name", "counselor_name", "preferred_university", "follow_up_time"]',
         1
       ],
@@ -8176,7 +8178,7 @@ function seedDatabase() {
         "WhatsApp",
         "ADMISSION_CONFIRMATION",
         null,
-        "Hearty Congratulations {{student_name}}! Your admission to {{preferred_course}} at {{preferred_university}} is formally confirmed. Welcome to the Education Sansar family. Your Student ID is {{student_id}}.",
+        "Hearty Congratulations {{student_name}}! Your admission to {{preferred_course}} at {{preferred_university}} is formally confirmed. Welcome to the Gems Group Services family. Your Student ID is {{student_id}}.",
         '["student_name", "preferred_course", "preferred_university", "student_id"]',
         1
       ]
@@ -8193,7 +8195,7 @@ function seedDatabase() {
       "Meta Lead Ads",
       0,
       "NOT CONNECTED",
-      JSON.stringify({ webhookUrl: "/api/integrations/meta/webhook", verifyToken: "education_sansar_meta_verify_token_2026", pageId: "", appId: "" }),
+      JSON.stringify({ webhookUrl: "/api/integrations/meta/webhook", verifyToken: "gems_group_services_meta_verify_token_2026", pageId: "", appId: "" }),
       null
     );
     insertIntegration.run(
@@ -8201,7 +8203,7 @@ function seedDatabase() {
       "WhatsApp Business API",
       0,
       "NOT CONNECTED",
-      JSON.stringify({ phoneNumberId: "", wabaId: "", defaultSender: "Education Sansar" }),
+      JSON.stringify({ phoneNumberId: "", wabaId: "", defaultSender: "Gems Group Services" }),
       null
     );
     insertIntegration.run(
@@ -8209,7 +8211,7 @@ function seedDatabase() {
       "Transactional Email (Resend/SendGrid)",
       0,
       "NOT CONNECTED",
-      JSON.stringify({ fromEmail: "admissions@educationsansar.com" }),
+      JSON.stringify({ fromEmail: "admissions@gemsgroupservices.com" }),
       null
     );
     insertIntegration.run(
@@ -8228,10 +8230,10 @@ function seedDatabase() {
       null
     );
     const insertSetting = db.prepare("INSERT OR REPLACE INTO settings (key, value, description) VALUES (?, ?, ?)");
-    insertSetting.run("company_name", "Education Sansar", "Official company legal name");
+    insertSetting.run("company_name", "Gems Group Services", "Official company legal name");
     insertSetting.run("company_address", "Sector 94, Noida, Uttar Pradesh 201313", "Main office address");
     insertSetting.run("company_phone", "+91 98100 12345 / +977 98012 34567", "Official hotline phone");
-    insertSetting.run("company_email", "admissions@educationsansar.com", "Official admissions email");
+    insertSetting.run("company_email", "admissions@gemsgroupservices.com", "Official admissions email");
     insertSetting.run("assignment_mode", "Round Robin", "Current lead assignment strategy: Round Robin, City Based, University Based, Course Based, Manual");
     insertSetting.run("round_robin_pointer", "0", "Index pointer for round-robin counselor distribution");
     insertSetting.run("duplicate_check_strictness", "Strict", "Duplicate detection rules (Phone, WhatsApp, Email, FB Lead ID)");
@@ -8254,7 +8256,7 @@ function seedDatabase() {
       insertUser2.run(
         "u-counselor-1",
         "Suman Sharma",
-        "counselor@educationsansar.com",
+        "counselor@gemsgroupservices.com",
         "counselor123",
         "Counselor",
         "+977 9801122334",
@@ -8265,7 +8267,7 @@ function seedDatabase() {
         "u-counselor-1",
         "Suman Sharma",
         "suman",
-        "counselor@educationsansar.com",
+        "counselor@gemsgroupservices.com",
         "+977 9801122334",
         "Counselor",
         "Nepal & North India",
@@ -8279,7 +8281,7 @@ function seedDatabase() {
       insertUser2.run(
         "u-counselor-2",
         "Dr. Anjali Thapa",
-        "medical@educationsansar.com",
+        "medical@gemsgroupservices.com",
         "counselor123",
         "Counselor",
         "+977 9812233445",
@@ -8290,7 +8292,7 @@ function seedDatabase() {
         "u-counselor-2",
         "Dr. Anjali Thapa",
         "anjali",
-        "medical@educationsansar.com",
+        "medical@gemsgroupservices.com",
         "+977 9812233445",
         "Counselor",
         "Nepal & Bangladesh",
@@ -8304,7 +8306,7 @@ function seedDatabase() {
       insertUser2.run(
         "u-marketing-1",
         "Rajesh Verma",
-        "marketing@educationsansar.com",
+        "marketing@gemsgroupservices.com",
         "marketing123",
         "Marketing Manager",
         "+977 9823344556",
@@ -8315,7 +8317,7 @@ function seedDatabase() {
         "u-marketing-1",
         "Rajesh Verma",
         "rajesh",
-        "marketing@educationsansar.com",
+        "marketing@gemsgroupservices.com",
         "+977 9823344556",
         "Marketing Manager",
         "Digital & Field Campaigns",
@@ -8329,7 +8331,7 @@ function seedDatabase() {
       insertUser2.run(
         "u-finance-1",
         "Pooja Karki",
-        "finance@educationsansar.com",
+        "finance@gemsgroupservices.com",
         "finance123",
         "Accountant",
         "+977 9834455667",
@@ -8340,7 +8342,7 @@ function seedDatabase() {
         "u-finance-1",
         "Pooja Karki",
         "pooja",
-        "finance@educationsansar.com",
+        "finance@gemsgroupservices.com",
         "+977 9834455667",
         "Accountant",
         "General Accounts",
@@ -8398,7 +8400,7 @@ function seedDatabase() {
         "u-counselor-1",
         "c-counselor-1",
         "Suman Sharma",
-        "counselor@educationsansar.com",
+        "counselor@gemsgroupservices.com",
         "+977 9801122334",
         "Counseling",
         "Senior Admission Counselor",
@@ -8417,7 +8419,7 @@ function seedDatabase() {
         "u-counselor-2",
         "c-counselor-2",
         "Dr. Anjali Thapa",
-        "medical@educationsansar.com",
+        "medical@gemsgroupservices.com",
         "+977 9812233445",
         "Counseling",
         "Medical Admissions Advisor",
@@ -8436,7 +8438,7 @@ function seedDatabase() {
         "u-marketing-1",
         "c-marketing-1",
         "Rajesh Verma",
-        "marketing@educationsansar.com",
+        "marketing@gemsgroupservices.com",
         "+977 9823344556",
         "Marketing",
         "Marketing Manager",
@@ -8455,7 +8457,7 @@ function seedDatabase() {
         "u-finance-1",
         "c-finance-1",
         "Pooja Karki",
-        "finance@educationsansar.com",
+        "finance@gemsgroupservices.com",
         "+977 9834455667",
         "Finance & Accounts",
         "Accounts Officer",
@@ -8531,7 +8533,7 @@ function seedDatabase() {
         "TXN-2026-0004",
         "EXPENSE",
         "Office Rent",
-        "Education Sansar head office monthly rental and high-speed internet",
+        "Gems Group Services head office monthly rental and high-speed internet",
         4e4,
         "NPR",
         "2026-10-01",
@@ -8587,7 +8589,7 @@ app.use("/api", apiRouter);
 var handleHealth = (req, res) => {
   res.json({
     status: "healthy",
-    system: "Education Sansar CRM Backend",
+    system: "Gems Group Services CRM Backend",
     version: "1.0.0",
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
@@ -8607,9 +8609,9 @@ app.get("*", (req, res, next) => {
   res.status(503).send(`
     <!DOCTYPE html>
     <html>
-      <head><title>Education Sansar CRM</title><meta http-equiv="refresh" content="3"></head>
+      <head><title>Gems Group Services CRM</title><meta http-equiv="refresh" content="3"></head>
       <body style="font-family:sans-serif;text-align:center;padding:50px;">
-        <h2>Education Sansar CRM is loading...</h2>
+        <h2>Gems Group Services CRM is loading...</h2>
         <p>Please wait while the service starts up.</p>
       </body>
     </html>
@@ -8634,7 +8636,7 @@ if (!isVercel2) {
     }
   }, 15 * 60 * 1e3);
   const server = app.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`\u{1F680} Education Sansar CRM Server is LIVE on port ${PORT}:`);
+    console.log(`\u{1F680} Gems Group Services CRM Server is LIVE on port ${PORT}:`);
     console.log(`   \u279C Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
     console.log(`\u{1F4CD} Office: Sector 94, Noida, Uttar Pradesh 201313`);
   });

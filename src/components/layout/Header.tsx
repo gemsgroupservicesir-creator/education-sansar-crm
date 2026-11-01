@@ -204,7 +204,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {user?.name || 'Administrator'}
               </div>
               <div className="text-[10px] text-slate-500 leading-tight truncate max-w-[120px]">
-                {user?.email || 'admin@educationsansar.com'}
+                {user?.email || 'admin@gemsgroupservices.com'}
               </div>
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />

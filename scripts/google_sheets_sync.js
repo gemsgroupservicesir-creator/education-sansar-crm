@@ -1,5 +1,5 @@
 /**
- * Education Sansar CRM - Google Sheets Real-Time Inbound Sync Script
+ * Gems Group Services CRM - Google Sheets Real-Time Inbound Sync Script
  * 
  * Standard Column Headers (Row 1):
  * 1. full_name
@@ -96,7 +96,7 @@ function testSendLastRow() {
 }
 
 /**
- * Core function to send row data to Education Sansar CRM webhook
+ * Core function to send row data to Gems Group Services CRM webhook
  */
 function sendRowToCRM(sheet, rowNumber) {
   const lastCol = sheet.getLastColumn();

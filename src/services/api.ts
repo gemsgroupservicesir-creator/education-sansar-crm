@@ -7,7 +7,7 @@ export async function fetchJson<T>(url: string, options?: RequestInit): Promise<
   let userRole = '';
   let userId = '';
   try {
-    const saved = localStorage.getItem('sansar_user');
+    const saved = localStorage.getItem('gems_user') || localStorage.getItem('sansar_user');
     if (saved) {
       const u = JSON.parse(saved);
       userRole = u.role || '';

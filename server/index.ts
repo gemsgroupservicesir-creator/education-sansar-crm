@@ -48,7 +48,7 @@ app.use('/api', apiRouter);
 const handleHealth = (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
-    system: 'Education Sansar CRM Backend',
+    system: 'Gems Group Services CRM Backend',
     version: '1.0.0',
     timestamp: new Date().toISOString()
   });
@@ -71,9 +71,9 @@ app.get('*', (req: Request, res: Response, next: NextFunction) => {
   res.status(503).send(`
     <!DOCTYPE html>
     <html>
-      <head><title>Education Sansar CRM</title><meta http-equiv="refresh" content="3"></head>
+      <head><title>Gems Group Services CRM</title><meta http-equiv="refresh" content="3"></head>
       <body style="font-family:sans-serif;text-align:center;padding:50px;">
-        <h2>Education Sansar CRM is loading...</h2>
+        <h2>Gems Group Services CRM is loading...</h2>
         <p>Please wait while the service starts up.</p>
       </body>
     </html>
@@ -104,7 +104,7 @@ if (!isVercel) {
   }, 15 * 60 * 1000);
 
   const server = app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`🚀 Education Sansar CRM Server is LIVE on port ${PORT}:`);
+    console.log(`🚀 Gems Group Services CRM Server is LIVE on port ${PORT}:`);
     console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);
     console.log(`📍 Office: Sector 94, Noida, Uttar Pradesh 201313`);
   });

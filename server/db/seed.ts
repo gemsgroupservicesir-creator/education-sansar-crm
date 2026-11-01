@@ -1,7 +1,7 @@
 import { db, initDatabase, logAudit } from './database.ts';
 
 export function seedDatabase() {
-  console.log('🌱 Initializing clean Education Sansar CRM database schema & Super Admin...');
+  console.log('🌱 Initializing clean Gems Group Services CRM database schema & Super Admin...');
 
   const runTx = db.transaction(() => {
     // 1. Roles
@@ -26,7 +26,7 @@ export function seedDatabase() {
     insertUser.run(
       'u-super',
       'System Administrator',
-      'admin@educationsansar.com',
+      'admin@gemsgroupservices.com',
       'admin123',
       'Super Admin',
       '+977 9801234567',
@@ -42,12 +42,12 @@ export function seedDatabase() {
     const templates = [
       [
         'tmpl-1', 'Lead Welcome & Introduction', 'WhatsApp', 'WELCOME', null,
-        'Namaste {{student_name}}! Welcome to Education Sansar. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!',
+        'Namaste {{student_name}}! Welcome to Gems Group Services. We have received your inquiry for {{preferred_course}} at {{preferred_university}}. Your dedicated counselor is {{counselor_name}} (Phone: {{counselor_phone}}). We look forward to guiding you through admissions and scholarships!',
         '["student_name", "preferred_course", "preferred_university", "counselor_name", "counselor_phone"]', 1
       ],
       [
         'tmpl-2', 'Counselor Personal Introduction', 'WhatsApp', 'COUNSELOR_INTRO', null,
-        'Hello {{student_name}}, this is {{counselor_name}} from Education Sansar. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?',
+        'Hello {{student_name}}, this is {{counselor_name}} from Gems Group Services. I will be your official admission advisor for {{preferred_university}}. Are you free for a 10-minute briefing today at {{follow_up_time}}?',
         '["student_name", "counselor_name", "preferred_university", "follow_up_time"]', 1
       ],
       [
@@ -67,7 +67,7 @@ export function seedDatabase() {
       ],
       [
         'tmpl-6', 'Admission Confirmed Welcome', 'WhatsApp', 'ADMISSION_CONFIRMATION', null,
-        'Hearty Congratulations {{student_name}}! Your admission to {{preferred_course}} at {{preferred_university}} is formally confirmed. Welcome to the Education Sansar family. Your Student ID is {{student_id}}.',
+        'Hearty Congratulations {{student_name}}! Your admission to {{preferred_course}} at {{preferred_university}} is formally confirmed. Welcome to the Gems Group Services family. Your Student ID is {{student_id}}.',
         '["student_name", "preferred_course", "preferred_university", "student_id"]', 1
       ]
     ];
@@ -82,17 +82,17 @@ export function seedDatabase() {
     `);
     insertIntegration.run(
       'int-meta', 'Meta Lead Ads', 0, 'NOT CONNECTED',
-      JSON.stringify({ webhookUrl: '/api/integrations/meta/webhook', verifyToken: 'education_sansar_meta_verify_token_2026', pageId: '', appId: '' }),
+      JSON.stringify({ webhookUrl: '/api/integrations/meta/webhook', verifyToken: 'gems_group_services_meta_verify_token_2026', pageId: '', appId: '' }),
       null
     );
     insertIntegration.run(
       'int-wa', 'WhatsApp Business API', 0, 'NOT CONNECTED',
-      JSON.stringify({ phoneNumberId: '', wabaId: '', defaultSender: 'Education Sansar' }),
+      JSON.stringify({ phoneNumberId: '', wabaId: '', defaultSender: 'Gems Group Services' }),
       null
     );
     insertIntegration.run(
       'int-email', 'Transactional Email (Resend/SendGrid)', 0, 'NOT CONNECTED',
-      JSON.stringify({ fromEmail: 'admissions@educationsansar.com' }),
+      JSON.stringify({ fromEmail: 'admissions@gemsgroupservices.com' }),
       null
     );
     insertIntegration.run(
@@ -110,10 +110,10 @@ export function seedDatabase() {
 
     // 5. System Settings
     const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value, description) VALUES (?, ?, ?)');
-    insertSetting.run('company_name', 'Education Sansar', 'Official company legal name');
+    insertSetting.run('company_name', 'Gems Group Services', 'Official company legal name');
     insertSetting.run('company_address', 'Sector 94, Noida, Uttar Pradesh 201313', 'Main office address');
     insertSetting.run('company_phone', '+91 98100 12345 / +977 98012 34567', 'Official hotline phone');
-    insertSetting.run('company_email', 'admissions@educationsansar.com', 'Official admissions email');
+    insertSetting.run('company_email', 'admissions@gemsgroupservices.com', 'Official admissions email');
     insertSetting.run('assignment_mode', 'Round Robin', 'Current lead assignment strategy: Round Robin, City Based, University Based, Course Based, Manual');
     insertSetting.run('round_robin_pointer', '0', 'Index pointer for round-robin counselor distribution');
     insertSetting.run('duplicate_check_strictness', 'Strict', 'Duplicate detection rules (Phone, WhatsApp, Email, FB Lead ID)');
@@ -138,11 +138,11 @@ export function seedDatabase() {
 
       // Staff 1: Suman Sharma (Engineering & Tech Specialist)
       insertUser.run(
-        'u-counselor-1', 'Suman Sharma', 'counselor@educationsansar.com', 'counselor123', 'Counselor', '+977 9801122334',
+        'u-counselor-1', 'Suman Sharma', 'counselor@gemsgroupservices.com', 'counselor123', 'Counselor', '+977 9801122334',
         JSON.stringify(['dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline', 'applications', 'students', 'universities', 'documents'])
       );
       insertCounselor.run(
-        'c-counselor-1', 'u-counselor-1', 'Suman Sharma', 'suman', 'counselor@educationsansar.com', '+977 9801122334',
+        'c-counselor-1', 'u-counselor-1', 'Suman Sharma', 'suman', 'counselor@gemsgroupservices.com', '+977 9801122334',
         'Counselor', 'Nepal & North India', JSON.stringify(['Kathmandu', 'Pokhara', 'Janakpur']),
         100, '2025-01-15', JSON.stringify(['B.Tech', 'BE', 'BCA', 'Computer Science', 'Data Science', 'IT']),
         JSON.stringify(['Sharda University', 'Chandigarh University', 'Parul University']), 25
@@ -150,11 +150,11 @@ export function seedDatabase() {
 
       // Staff 2: Dr. Anjali Thapa (Medical & Health Sciences Advisor)
       insertUser.run(
-        'u-counselor-2', 'Dr. Anjali Thapa', 'medical@educationsansar.com', 'counselor123', 'Counselor', '+977 9812233445',
+        'u-counselor-2', 'Dr. Anjali Thapa', 'medical@gemsgroupservices.com', 'counselor123', 'Counselor', '+977 9812233445',
         JSON.stringify(['dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline', 'applications', 'students', 'universities', 'documents'])
       );
       insertCounselor.run(
-        'c-counselor-2', 'u-counselor-2', 'Dr. Anjali Thapa', 'anjali', 'medical@educationsansar.com', '+977 9812233445',
+        'c-counselor-2', 'u-counselor-2', 'Dr. Anjali Thapa', 'anjali', 'medical@gemsgroupservices.com', '+977 9812233445',
         'Counselor', 'Nepal & Bangladesh', JSON.stringify(['Kathmandu', 'Biratnagar', 'Dharan']),
         80, '2025-02-01', JSON.stringify(['MBBS', 'BDS', 'B.Sc Nursing', 'Pharmacy', 'BAMS', 'MD']),
         JSON.stringify(['Parul University', 'Graphic Era University', 'Sharda University']), 20
@@ -162,22 +162,22 @@ export function seedDatabase() {
 
       // Staff 3: Rajesh Verma (Marketing Lead)
       insertUser.run(
-        'u-marketing-1', 'Rajesh Verma', 'marketing@educationsansar.com', 'marketing123', 'Marketing Manager', '+977 9823344556',
+        'u-marketing-1', 'Rajesh Verma', 'marketing@gemsgroupservices.com', 'marketing123', 'Marketing Manager', '+977 9823344556',
         JSON.stringify(['dashboard', 'leads_view', 'leads_create', 'campaigns', 'reports', 'integrations'])
       );
       insertCounselor.run(
-        'c-marketing-1', 'u-marketing-1', 'Rajesh Verma', 'rajesh', 'marketing@educationsansar.com', '+977 9823344556',
+        'c-marketing-1', 'u-marketing-1', 'Rajesh Verma', 'rajesh', 'marketing@gemsgroupservices.com', '+977 9823344556',
         'Marketing Manager', 'Digital & Field Campaigns', JSON.stringify(['Kathmandu', 'Chitwan']),
         50, '2025-01-10', '[]', '[]', 10
       );
 
       // Staff 4: Pooja Karki (Accounts & Finance Specialist)
       insertUser.run(
-        'u-finance-1', 'Pooja Karki', 'finance@educationsansar.com', 'finance123', 'Accountant', '+977 9834455667',
+        'u-finance-1', 'Pooja Karki', 'finance@gemsgroupservices.com', 'finance123', 'Accountant', '+977 9834455667',
         JSON.stringify(['dashboard', 'students', 'finance_management', 'hr_management', 'reports'])
       );
       insertCounselor.run(
-        'c-finance-1', 'u-finance-1', 'Pooja Karki', 'pooja', 'finance@educationsansar.com', '+977 9834455667',
+        'c-finance-1', 'u-finance-1', 'Pooja Karki', 'pooja', 'finance@gemsgroupservices.com', '+977 9834455667',
         'Accountant', 'General Accounts', '[]',
         30, '2025-01-20', '[]', '[]', 10
       );
@@ -217,22 +217,22 @@ export function seedDatabase() {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       insertEmp.run(
-        'emp-1', 'EMP-1001', 'u-counselor-1', 'c-counselor-1', 'Suman Sharma', 'counselor@educationsansar.com', '+977 9801122334',
+        'emp-1', 'EMP-1001', 'u-counselor-1', 'c-counselor-1', 'Suman Sharma', 'counselor@gemsgroupservices.com', '+977 9801122334',
         'Counseling', 'Senior Admission Counselor', 'Full-time', '2025-01-15', 55000, 'NPR',
         'Nabil Bank Ltd', '01200175001234', 'PAN-987654321', 'Active'
       );
       insertEmp.run(
-        'emp-2', 'EMP-1002', 'u-counselor-2', 'c-counselor-2', 'Dr. Anjali Thapa', 'medical@educationsansar.com', '+977 9812233445',
+        'emp-2', 'EMP-1002', 'u-counselor-2', 'c-counselor-2', 'Dr. Anjali Thapa', 'medical@gemsgroupservices.com', '+977 9812233445',
         'Counseling', 'Medical Admissions Advisor', 'Full-time', '2025-02-01', 65000, 'NPR',
         'Global IME Bank', '2901010004567', 'PAN-876543210', 'Active'
       );
       insertEmp.run(
-        'emp-3', 'EMP-1003', 'u-marketing-1', 'c-marketing-1', 'Rajesh Verma', 'marketing@educationsansar.com', '+977 9823344556',
+        'emp-3', 'EMP-1003', 'u-marketing-1', 'c-marketing-1', 'Rajesh Verma', 'marketing@gemsgroupservices.com', '+977 9823344556',
         'Marketing', 'Marketing Manager', 'Full-time', '2025-01-10', 60000, 'NPR',
         'NIC Asia Bank', '1092003847291', 'PAN-765432109', 'Active'
       );
       insertEmp.run(
-        'emp-4', 'EMP-1004', 'u-finance-1', 'c-finance-1', 'Pooja Karki', 'finance@educationsansar.com', '+977 9834455667',
+        'emp-4', 'EMP-1004', 'u-finance-1', 'c-finance-1', 'Pooja Karki', 'finance@gemsgroupservices.com', '+977 9834455667',
         'Finance & Accounts', 'Accounts Officer', 'Full-time', '2025-01-20', 48000, 'NPR',
         'Siddhartha Bank', '003150098234', 'PAN-654321098', 'Active'
       );
@@ -273,7 +273,7 @@ export function seedDatabase() {
       );
       insertTx.run(
         'tx-4', 'TXN-2026-0004', 'EXPENSE', 'Office Rent',
-        'Education Sansar head office monthly rental and high-speed internet',
+        'Gems Group Services head office monthly rental and high-speed internet',
         40000, 'NPR', '2026-10-01', 'Bank Transfer', 'RENT-OCT-2026', 'Completed', 'Pooja Karki'
       );
     }

@@ -177,12 +177,12 @@ export function previewEmailResolution(subject: string, content: string, sampleD
     preferred_university: 'Sharda University',
     city: 'Kathmandu',
     counselor_name: 'Suman Sharma',
-    counselor_email: 'counselor@educationsansar.com',
+    counselor_email: 'counselor@gemsgroupservices.com',
     counselor_phone: '+977 9801122334',
     application_id: 'APP-2026-0812',
     deadline: '15th November 2026',
     portal_url: 'https://education-sansar-crm.vercel.app',
-    company_name: 'Education Sansar',
+    company_name: 'Gems Group Services',
     year: '2026'
   };
 
@@ -372,13 +372,13 @@ export function sendBulkEmailCampaign(params: BulkSendParams): {
           preferred_course: lead.preferred_course || 'Chosen Program',
           preferred_university: lead.preferred_university || 'Partner University',
           city: lead.city || 'Nepal',
-          counselor_name: lead.counselor_name || 'Education Sansar Advisor',
-          counselor_email: lead.counselor_email || 'admissions@educationsansar.com',
+          counselor_name: lead.counselor_name || 'Gems Group Services Advisor',
+          counselor_email: lead.counselor_email || 'admissions@gemsgroupservices.com',
           counselor_phone: lead.counselor_phone || '+91 98100 12345',
           application_id: 'APP-' + lead.id.substring(0, 8).toUpperCase(),
           deadline: '30th November 2026',
           portal_url: 'https://education-sansar-crm.vercel.app',
-          company_name: 'Education Sansar',
+          company_name: 'Gems Group Services',
           year: '2026'
         };
 
@@ -397,7 +397,7 @@ export function sendBulkEmailCampaign(params: BulkSendParams): {
           msgId,
           lead.id,
           lead.email,
-          params.sent_by || 'Education Sansar Admissions',
+          params.sent_by || 'Gems Group Services Admissions',
           validTemplateId,
           resolvedBody,
           metadata,
@@ -505,7 +505,7 @@ export function ensureInitialCourseEmailTemplatesSeed() {
       target_universities: ['Sharda University', 'Chandigarh University', 'Parul University'],
       content: `Dear {{student_name}},
 
-Namaste! Greetings from Education Sansar.
+Namaste! Greetings from Gems Group Services.
 
 We have reviewed your profile and academic interests for {{preferred_course}} at {{preferred_university}}. Based on your academic background, you qualify for an Exclusive Nepal Merit Scholarship (up to 50% tuition fee waiver) for the 2026 Academic Batch.
 
@@ -526,7 +526,7 @@ Feel free to reply directly to this email or connect with your advisor on WhatsA
 Warm Regards,
 {{counselor_name}}
 Senior Admissions Advisor
-Education Sansar | Sector 94, Noida
+Gems Group Services | Sector 94, Noida
 Hotline: +91 98100 12345 / +977 98012 34567`
     },
     {
@@ -542,7 +542,7 @@ Hotline: +91 98100 12345 / +977 98012 34567`
 
 Congratulations on taking the first step toward your medical career!
 
-We are pleased to guide you regarding admissions for {{preferred_course}} at {{preferred_university}}. As an authorized recruitment partner, Education Sansar assists you through NMC / WHO recognized institutions with clinical hospital training.
+We are pleased to guide you regarding admissions for {{preferred_course}} at {{preferred_university}}. As an authorized recruitment partner, Gems Group Services assists you through NMC / WHO recognized institutions with clinical hospital training.
 
 Essential Admission Overview:
 - Course: {{preferred_course}}
@@ -559,7 +559,7 @@ Please reply with your latest academic transcripts and NEET scorecard to finaliz
 
 Best Wishes,
 Medical Admissions Advisory Board
-Education Sansar`
+Gems Group Services`
     },
     {
       id: 'tmpl-mba-business',
@@ -587,7 +587,7 @@ Connect with your personal counselor {{counselor_name}} ({{counselor_phone}}) or
 
 Sincerely,
 Admissions Directorate
-Education Sansar`
+Gems Group Services`
     },
     {
       id: 'tmpl-fee-deadline',
@@ -613,7 +613,7 @@ If you have already transferred the fee, please share the deposit voucher with {
 
 Sincerely,
 Accounts & Student Services
-Education Sansar`
+Gems Group Services`
     }
   ];
 

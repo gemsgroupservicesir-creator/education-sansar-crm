@@ -23,7 +23,7 @@ export const IntegrationsPage: React.FC = () => {
   const [metaFormConfig, setMetaFormConfig] = useState({
     pageAccessToken: '',
     pageId: '',
-    verifyToken: 'education_sansar_meta_verify_2026',
+    verifyToken: 'gems_group_services_meta_verify_2026',
     appSecret: '',
     autoAssign: true,
   });
@@ -50,7 +50,7 @@ export const IntegrationsPage: React.FC = () => {
   const [waTestData, setWaTestData] = useState({
     recipientPhone: '+977 9841234567',
     templateName: 'lead_welcome_nepal',
-    params: 'Aayush Shrestha,B.Tech CSE,Suman Sharma,Education Sansar',
+    params: 'Aayush Shrestha,B.Tech CSE,Suman Sharma,Gems Group Services',
   });
   const [sendingWa, setSendingWa] = useState(false);
   const [waResult, setWaResult] = useState<any>(null);
@@ -165,7 +165,7 @@ export const IntegrationsPage: React.FC = () => {
             ...prev,
             pageAccessToken: parsed.pageAccessToken || '',
             pageId: parsed.pageId || '',
-            verifyToken: parsed.verifyToken || 'education_sansar_meta_verify_2026',
+            verifyToken: parsed.verifyToken || 'gems_group_services_meta_verify_2026',
             appSecret: parsed.appSecret || '',
             autoAssign: parsed.autoAssign ?? true,
           }));
@@ -481,7 +481,7 @@ export const IntegrationsPage: React.FC = () => {
   };
 
   const handleUseSampleSheet = () => {
-    setLiveSheetUrl('https://docs.google.com/spreadsheets/d/demo-google-sheet-sansar-2026/edit?usp=sharing');
+    setLiveSheetUrl('https://docs.google.com/spreadsheets/d/demo-google-sheet-gems-2026/edit?usp=sharing');
     setLiveSheetName('Leads 2026');
     addToast('Sample Google Sheet link loaded. Click "Connect & Preview Live Sheet"', 'info');
   };
@@ -1538,7 +1538,7 @@ export const IntegrationsPage: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 max-w-2xl">
-                  Connect Facebook &amp; Instagram Lead Ad Instant Forms directly to Education Sansar CRM—just like HubSpot. 
+                  Connect Facebook &amp; Instagram Lead Ad Instant Forms directly to Gems Group Services CRM—just like HubSpot. 
                   Student inquiries captured in real time, checked for duplicates, and instantly routed to the best counselor by Course &amp; University.
                 </p>
               </div>
@@ -1636,12 +1636,12 @@ export const IntegrationsPage: React.FC = () => {
                       <input
                         type="text"
                         readOnly
-                        value={metaFormConfig.verifyToken || 'education_sansar_meta_verify_2026'}
+                        value={metaFormConfig.verifyToken || 'gems_group_services_meta_verify_2026'}
                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 font-mono text-gray-800 text-[11px]"
                       />
                       <button
                         type="button"
-                        onClick={() => handleCopy(metaFormConfig.verifyToken || 'education_sansar_meta_verify_2026', 'meta_token')}
+                        onClick={() => handleCopy(metaFormConfig.verifyToken || 'gems_group_services_meta_verify_2026', 'meta_token')}
                         className="p-2 border border-gray-200 hover:bg-gray-100 rounded-xl text-gray-600 transition shrink-0"
                         title="Copy Token"
                       >
@@ -1753,7 +1753,7 @@ export const IntegrationsPage: React.FC = () => {
                         type="text"
                         value={metaFormConfig.verifyToken}
                         onChange={(e) => setMetaFormConfig({ ...metaFormConfig, verifyToken: e.target.value })}
-                        placeholder="education_sansar_meta_verify_2026"
+                        placeholder="gems_group_services_meta_verify_2026"
                         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono"
                       />
                     </div>
@@ -1939,7 +1939,7 @@ export const IntegrationsPage: React.FC = () => {
                         3
                       </span>
                       <p>
-                        Under Page Subscriptions, subscribe to the <strong>leadgen</strong> event for your Education Sansar Facebook Page.
+                        Under Page Subscriptions, subscribe to the <strong>leadgen</strong> event for your Gems Group Services Facebook Page.
                       </p>
                     </div>
 
@@ -2245,7 +2245,7 @@ export const IntegrationsPage: React.FC = () => {
               </div>
 
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                <span className="font-bold">Education Sansar Dispatch Logic:</span> When credentials are not yet saved, the CRM safely logs simulated WhatsApp dispatches to the database and creates counselor notifications.
+                <span className="font-bold">Gems Group Services Dispatch Logic:</span> When credentials are not yet saved, the CRM safely logs simulated WhatsApp dispatches to the database and creates counselor notifications.
               </div>
             </div>
           </div>
@@ -2340,7 +2340,7 @@ export const IntegrationsPage: React.FC = () => {
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold text-gray-900">Education Sansar Pre-Approved Message Templates</h3>
+              <h3 className="text-lg font-bold text-gray-900">Gems Group Services Pre-Approved Message Templates</h3>
               <p className="text-sm text-gray-500">
                 Official WhatsApp & SMS templates for student outreach across Nepal and India
               </p>

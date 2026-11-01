@@ -93,7 +93,7 @@ export const ReportsPage: React.FC = () => {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Executive Reports & Intelligence</h1>
               <p className="text-sm text-gray-500">
-                Education Sansar cross-market recruitment analytics & conversion metrics
+                Gems Group Services cross-market recruitment analytics & conversion metrics
               </p>
             </div>
           </div>
@@ -342,7 +342,7 @@ export const ReportsPage: React.FC = () => {
                             </div>
                             <div>
                               <div>{c.counselor_name}</div>
-                              <div className="text-xs text-gray-400 font-normal">{counselorMeta?.email || 'counselor@educationsansar.com'}</div>
+                              <div className="text-xs text-gray-400 font-normal">{counselorMeta?.email || 'counselor@gemsgroupservices.com'}</div>
                             </div>
                           </div>
                         </td>

@@ -1,7 +1,7 @@
-# Education Sansar CRM 🎓
+# Gems Group Services CRM 🎓
 ### Full-Stack Student Recruitment & Admission Management System
 
-**Education Sansar** is a specialized Education Counselling and University Admission Consultancy headquartered at:
+**Gems Group Services** is a specialized Education Counselling and University Admission Consultancy headquartered at:
 > **Office Address:** Sector 94, Noida, Uttar Pradesh 201313  
 > **Target Markets:** Nepal (Kathmandu, Birgunj, Janakpur, Biratnagar, Butwal, Bhairahawa, Lahan, Rajbiraj) & India (Delhi, Noida, Bangalore, Chennai, Mumbai, Pune).
 
@@ -9,7 +9,7 @@
 
 ## 🌟 Executive Summary & Architectural Overview
 
-Education Sansar CRM is an enterprise-grade, high-performance web CRM designed specifically for international and domestic education student recruitment workflows. It eliminates lead loss, prevents duplicate registrations across platforms, automates counselor workload balancing, and tracks prospective students from their initial Meta Lead Ad click all the way through counseling, university application, offer letter issuance, fee payment, and confirmed enrollment.
+Gems Group Services CRM is an enterprise-grade, high-performance web CRM designed specifically for international and domestic education student recruitment workflows. It eliminates lead loss, prevents duplicate registrations across platforms, automates counselor workload balancing, and tracks prospective students from their initial Meta Lead Ad click all the way through counseling, university application, offer letter issuance, fee payment, and confirmed enrollment.
 
 ### Key Highlights
 - **100% Original UI & Implementation:** Custom blue corporate identity (`#1E3A8A`, `#2563EB`, `#0284C7`), responsive layouts, intuitive workflows, zero third-party proprietary dependencies.
@@ -25,7 +25,7 @@ Education Sansar CRM is an enterprise-grade, high-performance web CRM designed s
 
 ## 🚀 1-Click Cloud Platforms Deployment
 
-Deploy Education Sansar CRM to the cloud in under 60 seconds with free HTTPS, automated builds, and zero infrastructure hassle:
+Deploy Gems Group Services CRM to the cloud in under 60 seconds with free HTTPS, automated builds, and zero infrastructure hassle:
 
 ### Option 1: 1-Click Deploy on Render
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
@@ -216,7 +216,7 @@ Visual board with stages:
 ---
 
 ## 🏢 Corporate Headquarters
-**Education Sansar**  
+**Gems Group Services**  
 Sector 94, Noida, Uttar Pradesh 201313  
-Admissions Desk: `admissions@educationsansar.com` | `+91 120 4567890`  
+Admissions Desk: `admissions@gemsgroupservices.com` | `+91 120 4567890`  
 *Guiding students across Nepal and India toward world-class higher education.*

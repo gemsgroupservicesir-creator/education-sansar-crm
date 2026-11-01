@@ -88,7 +88,7 @@ export const CommunicationsPage: React.FC = () => {
   const [subject, setSubject] = useState('Exclusive Admission Offer & Scholarship Details: {{preferred_course}} at {{preferred_university}}');
   const [content, setContent] = useState(`Dear {{student_name}},
 
-Greetings from Education Sansar!
+Greetings from Gems Group Services!
 
 We noticed your high interest in pursuing {{preferred_course}} at {{preferred_university}}. As an authorized admissions partner, we are pleased to inform you that merit-based scholarships and fast-track seat allotments are now open for the upcoming intake.
 
@@ -108,7 +108,7 @@ To confirm your provisional eligibility and scholarship tier before the deadline
 
 Warm regards,
 Admissions Directorate
-Education Sansar`);
+Gems Group Services`);
 
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<any>(null);
@@ -355,7 +355,7 @@ We have reserved your application profile for upcoming scholarship allocations. 
 
 Sincerely,
 Admissions Desk
-Education Sansar`);
+Gems Group Services`);
     setTemplateModalOpen(true);
   };
 

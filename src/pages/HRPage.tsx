@@ -829,7 +829,7 @@ export const HRPage: React.FC = () => {
                     required
                     value={empEmail}
                     onChange={(e) => setEmpEmail(e.target.value)}
-                    placeholder="ramesh@educationsansar.com"
+                    placeholder="ramesh@gemsgroupservices.com"
                     className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   />
                 </div>
@@ -1020,9 +1020,9 @@ export const HRPage: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
-                  ES
+                  GGS
                 </div>
-                <h3 className="text-sm font-bold text-slate-900">Education Sansar Consultancy</h3>
+                <h3 className="text-sm font-bold text-slate-900">Gems Group Services</h3>
               </div>
               <button onClick={() => setSelectedPaySlip(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
