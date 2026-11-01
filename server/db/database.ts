@@ -182,6 +182,7 @@ function runSafeMigrations() {
   } catch (e: any) {
     console.warn('[Migration Notice] bulk_email_campaigns table:', e.message);
   }
+  addColumnIfNotExists('bulk_email_campaigns', 'channel', "TEXT NOT NULL DEFAULT 'Email'");
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

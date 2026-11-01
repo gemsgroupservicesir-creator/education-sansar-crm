@@ -2947,34 +2947,36 @@ apiRouter.get('/email/templates', (req: Request, res: Response) => {
     const filters = {
       course: req.query.course as string,
       university: req.query.university as string,
-      category: req.query.category as string
+      category: req.query.category as string,
+      channel: req.query.channel as string
     };
     const templates = getEmailTemplates(filters);
     res.json(templates);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to fetch email templates' });
+    res.status(500).json({ error: err.message || 'Failed to fetch templates' });
   }
 });
 
 apiRouter.get('/email/filter-options', (req: Request, res: Response) => {
   try {
-    const options = getBulkEmailFilterOptions();
+    const channel = (req.query.channel as 'Email' | 'WhatsApp') || 'Email';
+    const options = getBulkEmailFilterOptions(channel);
     res.json(options);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to fetch email filter options' });
+    res.status(500).json({ error: err.message || 'Failed to fetch filter options' });
   }
 });
 
 apiRouter.post('/email/templates', (req: Request, res: Response) => {
   try {
-    const { name, subject, content } = req.body;
-    if (!name || !subject || !content) {
-      return res.status(400).json({ error: 'Template name, subject, and content are required' });
+    const { name, content } = req.body;
+    if (!name || !content) {
+      return res.status(400).json({ error: 'Template name and content are required' });
     }
     const template = saveEmailTemplate(req.body, req.body.performedBy || 'Super Admin');
     res.status(201).json(template);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to create email template' });
+    res.status(500).json({ error: err.message || 'Failed to create template' });
   }
 });
 
@@ -2983,7 +2985,7 @@ apiRouter.put('/email/templates/:id', (req: Request, res: Response) => {
     const template = saveEmailTemplate({ id: req.params.id, ...req.body }, req.body.performedBy || 'Super Admin');
     res.json(template);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to update email template' });
+    res.status(500).json({ error: err.message || 'Failed to update template' });
   }
 });
 
@@ -2996,7 +2998,7 @@ apiRouter.delete('/email/templates/:id', (req: Request, res: Response) => {
     }
     res.json({ success });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to delete email template' });
+    res.status(500).json({ error: err.message || 'Failed to delete template' });
   }
 });
 
@@ -3006,12 +3008,13 @@ apiRouter.post('/email/preview', (req: Request, res: Response) => {
     const preview = previewEmailResolution(subject || '', content || '', sampleData);
     res.json(preview);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to preview email template' });
+    res.status(500).json({ error: err.message || 'Failed to preview template' });
   }
 });
 
 apiRouter.post('/email/target-count', (req: Request, res: Response) => {
   try {
+    const channel = req.body?.channel || 'Email';
     const matchingLeads = getTargetLeadsForBulkEmail(req.body || {});
     res.json({
       count: matchingLeads.length,
@@ -3019,6 +3022,9 @@ apiRouter.post('/email/target-count', (req: Request, res: Response) => {
         id: l.id,
         student_name: l.student_name,
         email: l.email,
+        phone: l.phone,
+        whatsapp_number: l.whatsapp_number,
+        recipient: channel === 'WhatsApp' ? (l.whatsapp_number || l.phone) : l.email,
         course: l.preferred_course,
         university: l.preferred_university,
         city: l.city,
@@ -3032,14 +3038,20 @@ apiRouter.post('/email/target-count', (req: Request, res: Response) => {
 
 apiRouter.post('/email/send-bulk', (req: Request, res: Response) => {
   try {
-    const { subject, content } = req.body;
-    if (!subject || !content) {
+    const { subject, content, channel } = req.body;
+    const outreachChannel = channel === 'WhatsApp' ? 'WhatsApp' : 'Email';
+
+    if (outreachChannel === 'Email' && (!subject || !content)) {
       return res.status(400).json({ error: 'Subject and email content body are required' });
     }
+    if (outreachChannel === 'WhatsApp' && !content) {
+      return res.status(400).json({ error: 'WhatsApp message content is required' });
+    }
+
     const result = sendBulkEmailCampaign(req.body);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to dispatch bulk email campaign' });
+    res.status(500).json({ error: err.message || 'Failed to dispatch bulk outreach campaign' });
   }
 });
 

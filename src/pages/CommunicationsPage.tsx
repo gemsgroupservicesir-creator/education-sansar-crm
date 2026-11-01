@@ -20,7 +20,13 @@ import {
   Search,
   Sliders,
   Check,
-  X
+  X,
+  MessageSquare,
+  Phone,
+  Smartphone,
+  CheckCheck,
+  Share2,
+  ExternalLink
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -48,45 +54,7 @@ const formatTags = (val: any): string => {
   return arr.length > 0 ? `(${arr.join(', ')})` : '';
 };
 
-export const CommunicationsPage: React.FC = () => {
-  const { addToast } = useNotifications();
-  const { user, isSuperAdmin, hasPermission } = useAuth();
-  const canSendBulk = isSuperAdmin || hasPermission('bulk_email');
-  const canManageTemplates = isSuperAdmin || hasPermission('email_templates');
-
-  const [activeTab, setActiveTab] = useState<'send' | 'templates' | 'history'>('send');
-
-  // Filter states for Bulk Sending
-  const [filterCourse, setFilterCourse] = useState('');
-  const [filterUniversity, setFilterUniversity] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterTemperature, setFilterTemperature] = useState('');
-  const [filterCity, setFilterCity] = useState('');
-  const [targetCount, setTargetCount] = useState<number>(0);
-  const [sampleLeads, setSampleLeads] = useState<any[]>([]);
-  const [loadingCount, setLoadingCount] = useState(false);
-  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-
-  // Live filter suggestions & distributions
-  const [filterOptions, setFilterOptions] = useState<{
-    courses: { name: string; count: number }[];
-    universities: { name: string; count: number }[];
-    statuses: { name: string; count: number }[];
-    temperatures: { name: string; count: number }[];
-    totalLeadsWithEmail: number;
-  }>({
-    courses: [],
-    universities: [],
-    statuses: [],
-    temperatures: [],
-    totalLeadsWithEmail: 0
-  });
-
-  // Email Composer states
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [campaignName, setCampaignName] = useState('');
-  const [subject, setSubject] = useState('Exclusive Admission Offer & Scholarship Details: {{preferred_course}} at {{preferred_university}}');
-  const [content, setContent] = useState(`Dear {{student_name}},
+const defaultEmailContent = `Dear {{student_name}},
 
 Greetings from Gems Group Services!
 
@@ -108,7 +76,69 @@ To confirm your provisional eligibility and scholarship tier before the deadline
 
 Warm regards,
 Admissions Directorate
-Gems Group Services`);
+Gems Group Services`;
+
+const defaultWhatsAppContent = `Namaste {{student_name}}! 🎓 Greetings from *Gems Group Services*.
+
+We noticed your interest in pursuing *{{preferred_course}}* at *{{preferred_university}}*.
+
+🌟 *Special Admission Update for Nepal Students:*
+• Merit Scholarships: Up to 50% tuition waiver
+• Direct Authorized Seat Allotment for 2026 Batch
+• Dedicated Nepal Student Hostels & Guidance
+
+Your Personal Admissions Counselor:
+👤 *{{counselor_name}}*
+📞 WhatsApp: {{counselor_phone}}
+🆔 Application Ref: {{application_id}}
+
+Reply *YES* to receive the official fee breakdown & confirm your scholarship tier before {{deadline}}!`;
+
+export const CommunicationsPage: React.FC = () => {
+  const { addToast } = useNotifications();
+  const { user, isSuperAdmin, hasPermission } = useAuth();
+  const canSendBulk = isSuperAdmin || hasPermission('bulk_email');
+  const canManageTemplates = isSuperAdmin || hasPermission('email_templates');
+
+  const [activeTab, setActiveTab] = useState<'send' | 'templates' | 'history'>('send');
+  // Channel state: WhatsApp (Default) vs Email
+  const [outreachChannel, setOutreachChannel] = useState<'WhatsApp' | 'Email'>('WhatsApp');
+
+  // Filter states for Bulk Sending
+  const [filterCourse, setFilterCourse] = useState('');
+  const [filterUniversity, setFilterUniversity] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterTemperature, setFilterTemperature] = useState('');
+  const [filterCity, setFilterCity] = useState('');
+  const [targetCount, setTargetCount] = useState<number>(0);
+  const [sampleLeads, setSampleLeads] = useState<any[]>([]);
+  const [loadingCount, setLoadingCount] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+
+  // Live filter suggestions & distributions
+  const [filterOptions, setFilterOptions] = useState<{
+    courses: { name: string; count: number }[];
+    universities: { name: string; count: number }[];
+    statuses: { name: string; count: number }[];
+    temperatures: { name: string; count: number }[];
+    totalLeadsWithEmail: number;
+    totalLeadsWithWhatsApp?: number;
+    totalTargetLeads?: number;
+  }>({
+    courses: [],
+    universities: [],
+    statuses: [],
+    temperatures: [],
+    totalLeadsWithEmail: 0,
+    totalLeadsWithWhatsApp: 0,
+    totalTargetLeads: 0
+  });
+
+  // Composer states
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [campaignName, setCampaignName] = useState('');
+  const [subject, setSubject] = useState('Exclusive Admission Offer & Scholarship Details: {{preferred_course}} at {{preferred_university}}');
+  const [content, setContent] = useState(defaultWhatsAppContent);
 
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<any>(null);
@@ -122,11 +152,13 @@ Gems Group Services`);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateFilterCategory, setTemplateFilterCategory] = useState('');
   const [templateFilterCourse, setTemplateFilterCourse] = useState('');
+  const [templateFilterChannel, setTemplateFilterChannel] = useState<string>('ALL');
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
 
   // Template Form states
   const [tmplName, setTmplName] = useState('');
+  const [tmplChannel, setTmplChannel] = useState<'Email' | 'WhatsApp' | 'SMS'>('WhatsApp');
   const [tmplCategory, setTmplCategory] = useState('COURSE_PROSPECTUS');
   const [tmplSubject, setTmplSubject] = useState('');
   const [tmplContent, setTmplContent] = useState('');
@@ -138,6 +170,32 @@ Gems Group Services`);
   const [campaigns, setCampaigns] = useState<BulkEmailCampaign[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
+  // Switch between WhatsApp and Email channels
+  const handleSwitchChannel = (channel: 'WhatsApp' | 'Email') => {
+    setOutreachChannel(channel);
+    setSelectedTemplateId('');
+    if (channel === 'WhatsApp') {
+      if (content === defaultEmailContent || !content.trim()) {
+        setContent(defaultWhatsAppContent);
+      }
+    } else {
+      if (content === defaultWhatsAppContent || !content.trim()) {
+        setContent(defaultEmailContent);
+      }
+    }
+    addToast(`Switched to Bulk ${channel} Mode`, 'info');
+  };
+
+  // Insert emoji helper
+  const insertEmoji = (emoji: string) => {
+    setContent(prev => prev + ' ' + emoji);
+  };
+
+  // Format wrap helper (*bold*, _italic_)
+  const insertFormat = (prefix: string, suffix: string, placeholder: string) => {
+    setContent(prev => prev + ` ${prefix}${placeholder}${suffix} `);
+  };
+
   // Fetch recipients count whenever filters change
   useEffect(() => {
     let active = true;
@@ -145,6 +203,7 @@ Gems Group Services`);
       setLoadingCount(true);
       try {
         const res = await api.getTargetEmailCount({
+          channel: outreachChannel,
           filter_course: filterCourse,
           filter_university: filterUniversity,
           filter_status: filterStatus,
@@ -167,8 +226,9 @@ Gems Group Services`);
     };
 
     fetchCount();
+    fetchFilterOptions(outreachChannel);
     return () => { active = false; };
-  }, [filterCourse, filterUniversity, filterStatus, filterTemperature, filterCity]);
+  }, [outreachChannel, filterCourse, filterUniversity, filterStatus, filterTemperature, filterCity]);
 
   // Update live preview when subject or content changes
   useEffect(() => {
@@ -176,11 +236,22 @@ Gems Group Services`);
     const updatePreview = async () => {
       try {
         const sampleStudent = Array.isArray(sampleLeads) && sampleLeads[0] ? {
-          student_name: sampleLeads[0].student_name || 'Student',
-          email: sampleLeads[0].email || 'student@example.com',
+          student_name: sampleLeads[0].student_name || 'Bikram Thapa',
+          first_name: sampleLeads[0].student_name ? sampleLeads[0].student_name.split(' ')[0] : 'Bikram',
+          phone: sampleLeads[0].phone || '+977 9801234567',
+          whatsapp_number: sampleLeads[0].whatsapp_number || sampleLeads[0].phone || '+977 9801234567',
+          email: sampleLeads[0].email || 'bikram.thapa@example.com',
           preferred_course: sampleLeads[0].course || 'B.Tech Computer Science',
           preferred_university: sampleLeads[0].university || 'Sharda University',
-          city: sampleLeads[0].city || 'Kathmandu'
+          city: sampleLeads[0].city || 'Kathmandu',
+          counselor_name: 'Suman Sharma',
+          counselor_email: 'counselor@gemsgroupservices.com',
+          counselor_phone: '+977 9801122334',
+          application_id: 'APP-2026-0812',
+          deadline: '30th November 2026',
+          portal_url: 'https://education-sansar-crm.vercel.app',
+          company_name: 'Gems Group Services',
+          year: '2026'
         } : undefined;
 
         const res = await api.previewEmailTemplate({
@@ -208,16 +279,18 @@ Gems Group Services`);
   }, [subject, content, sampleLeads]);
 
   // Load filter options (courses, universities, counts)
-  const fetchFilterOptions = async () => {
+  const fetchFilterOptions = async (channel: 'Email' | 'WhatsApp' = outreachChannel) => {
     try {
-      const opts = await api.getEmailFilterOptions();
+      const opts = await api.getEmailFilterOptions(channel);
       if (opts && typeof opts === 'object') {
         setFilterOptions({
           courses: Array.isArray(opts.courses) ? opts.courses : [],
           universities: Array.isArray(opts.universities) ? opts.universities : [],
           statuses: Array.isArray(opts.statuses) ? opts.statuses : [],
           temperatures: Array.isArray(opts.temperatures) ? opts.temperatures : [],
-          totalLeadsWithEmail: typeof opts.totalLeadsWithEmail === 'number' ? opts.totalLeadsWithEmail : 0
+          totalLeadsWithEmail: typeof opts.totalLeadsWithEmail === 'number' ? opts.totalLeadsWithEmail : 0,
+          totalLeadsWithWhatsApp: typeof opts.totalLeadsWithWhatsApp === 'number' ? opts.totalLeadsWithWhatsApp : 0,
+          totalTargetLeads: typeof opts.totalTargetLeads === 'number' ? opts.totalTargetLeads : 0
         });
       }
     } catch (e) {
@@ -226,16 +299,21 @@ Gems Group Services`);
   };
 
   useEffect(() => {
-    fetchFilterOptions();
+    fetchFilterOptions(outreachChannel);
   }, []);
 
   // Load templates
   const fetchTemplates = async () => {
     setLoadingTemplates(true);
     try {
+      const channelParam = activeTab === 'send'
+        ? outreachChannel
+        : (templateFilterChannel === 'ALL' ? undefined : templateFilterChannel);
+
       const data = await api.getEmailTemplates({
         category: templateFilterCategory,
-        course: templateFilterCourse
+        course: templateFilterCourse,
+        channel: channelParam
       });
       setTemplates(Array.isArray(data) ? data : []);
     } catch (err: any) {
@@ -245,6 +323,10 @@ Gems Group Services`);
       setLoadingTemplates(false);
     }
   };
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [activeTab, outreachChannel, templateFilterCategory, templateFilterCourse, templateFilterChannel]);
 
   // Load campaigns history
   const fetchCampaigns = async () => {
@@ -296,13 +378,18 @@ Gems Group Services`);
   };
 
   const handleOpenSendConfirmation = () => {
-    if (!subject.trim() || !content.trim()) {
-      addToast('Please enter an email subject and content body', 'error');
+    if (!content.trim()) {
+      addToast(outreachChannel === 'WhatsApp' ? 'Please enter a WhatsApp message body' : 'Please enter an email body', 'error');
+      return;
+    }
+
+    if (outreachChannel === 'Email' && !subject.trim()) {
+      addToast('Please enter an email subject line', 'error');
       return;
     }
 
     if (targetCount === 0) {
-      addToast('No matching leads found for current filters. Clear filters to send to all leads.', 'warning');
+      addToast(`No matching leads found for current filters with valid ${outreachChannel === 'WhatsApp' ? 'phone/WhatsApp number' : 'email'}. Clear filters to target all leads.`, 'warning');
       return;
     }
 
@@ -315,10 +402,11 @@ Gems Group Services`);
 
     try {
       const res = await api.sendBulkEmail({
-        campaign_name: campaignName.trim() || `Bulk Outreach - ${filterCourse || 'All Courses'} (${targetCount} leads)`,
+        campaign_name: campaignName.trim() || `Bulk ${outreachChannel} - ${filterCourse || 'All Courses'} (${targetCount} leads)`,
         template_id: selectedTemplateId || undefined,
-        subject,
+        subject: subject.trim() || (outreachChannel === 'WhatsApp' ? `WhatsApp Broadcast - ${filterCourse || 'Admissions'}` : 'Important Admission Notification'),
         content,
+        channel: outreachChannel,
         filter_course: filterCourse,
         filter_university: filterUniversity,
         filter_status: filterStatus,
@@ -329,11 +417,11 @@ Gems Group Services`);
 
       setSendResult(res);
       setConfirmModalOpen(false);
-      addToast(`Successfully dispatched email to ${res.sent_count} students!`, 'success');
+      addToast(`Successfully dispatched ${outreachChannel} broadcast to ${res.sent_count} students!`, 'success');
       fetchCampaigns();
-      fetchFilterOptions();
+      fetchFilterOptions(outreachChannel);
     } catch (err: any) {
-      addToast(err.message || 'Failed to send bulk email', 'error');
+      addToast(err.message || `Failed to send bulk ${outreachChannel}`, 'error');
     } finally {
       setSending(false);
     }
@@ -342,26 +430,20 @@ Gems Group Services`);
   const handleOpenAddTemplate = () => {
     setEditingTemplate(null);
     setTmplName('');
+    setTmplChannel(outreachChannel);
     setTmplCategory('COURSE_PROSPECTUS');
-    setTmplSubject('Course Prospectus & Scholarship Offer for {{preferred_course}}');
+    setTmplSubject(outreachChannel === 'WhatsApp' ? 'Exclusive WhatsApp Offer for {{preferred_course}}' : 'Course Prospectus & Scholarship Offer for {{preferred_course}}');
     setTmplCourses(filterCourse || 'B.Tech, MBBS, MBA');
     setTmplUniversities(filterUniversity || 'Sharda University, Chandigarh University');
-    setTmplDescription('Customized course prospectus and scholarship announcement');
-    setTmplContent(`Dear {{student_name}},
-
-Thank you for your interest in {{preferred_course}} at {{preferred_university}}.
-
-We have reserved your application profile for upcoming scholarship allocations. Please review the enclosed information and get in touch with {{counselor_name}} at {{counselor_phone}} to confirm your admission.
-
-Sincerely,
-Admissions Desk
-Gems Group Services`);
+    setTmplDescription(outreachChannel === 'WhatsApp' ? 'High-engagement WhatsApp template with Nepal scholarship guidance' : 'Customized course prospectus and scholarship announcement');
+    setTmplContent(outreachChannel === 'WhatsApp' ? defaultWhatsAppContent : defaultEmailContent);
     setTemplateModalOpen(true);
   };
 
   const handleOpenEditTemplate = (t: EmailTemplate) => {
     setEditingTemplate(t);
     setTmplName(t.name);
+    setTmplChannel((t.channel as any) || 'Email');
     setTmplCategory(t.category);
     setTmplSubject(t.subject);
     setTmplContent(t.content);
@@ -373,8 +455,12 @@ Gems Group Services`);
 
   const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tmplName.trim() || !tmplSubject.trim() || !tmplContent.trim()) {
-      addToast('Template name, subject, and body are required', 'error');
+    if (!tmplName.trim() || !tmplContent.trim()) {
+      addToast('Template name and content body are required', 'error');
+      return;
+    }
+    if (tmplChannel === 'Email' && !tmplSubject.trim()) {
+      addToast('Email template requires a subject line', 'error');
       return;
     }
 
@@ -385,21 +471,21 @@ Gems Group Services`);
       const payload = {
         name: tmplName.trim(),
         category: tmplCategory,
-        subject: tmplSubject.trim(),
+        subject: tmplSubject.trim() || (tmplChannel === 'WhatsApp' ? `${tmplName.trim()} (WhatsApp)` : 'Admissions Update'),
         content: tmplContent.trim(),
         description: tmplDescription.trim(),
         target_courses: coursesArr,
         target_universities: unisArr,
-        channel: 'Email' as const,
+        channel: tmplChannel,
         performedBy: user?.name || 'Super Admin'
       };
 
       if (editingTemplate) {
         await api.updateEmailTemplate(editingTemplate.id, payload);
-        addToast(`Email template "${tmplName}" updated successfully!`, 'success');
+        addToast(`Template "${tmplName}" updated successfully!`, 'success');
       } else {
         await api.createEmailTemplate(payload);
-        addToast(`Email template "${tmplName}" created!`, 'success');
+        addToast(`Template "${tmplName}" created!`, 'success');
       }
 
       setTemplateModalOpen(false);
@@ -423,19 +509,34 @@ Gems Group Services`);
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-900/20">
-              <Mail className="w-5 h-5" />
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-md transition-all ${
+              outreachChannel === 'WhatsApp'
+                ? 'bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-600 shadow-emerald-900/20'
+                : 'bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-600 shadow-blue-900/20'
+            }`}>
+              {outreachChannel === 'WhatsApp' ? (
+                <MessageSquare className="w-6 h-6" />
+              ) : (
+                <Mail className="w-6 h-6" />
+              )}
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                <span>Bulk Email &amp; Course Outreach Engine</span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold uppercase tracking-wider">
-                  Automated Merge Tags
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                  {outreachChannel === 'WhatsApp' ? 'Bulk WhatsApp Broadcast & Outreach' : 'Bulk Email & Outreach Engine'}
+                </h1>
+                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 ${
+                  outreachChannel === 'WhatsApp'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-blue-100 text-blue-800'
+                }`}>
+                  <Sparkles className="w-3 h-3" />
+                  <span>Automated Merge Tags</span>
                 </span>
-              </h1>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Target leads by specialized Course and University with dynamic merge tags ({"{{student_name}}"}, {"{{preferred_course}}"}, {"{{counselor_name}}"})
               </p>
@@ -443,45 +544,86 @@ Gems Group Services`);
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 self-start sm:self-auto">
-          <button
-            onClick={() => setActiveTab('send')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'send'
-                ? 'bg-white text-blue-700 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Send className="w-4 h-4" />
-            <span>Send Bulk Outreach</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('templates')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'templates'
-                ? 'bg-white text-blue-700 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Course &amp; University Templates</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'history'
-                ? 'bg-white text-blue-700 shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span>Campaign History</span>
-          </button>
+        {/* Channel Switcher & Tab Navigation */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5">
+          {/* WhatsApp vs Email Switcher */}
+          <div className="flex items-center bg-slate-200/70 p-1 rounded-2xl border border-slate-300/80 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => handleSwitchChannel('WhatsApp')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                outreachChannel === 'WhatsApp'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-700 hover:text-emerald-700'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Bulk WhatsApp</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                outreachChannel === 'WhatsApp' ? 'bg-emerald-700 text-emerald-100' : 'bg-slate-300 text-slate-700'
+              }`}>
+                {filterOptions.totalLeadsWithWhatsApp ?? 0}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSwitchChannel('Email')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                outreachChannel === 'Email'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-700 hover:text-blue-700'
+              }`}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>Bulk Email</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                outreachChannel === 'Email' ? 'bg-blue-700 text-blue-100' : 'bg-slate-300 text-slate-700'
+              }`}>
+                {filterOptions.totalLeadsWithEmail ?? 0}
+              </span>
+            </button>
+          </div>
+
+          {/* Module Tabs */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+            <button
+              onClick={() => setActiveTab('send')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'send'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Compose &amp; Send</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('templates')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'templates'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Templates</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'history'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>History</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* TAB 1: BULK EMAIL DISPATCH ENGINE */}
+      {/* TAB 1: BULK OUTREACH DISPATCH ENGINE */}
       {activeTab === 'send' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Column: Targeting Filters & Recipients */}
@@ -490,7 +632,9 @@ Gems Group Services`);
             <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold text-xs">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                    outreachChannel === 'WhatsApp' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+                  }`}>
                     1
                   </div>
                   <div>
@@ -504,14 +648,20 @@ Gems Group Services`);
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] font-semibold text-slate-500">Matches:</span>
                   <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1 ${
-                    targetCount > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
+                    targetCount > 0
+                      ? outreachChannel === 'WhatsApp' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                      : 'bg-slate-100 text-slate-500'
                   }`}>
                     {loadingCount ? (
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     ) : (
                       <>
-                        <Users className="w-3.5 h-3.5" />
-                        <span>{targetCount} Leads</span>
+                        {outreachChannel === 'WhatsApp' ? (
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        ) : (
+                          <Users className="w-3.5 h-3.5" />
+                        )}
+                        <span>{targetCount} {outreachChannel} Leads</span>
                       </>
                     )}
                   </span>
@@ -717,7 +867,7 @@ Gems Group Services`);
                       className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white rounded-xl font-bold text-xs shadow-xs transition-all flex items-center justify-center gap-1.5"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Clear Filters &amp; Target All ({filterOptions.totalLeadsWithEmail || 'All'} Leads)</span>
+                      <span>Clear Filters &amp; Target All ({outreachChannel === 'WhatsApp' ? (filterOptions.totalLeadsWithWhatsApp || 'All') : (filterOptions.totalLeadsWithEmail || 'All')} Leads)</span>
                     </button>
                   </div>
                 </div>
@@ -734,18 +884,49 @@ Gems Group Services`);
                     No matching leads found for these filters
                   </div>
                 ) : (
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                    {sampleLeads.map((s, idx) => (
-                      <div key={idx} className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
-                        <div>
-                          <span className="font-bold text-slate-900">{s.student_name}</span>
-                          <span className="text-[11px] text-slate-400 ml-1.5 font-mono">({s.email})</span>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {sampleLeads.map((s, idx) => {
+                      const phoneNum = s.whatsapp_number || s.phone || '';
+                      const cleanDigits = phoneNum.replace(/[^0-9]/g, '');
+                      return (
+                        <div key={idx} className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs hover:bg-slate-100/70 transition-colors">
+                          <div className="min-w-0 pr-2">
+                            <div className="font-bold text-slate-900 truncate">{s.student_name}</div>
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                              {outreachChannel === 'WhatsApp' ? (
+                                <>
+                                  <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
+                                  <span className="font-mono">{phoneNum || 'No phone number'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Mail className="w-3 h-3 text-blue-600 shrink-0" />
+                                  <span className="font-mono truncate">{s.email || 'No email address'}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-100">
+                              {s.course || 'General'}
+                            </span>
+                            {outreachChannel === 'WhatsApp' && cleanDigits && (
+                              <a
+                                href={`https://wa.me/${cleanDigits}?text=${encodeURIComponent(previewContent || content)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition-colors shadow-2xs"
+                                title="Open WhatsApp Web direct 1-on-1 chat"
+                              >
+                                <MessageSquare className="w-3 h-3 text-emerald-600" />
+                                <span>Chat</span>
+                                <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                              </a>
+                            )}
+                          </div>
                         </div>
-                        <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-100">
-                          {s.course || 'General'}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -754,14 +935,18 @@ Gems Group Services`);
             {/* Template Selector Card */}
             <div className="p-5 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-3">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
-                <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold text-xs">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                  outreachChannel === 'WhatsApp' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
+                }`}>
                   2
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                    Select Course Email Template
+                    {outreachChannel === 'WhatsApp' ? 'Select WhatsApp Message Template' : 'Select Course Email Template'}
                   </h3>
-                  <p className="text-[11px] text-slate-500">Pick a pre-written, targeted outreach template</p>
+                  <p className="text-[11px] text-slate-500">
+                    {outreachChannel === 'WhatsApp' ? 'Pick a pre-written WhatsApp outreach template' : 'Pick a pre-written, targeted outreach template'}
+                  </p>
                 </div>
               </div>
 
@@ -774,20 +959,22 @@ Gems Group Services`);
                   <option value="">-- Choose Template (or write custom) --</option>
                   {(Array.isArray(templates) ? templates : []).map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} [{t.category}] {formatTags(t.target_courses)}
+                      [{t.channel || 'Email'}] {t.name} [{t.category}] {formatTags(t.target_courses)}
                     </option>
                   ))}
                 </select>
               </div>
 
               {selectedTemplateId && (
-                <div className="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-900 space-y-1">
+                <div className={`p-3 rounded-2xl border text-xs space-y-1 ${
+                  outreachChannel === 'WhatsApp' ? 'bg-emerald-50/70 border-emerald-100 text-emerald-900' : 'bg-indigo-50/70 border-indigo-100 text-indigo-900'
+                }`}>
                   <div className="font-bold flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Template Loaded</span>
                   </div>
-                  <p className="text-[11px] text-indigo-800/80">
-                    Subject line and message body populated below. You can customize them freely before sending.
+                  <p className="text-[11px] opacity-80">
+                    Template content populated below. You can customize text freely before sending.
                   </p>
                 </div>
               )}
@@ -799,18 +986,24 @@ Gems Group Services`);
             <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-5">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold text-xs">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                    outreachChannel === 'WhatsApp' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+                  }`}>
                     3
                   </div>
                   <div>
-                    <h2 className="text-sm font-bold text-slate-900">Email Campaign Composer</h2>
-                    <p className="text-xs text-slate-500">Personalized content with dynamic variables</p>
+                    <h2 className="text-sm font-bold text-slate-900">
+                      {outreachChannel === 'WhatsApp' ? 'WhatsApp Outreach Composer' : 'Email Campaign Composer'}
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      {outreachChannel === 'WhatsApp' ? 'Craft high-converting WhatsApp message with emoji & tags' : 'Personalized content with dynamic variables'}
+                    </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-bold text-slate-500">
-                    Recipients: <strong className="text-blue-700">{targetCount}</strong>
+                    Target {outreachChannel}: <strong className={outreachChannel === 'WhatsApp' ? 'text-emerald-700' : 'text-blue-700'}>{targetCount} Leads</strong>
                   </span>
                 </div>
               </div>
@@ -819,32 +1012,91 @@ Gems Group Services`);
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Campaign Internal Label
+                    Campaign Internal Label (CRM Tracking)
                   </label>
                   <input
                     type="text"
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
-                    placeholder={`e.g. October 2026 ${filterCourse || 'Engineering & Medical'} Admissions Blast`}
+                    placeholder={`e.g. Nepal 2026 ${filterCourse || 'Admissions'} ${outreachChannel} Blast`}
                     className="w-full p-2.5 text-xs rounded-xl border border-slate-300"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>Email Subject Line *</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Supports merge tags</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    placeholder="Subject with {{student_name}} or {{preferred_course}}..."
-                    className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                {outreachChannel === 'Email' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                      <span>Email Subject Line *</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Supports merge tags</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="Subject with {{student_name}} or {{preferred_course}}..."
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                      <span>WhatsApp Campaign Reference Title (Optional)</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Internal CRM campaign log label</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="e.g. Nepal Scholarship Announcement on WhatsApp"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 text-slate-800"
+                    />
+                  </div>
+                )}
               </div>
+
+              {/* WhatsApp Formatting & Quick Emojis Toolbar */}
+              {outreachChannel === 'WhatsApp' && (
+                <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-2xl bg-emerald-50/60 border border-emerald-100 text-xs">
+                  <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider mr-1">Formatting:</span>
+                  <button
+                    type="button"
+                    onClick={() => insertFormat('*', '*', 'bold text')}
+                    className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 hover:bg-emerald-100/60 font-bold text-xs text-slate-800 shadow-2xs"
+                    title="Bold (*text*)"
+                  >
+                    *B*
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertFormat('_', '_', 'italic text')}
+                    className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 hover:bg-emerald-100/60 italic text-xs font-semibold text-slate-800 shadow-2xs"
+                    title="Italic (_text_)"
+                  >
+                    _I_
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertFormat('~', '~', 'strike text')}
+                    className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 hover:bg-emerald-100/60 line-through text-xs text-slate-800 shadow-2xs"
+                    title="Strikethrough (~text~)"
+                  >
+                    ~S~
+                  </button>
+                  <div className="h-4 w-px bg-emerald-200 mx-1.5" />
+                  <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider mr-1">Emojis:</span>
+                  {['🎓', '🏛️', '📞', '🌟', '📌', '✅', '🚀', '💰', '🇳🇵', '📋', '💬'].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => insertEmoji(emoji)}
+                      className="px-1.5 py-0.5 rounded-lg hover:bg-white transition-colors text-sm"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Dynamic Merge Tags Helper Toolbar */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
@@ -873,7 +1125,9 @@ Gems Group Services`);
                       type="button"
                       onClick={() => insertMergeTag(tag)}
                       title={desc}
-                      className="text-[11px] font-mono px-2 py-1 rounded-lg bg-white border border-slate-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 font-bold transition-all shadow-2xs"
+                      className={`text-[11px] font-mono px-2 py-1 rounded-lg bg-white border border-slate-200 font-bold transition-all shadow-2xs ${
+                        outreachChannel === 'WhatsApp' ? 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-300' : 'text-blue-700 hover:bg-blue-50 hover:border-blue-300'
+                      }`}
                     >
                       {tag}
                     </button>
@@ -884,45 +1138,112 @@ Gems Group Services`);
               {/* Message Content Body */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
-                  <span>Message Body *</span>
-                  <span className="text-[10px] text-slate-400">Plain text / formatted email</span>
+                  <span>{outreachChannel === 'WhatsApp' ? 'WhatsApp Message Content *' : 'Email Body Content *'}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {outreachChannel === 'WhatsApp' ? 'Supports WhatsApp formatting (*bold*, _italic_) & emojis' : 'Plain text / formatted email'}
+                  </span>
                 </label>
                 <textarea
                   rows={10}
                   required
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  placeholder="Dear {{student_name}}, ..."
-                  className="w-full p-3 text-xs rounded-2xl border border-slate-300 font-mono text-slate-800 leading-relaxed focus:ring-2 focus:ring-blue-500"
+                  placeholder={outreachChannel === 'WhatsApp' ? 'Namaste {{student_name}}! 🎓 ...' : 'Dear {{student_name}}, ...'}
+                  className="w-full p-3 text-xs rounded-2xl border border-slate-300 font-mono text-slate-800 leading-relaxed focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
-              {/* Live Student Merge Preview */}
-              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-2">
-                <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Eye className="w-3.5 h-3.5 text-amber-700" />
-                    <span>Live Merge Preview (What Student Sees)</span>
-                  </span>
-                  <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                    Sample Lead
-                  </span>
-                </div>
-                <div className="p-3.5 rounded-xl bg-white border border-amber-200 space-y-2 text-xs">
-                  <div className="border-b border-slate-100 pb-1.5">
-                    <span className="text-slate-400 font-semibold">Subject: </span>
-                    <strong className="text-slate-900">{previewSubject || subject}</strong>
+              {/* Live Preview: Smartphone Mockup for WhatsApp, Clean Card for Email */}
+              {outreachChannel === 'WhatsApp' ? (
+                <div className="p-4 rounded-3xl bg-slate-100 border border-slate-200 space-y-3">
+                  <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Smartphone className="w-4 h-4 text-emerald-600" />
+                      <span>Live WhatsApp Smartphone Preview</span>
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      <span>Gems Group Services Official</span>
+                    </span>
                   </div>
-                  <div className="text-slate-700 font-sans whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
-                    {previewContent || content}
+
+                  {/* Smartphone Container */}
+                  <div className="max-w-md mx-auto rounded-3xl overflow-hidden shadow-xl border-4 border-slate-800 bg-[#efeae2]">
+                    {/* WhatsApp Header */}
+                    <div className="bg-[#075e54] text-white px-4 py-2.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-emerald-400 text-emerald-950 font-black text-xs flex items-center justify-center border-2 border-white/40">
+                          GGS
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs flex items-center gap-1 text-white">
+                            <span>Gems Group Services</span>
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" title="Verified" />
+                          </div>
+                          <div className="text-[10px] text-emerald-100/90">Official Admissions Desk • online</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-white/80">
+                        <Phone className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+
+                    {/* Chat Bubble Area */}
+                    <div className="p-3.5 space-y-3 min-h-[220px] max-h-[340px] overflow-y-auto bg-[radial-gradient(#d4cbbe_1px,transparent_1px)] [background-size:16px_16px]">
+                      <div className="text-center">
+                        <span className="text-[10px] bg-white/80 backdrop-blur-xs text-slate-600 font-semibold px-2.5 py-0.5 rounded-full shadow-2xs">
+                          Today
+                        </span>
+                      </div>
+
+                      <div className="bg-[#dcf8c6] text-slate-900 rounded-2xl rounded-tr-xs p-3.5 shadow-xs max-w-[92%] ml-auto text-xs whitespace-pre-wrap leading-relaxed font-sans border border-emerald-200/50">
+                        <div>{previewContent || content}</div>
+                        <div className="flex items-center justify-end gap-1 mt-2 text-[10px] text-slate-500 font-sans">
+                          <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <CheckCheck className="w-3.5 h-3.5 text-[#34b7f1]" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Mock Input Bar */}
+                    <div className="bg-[#f0f0f0] px-3 py-2 flex items-center gap-2 border-t border-slate-300/80">
+                      <div className="flex-1 bg-white rounded-full px-3 py-1.5 text-[11px] text-slate-400 flex items-center justify-between">
+                        <span>Message...</span>
+                        <span>😊</span>
+                      </div>
+                      <div className="w-7 h-7 rounded-full bg-[#128c7e] text-white flex items-center justify-center shadow-xs">
+                        <Send className="w-3 h-3" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 space-y-2">
+                  <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Eye className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Live Merge Preview (What Student Sees)</span>
+                    </span>
+                    <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                      Sample Lead
+                    </span>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-white border border-amber-200 space-y-2 text-xs">
+                    <div className="border-b border-slate-100 pb-1.5">
+                      <span className="text-slate-400 font-semibold">Subject: </span>
+                      <strong className="text-slate-900">{previewSubject || subject}</strong>
+                    </div>
+                    <div className="text-slate-700 font-sans whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                      {previewContent || content}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Dispatch Action Bar */}
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-3">
                 <div className="text-xs text-slate-500">
-                  Ready to send to <strong className="text-slate-900">{targetCount} leads</strong> via verified mail gateway.
+                  Ready to send to <strong className="text-slate-900">{targetCount} leads</strong> via {outreachChannel === 'WhatsApp' ? 'verified WhatsApp Business Gateway' : 'verified mail gateway'}.
                 </div>
 
                 <button
@@ -932,18 +1253,24 @@ Gems Group Services`);
                   className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-xs font-black text-white shadow-lg transition-all ${
                     sending || targetCount === 0 || !canSendBulk
                       ? 'bg-slate-300 cursor-not-allowed shadow-none'
-                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-98 shadow-blue-900/20'
+                      : outreachChannel === 'WhatsApp'
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-98 shadow-emerald-900/20'
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-98 shadow-blue-900/20'
                   }`}
                 >
                   {sending ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Sending Campaign...</span>
+                      <span>Dispatching {outreachChannel}...</span>
                     </>
                   ) : (
                     <>
-                      <Send className="w-4 h-4" />
-                      <span>Send to {targetCount} Students</span>
+                      {outreachChannel === 'WhatsApp' ? (
+                        <MessageSquare className="w-4 h-4" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                      <span>Send {outreachChannel} Broadcast to {targetCount} Students</span>
                     </>
                   )}
                 </button>
@@ -985,6 +1312,16 @@ Gems Group Services`);
             <div className="flex items-center gap-2 flex-wrap">
               <div className="text-xs font-bold text-slate-700">Filter Templates:</div>
               <select
+                value={templateFilterChannel}
+                onChange={(e) => setTemplateFilterChannel(e.target.value)}
+                className="p-1.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800"
+              >
+                <option value="ALL">All Channels</option>
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Email">Email</option>
+              </select>
+
+              <select
                 value={templateFilterCategory}
                 onChange={(e) => setTemplateFilterCategory(e.target.value)}
                 className="p-1.5 text-xs rounded-xl border border-slate-300 bg-white"
@@ -1023,12 +1360,12 @@ Gems Group Services`);
           {loadingTemplates ? (
             <div className="py-20 text-center flex flex-col items-center justify-center gap-2 text-slate-500 text-xs">
               <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
-              <span>Loading email templates...</span>
+              <span>Loading outreach templates...</span>
             </div>
           ) : !Array.isArray(templates) || templates.length === 0 ? (
             <div className="py-16 text-center bg-white rounded-3xl border border-slate-200 space-y-3">
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
-              <h3 className="text-sm font-bold text-slate-700">No Email Templates Found</h3>
+              <h3 className="text-sm font-bold text-slate-700">No Outreach Templates Found</h3>
               <p className="text-xs text-slate-400">Click "Create New Template" to add targeted outreach templates</p>
             </div>
           ) : (
@@ -1041,9 +1378,19 @@ Gems Group Services`);
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                          {tmpl.category ? tmpl.category.replace(/_/g, ' ') : 'General'}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                            tmpl.channel === 'WhatsApp'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {tmpl.channel === 'WhatsApp' ? <MessageSquare className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
+                            <span>{tmpl.channel || 'Email'}</span>
+                          </span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                            {tmpl.category ? tmpl.category.replace(/_/g, ' ') : 'General'}
+                          </span>
+                        </div>
                         <h3 className="text-sm font-bold text-slate-900 mt-1.5 leading-snug">{tmpl.name}</h3>
                       </div>
 
@@ -1107,14 +1454,14 @@ Gems Group Services`);
 
                     {/* Subject Line Preview */}
                     <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-                      <div className="text-[10px] text-slate-400 font-semibold uppercase">Subject:</div>
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase">Subject / Title:</div>
                       <div className="text-slate-800 font-semibold line-clamp-1 mt-0.5">{tmpl.subject}</div>
                     </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                     <span className="text-[11px] text-slate-400">
-                      Channel: <strong className="text-slate-700">Email</strong>
+                      Channel: <strong className={tmpl.channel === 'WhatsApp' ? 'text-emerald-700' : 'text-blue-700'}>{tmpl.channel || 'Email'}</strong>
                     </span>
                     <button
                       type="button"
@@ -1122,8 +1469,11 @@ Gems Group Services`);
                         setSelectedTemplateId(tmpl.id);
                         setSubject(tmpl.subject);
                         setContent(tmpl.content);
+                        if (tmpl.channel === 'WhatsApp' || tmpl.channel === 'Email') {
+                          setOutreachChannel(tmpl.channel);
+                        }
                         setActiveTab('send');
-                        addToast(`Loaded template "${tmpl.name}" into composer`, 'success');
+                        addToast(`Loaded ${tmpl.channel || 'Email'} template "${tmpl.name}" into composer`, 'success');
                       }}
                       className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline"
                     >
@@ -1143,8 +1493,8 @@ Gems Group Services`);
         <div className="p-6 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-900">Bulk Email Campaign Logs</h2>
-              <p className="text-xs text-slate-500">History of all dispatched bulk outreach batches</p>
+              <h2 className="text-sm font-bold text-slate-900">Bulk Outreach Campaign Logs</h2>
+              <p className="text-xs text-slate-500">History of all dispatched WhatsApp broadcasts and email campaigns</p>
             </div>
             <button
               type="button"
@@ -1162,15 +1512,16 @@ Gems Group Services`);
             </div>
           ) : !Array.isArray(campaigns) || campaigns.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-400 italic">
-              No bulk email campaigns have been sent yet.
+              No bulk outreach campaigns have been sent yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-400 text-[10px] uppercase font-bold">
+                    <th className="pb-2.5">Channel</th>
                     <th className="pb-2.5">Campaign Name</th>
-                    <th className="pb-2.5">Subject</th>
+                    <th className="pb-2.5">Subject / Reference</th>
                     <th className="pb-2.5">Target Course</th>
                     <th className="pb-2.5">University</th>
                     <th className="pb-2.5 text-center">Recipients</th>
@@ -1183,6 +1534,20 @@ Gems Group Services`);
                 <tbody className="divide-y divide-slate-100">
                   {(Array.isArray(campaigns) ? campaigns : []).map((camp) => (
                     <tr key={camp.id} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit ${
+                          camp.channel === 'WhatsApp'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-blue-100 text-blue-800 border border-blue-200'
+                        }`}>
+                          {camp.channel === 'WhatsApp' ? (
+                            <MessageSquare className="w-3 h-3" />
+                          ) : (
+                            <Mail className="w-3 h-3" />
+                          )}
+                          <span>{camp.channel || 'Email'}</span>
+                        </span>
+                      </td>
                       <td className="py-3 font-bold text-slate-900">{camp.name}</td>
                       <td className="py-3 text-slate-700 max-w-xs truncate" title={camp.subject}>
                         {camp.subject}
@@ -1227,8 +1592,8 @@ Gems Group Services`);
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                  <span>{editingTemplate ? 'Edit Email Template' : 'Create Course / University Template'}</span>
+                  <FileText className={`w-5 h-5 ${tmplChannel === 'WhatsApp' ? 'text-emerald-600' : 'text-blue-600'}`} />
+                  <span>{editingTemplate ? `Edit ${tmplChannel} Template` : `Create ${tmplChannel} Template`}</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Define reusable outreach content with automated merge tag variables
@@ -1243,7 +1608,20 @@ Gems Group Services`);
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Outreach Channel *</label>
+                <select
+                  value={tmplChannel}
+                  onChange={(e) => setTmplChannel(e.target.value as any)}
+                  className="w-full p-2.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="WhatsApp">WhatsApp Message</option>
+                  <option value="Email">Email</option>
+                  <option value="SMS">SMS Text</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Template Name *</label>
                 <input
@@ -1251,7 +1629,7 @@ Gems Group Services`);
                   type="text"
                   value={tmplName}
                   onChange={(e) => setTmplName(e.target.value)}
-                  placeholder="e.g. MBBS Medical Seat Guidance 2026"
+                  placeholder="e.g. MBBS Guidance 2026"
                   className="w-full p-2.5 text-xs rounded-xl border border-slate-300"
                 />
               </div>
@@ -1314,13 +1692,15 @@ Gems Group Services`);
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Subject Line *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {tmplChannel === 'WhatsApp' ? 'Template Reference Title (Internal / Reference)' : 'Subject Line *'}
+              </label>
               <input
-                required
+                required={tmplChannel === 'Email'}
                 type="text"
                 value={tmplSubject}
                 onChange={(e) => setTmplSubject(e.target.value)}
-                placeholder="Important: {{preferred_course}} Admissions at {{preferred_university}}"
+                placeholder={tmplChannel === 'WhatsApp' ? 'e.g. Nepal 50% Scholarship WhatsApp Broadcast' : 'Important: {{preferred_course}} Admissions at {{preferred_university}}'}
                 className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-semibold"
               />
             </div>
@@ -1334,7 +1714,7 @@ Gems Group Services`);
                     key={tag}
                     type="button"
                     onClick={() => setTmplContent(prev => prev + ' ' + tag)}
-                    className="text-[10px] font-mono px-2 py-0.5 rounded bg-white border border-slate-200 text-blue-700 font-bold"
+                    className="text-[10px] font-mono px-2 py-0.5 rounded bg-white border border-slate-200 text-blue-700 font-bold hover:bg-blue-50"
                   >
                     {tag}
                   </button>
@@ -1343,13 +1723,15 @@ Gems Group Services`);
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Email Body Content *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {tmplChannel === 'WhatsApp' ? 'WhatsApp Message Content * (Supports *bold*, _italic_, emojis)' : 'Email Body Content *'}
+              </label>
               <textarea
                 required
                 rows={8}
                 value={tmplContent}
                 onChange={(e) => setTmplContent(e.target.value)}
-                placeholder="Dear {{student_name}}, ..."
+                placeholder={tmplChannel === 'WhatsApp' ? 'Namaste {{student_name}}! 🎓 ...' : 'Dear {{student_name}}, ...'}
                 className="w-full p-3 text-xs rounded-2xl border border-slate-300 font-mono text-slate-800 leading-relaxed"
               />
             </div>
@@ -1364,7 +1746,9 @@ Gems Group Services`);
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-900/20"
+                className={`px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md transition-all ${
+                  tmplChannel === 'WhatsApp' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-900/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-900/20'
+                }`}
               >
                 {editingTemplate ? 'Update Template' : 'Save Template'}
               </button>
@@ -1379,12 +1763,22 @@ Gems Group Services`);
           <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-900/20">
-                  <Send className="w-4 h-4" />
+                <div className={`w-10 h-10 rounded-2xl text-white flex items-center justify-center shadow-md ${
+                  outreachChannel === 'WhatsApp'
+                    ? 'bg-gradient-to-tr from-emerald-600 to-teal-600 shadow-emerald-900/20'
+                    : 'bg-gradient-to-tr from-blue-600 to-indigo-600 shadow-blue-900/20'
+                }`}>
+                  {outreachChannel === 'WhatsApp' ? (
+                    <MessageSquare className="w-5 h-5" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900">Confirm Bulk Outreach Dispatch</h3>
-                  <p className="text-[11px] text-slate-500">Review campaign and target recipient details</p>
+                  <h3 className="text-sm font-black text-slate-900">
+                    Confirm Bulk {outreachChannel} Broadcast
+                  </h3>
+                  <p className="text-[11px] text-slate-500">Review target recipients &amp; personalized message details</p>
                 </div>
               </div>
               <button
@@ -1400,8 +1794,10 @@ Gems Group Services`);
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2.5 text-xs">
               <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
                 <span className="text-slate-500 font-medium">Recipients Count:</span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs">
-                  {targetCount} Students
+                <span className={`px-2.5 py-0.5 rounded-full font-black text-xs ${
+                  outreachChannel === 'WhatsApp' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {targetCount} Students ({outreachChannel} Delivery)
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -1425,20 +1821,24 @@ Gems Group Services`);
                 </div>
               )}
               <div className="pt-2 border-t border-slate-200/60">
-                <span className="text-slate-400 font-medium block mb-1">Subject Preview:</span>
+                <span className="text-slate-400 font-medium block mb-1">
+                  {outreachChannel === 'WhatsApp' ? 'Campaign Reference:' : 'Subject Preview:'}
+                </span>
                 <span className="font-semibold text-slate-800 block text-[11px] truncate bg-white p-2 rounded-xl border border-slate-200">
                   {previewSubject || subject}
                 </span>
               </div>
             </div>
 
-            <div className="p-3 bg-blue-50/70 rounded-2xl border border-blue-100/90 text-[11px] text-blue-900 space-y-1">
-              <div className="font-bold flex items-center gap-1.5 text-blue-800">
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                <span>Dynamic Merge Tags Active</span>
+            <div className={`p-3.5 rounded-2xl border text-[11px] space-y-1 ${
+              outreachChannel === 'WhatsApp' ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' : 'bg-blue-50/80 border-blue-200 text-blue-950'
+            }`}>
+              <div className={`font-bold flex items-center gap-1.5 ${outreachChannel === 'WhatsApp' ? 'text-emerald-800' : 'text-blue-800'}`}>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Automated Personalization &amp; CRM Activity Tracking Active</span>
               </div>
-              <p className="text-blue-800/80 leading-relaxed">
-                Every recipient will receive an individualized email with their actual student name, chosen course, and counselor contact details.
+              <p className="leading-relaxed opacity-90">
+                Every recipient will receive an individualized {outreachChannel} message addressed with their actual student name, course, and counselor details. All messages will be automatically logged to the student's activity timeline.
               </p>
             </div>
 
@@ -1455,17 +1855,21 @@ Gems Group Services`);
                 type="button"
                 onClick={handleConfirmDispatch}
                 disabled={sending}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-900/20 active:scale-98 transition-all"
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white shadow-md active:scale-98 transition-all ${
+                  outreachChannel === 'WhatsApp'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-900/20'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-blue-900/20'
+                }`}
               >
                 {sending ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Dispatching Emails...</span>
+                    <span>Dispatching {outreachChannel}...</span>
                   </>
                 ) : (
                   <>
-                    <Send className="w-4 h-4" />
-                    <span>Confirm &amp; Send Campaign</span>
+                    {outreachChannel === 'WhatsApp' ? <MessageSquare className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                    <span>Confirm &amp; Send {outreachChannel} Broadcast</span>
                   </>
                 )}
               </button>

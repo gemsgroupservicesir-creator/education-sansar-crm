@@ -405,6 +405,7 @@ CREATE TABLE IF NOT EXISTS bulk_email_campaigns (
   sent_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'COMPLETED', -- 'QUEUED', 'SENDING', 'COMPLETED', 'FAILED'
+  channel TEXT NOT NULL DEFAULT 'Email', -- 'Email', 'WhatsApp'
   sent_by TEXT NOT NULL DEFAULT 'Super Admin',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

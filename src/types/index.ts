@@ -576,6 +576,7 @@ export interface BulkEmailCampaign {
   sent_count: number;
   failed_count: number;
   status: 'QUEUED' | 'SENDING' | 'COMPLETED' | 'FAILED';
+  channel?: 'Email' | 'WhatsApp';
   sent_by: string;
   created_at: string;
 }

@@ -523,12 +523,13 @@ export const api = {
   getUniversityCommissions: () =>
     fetchJson<any[]>('/finance/university-commissions'),
 
-  // Email Templates & Bulk Outreach
-  getEmailTemplates: (params: { course?: string; university?: string; category?: string } = {}) => {
+  // Email Templates & Bulk Outreach (Email & WhatsApp)
+  getEmailTemplates: (params: { course?: string; university?: string; category?: string; channel?: string } = {}) => {
     const query = new URLSearchParams();
     if (params.course) query.append('course', params.course);
     if (params.university) query.append('university', params.university);
     if (params.category) query.append('category', params.category);
+    if (params.channel) query.append('channel', params.channel);
     const qs = query.toString();
     return fetchJson<any[]>(`/email/templates${qs ? `?${qs}` : ''}`);
   },
@@ -552,6 +553,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getTargetEmailCount: (filters: {
+    channel?: 'Email' | 'WhatsApp';
     filter_course?: string;
     filter_university?: string;
     filter_status?: string;
@@ -570,13 +572,15 @@ export const api = {
     }),
   getEmailCampaigns: () =>
     fetchJson<any[]>('/email/campaigns'),
-  getEmailFilterOptions: () =>
+  getEmailFilterOptions: (channel: 'Email' | 'WhatsApp' = 'Email') =>
     fetchJson<{
       courses: { name: string; count: number }[];
       universities: { name: string; count: number }[];
       statuses: { name: string; count: number }[];
       temperatures: { name: string; count: number }[];
       totalLeadsWithEmail: number;
-    }>('/email/filter-options'),
+      totalLeadsWithWhatsApp?: number;
+      totalTargetLeads?: number;
+    }>(`/email/filter-options?channel=${channel}`),
 };
 

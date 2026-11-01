@@ -436,6 +436,7 @@ CREATE TABLE IF NOT EXISTS bulk_email_campaigns (
   sent_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'COMPLETED', -- 'QUEUED', 'SENDING', 'COMPLETED', 'FAILED'
+  channel TEXT NOT NULL DEFAULT 'Email', -- 'Email', 'WhatsApp'
   sent_by TEXT NOT NULL DEFAULT 'Super Admin',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -1924,6 +1925,7 @@ function runSafeMigrations() {
   } catch (e) {
     console.warn("[Migration Notice] bulk_email_campaigns table:", e.message);
   }
+  addColumnIfNotExists("bulk_email_campaigns", "channel", "TEXT NOT NULL DEFAULT 'Email'");
 }
 function initDatabase() {
   try {
@@ -5404,8 +5406,16 @@ function resolveMergeTags(text, vars) {
   });
 }
 function getEmailTemplates(filters) {
-  let query = "SELECT * FROM message_templates WHERE is_active = 1 AND (channel = 'Email' OR channel IS NULL OR channel = '')";
+  let query = "SELECT * FROM message_templates WHERE is_active = 1";
   const params = [];
+  if (filters?.channel && filters.channel !== "ALL") {
+    if (filters.channel === "Email") {
+      query += " AND (channel = 'Email' OR channel IS NULL OR channel = '')";
+    } else {
+      query += " AND channel = ?";
+      params.push(filters.channel);
+    }
+  }
   if (filters?.category) {
     query += " AND category = ?";
     params.push(filters.category);
@@ -5541,12 +5551,18 @@ function previewEmailResolution(subject, content, sampleData) {
   };
 }
 function getTargetLeadsForBulkEmail(filters) {
+  const isWhatsApp = filters.channel === "WhatsApp";
   let query = `
     SELECT l.*, c.name as counselor_name, c.email as counselor_email, c.phone as counselor_phone
     FROM leads l
     LEFT JOIN counselors c ON l.assigned_counselor_id = c.id
-    WHERE l.is_deleted = 0 AND l.email IS NOT NULL AND trim(l.email) != '' AND l.email LIKE '%@%'
+    WHERE l.is_deleted = 0
   `;
+  if (isWhatsApp) {
+    query += ` AND ((l.whatsapp_number IS NOT NULL AND trim(l.whatsapp_number) != '') OR (l.phone IS NOT NULL AND trim(l.phone) != ''))`;
+  } else {
+    query += ` AND l.email IS NOT NULL AND trim(l.email) != '' AND l.email LIKE '%@%'`;
+  }
   const params = [];
   if (filters.filter_course && filters.filter_course.trim()) {
     const rawCourse = filters.filter_course.trim().toLowerCase();
@@ -5591,9 +5607,12 @@ function getTargetLeadsForBulkEmail(filters) {
   query += " ORDER BY l.created_at DESC";
   return db.prepare(query).all(...params);
 }
-function getBulkEmailFilterOptions() {
-  const baseWhere = "WHERE is_deleted = 0 AND email IS NOT NULL AND trim(email) != '' AND email LIKE '%@%'";
-  const total = db.prepare(`SELECT count(*) as count FROM leads ${baseWhere}`).get().count;
+function getBulkEmailFilterOptions(channel = "Email") {
+  const emailWhere = "WHERE is_deleted = 0 AND email IS NOT NULL AND trim(email) != '' AND email LIKE '%@%'";
+  const waWhere = "WHERE is_deleted = 0 AND ((whatsapp_number IS NOT NULL AND trim(whatsapp_number) != '') OR (phone IS NOT NULL AND trim(phone) != ''))";
+  const totalEmail = db.prepare(`SELECT count(*) as count FROM leads ${emailWhere}`).get().count;
+  const totalWhatsApp = db.prepare(`SELECT count(*) as count FROM leads ${waWhere}`).get().count;
+  const baseWhere = channel === "WhatsApp" ? waWhere : emailWhere;
   const courses = db.prepare(`
     SELECT COALESCE(preferred_course, 'Unspecified') as name, count(*) as count
     FROM leads
@@ -5627,12 +5646,15 @@ function getBulkEmailFilterOptions() {
     universities: universities.filter((u) => u.name && u.name !== "Unspecified"),
     statuses: statuses.filter((s) => s.name),
     temperatures: temperatures.filter((t) => t.name),
-    totalLeadsWithEmail: total
+    totalLeadsWithEmail: totalEmail,
+    totalLeadsWithWhatsApp: totalWhatsApp,
+    totalTargetLeads: channel === "WhatsApp" ? totalWhatsApp : totalEmail
   };
 }
 function sendBulkEmailCampaign(params) {
-  const targetLeads = getTargetLeadsForBulkEmail(params);
-  const campaignId = "camp-bulk-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const channel = params.channel === "WhatsApp" ? "WhatsApp" : "Email";
+  const targetLeads = getTargetLeadsForBulkEmail({ ...params, channel });
+  const campaignId = `camp-${channel.toLowerCase()}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
   const now = (/* @__PURE__ */ new Date()).toISOString();
   let validTemplateId = null;
   if (params.template_id) {
@@ -5646,47 +5668,57 @@ function sendBulkEmailCampaign(params) {
   const samplePreviews = [];
   const insertMsg = db.prepare(`
     INSERT INTO messages (id, lead_id, channel, recipient, sender, template_id, content, status, metadata, sent_at)
-    VALUES (?, ?, 'Email', ?, ?, ?, ?, 'Sent', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'Sent', ?, ?)
   `);
   const insertLeadActivity = db.prepare(`
     INSERT INTO lead_activities (id, lead_id, activity_type, title, description, performed_by, created_at)
-    VALUES (?, ?, 'EMAIL_SENT', ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
+  const insertIntegrationLog = db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+    VALUES (?, ?, 'OUTBOUND', 'SUCCESS', ?, ?, ?)
+  `);
+  const effectiveSubject = params.subject || (channel === "WhatsApp" ? params.campaign_name || "Bulk WhatsApp Outreach" : "Admissions Update");
   const runDispatch = db.transaction(() => {
     for (const lead of targetLeads) {
       try {
         const studentName = lead.student_name || lead.first_name || "Student";
         const firstName = lead.first_name || studentName.split(" ")[0];
+        const recipient = channel === "WhatsApp" ? lead.whatsapp_number || lead.phone : lead.email;
         const mergeVars = {
           student_name: studentName,
           first_name: firstName,
           phone: lead.phone,
+          whatsapp_number: lead.whatsapp_number || lead.phone,
           email: lead.email,
           preferred_course: lead.preferred_course || "Chosen Program",
           preferred_university: lead.preferred_university || "Partner University",
           city: lead.city || "Nepal",
           counselor_name: lead.counselor_name || "Gems Group Services Advisor",
           counselor_email: lead.counselor_email || "admissions@gemsgroupservices.com",
-          counselor_phone: lead.counselor_phone || "+91 98100 12345",
+          counselor_phone: lead.counselor_phone || "+977 9801234567",
           application_id: "APP-" + lead.id.substring(0, 8).toUpperCase(),
           deadline: "30th November 2026",
           portal_url: "https://education-sansar-crm.vercel.app",
           company_name: "Gems Group Services",
           year: "2026"
         };
-        const resolvedSubject = resolveMergeTags(params.subject, mergeVars);
+        const resolvedSubject2 = resolveMergeTags(effectiveSubject, mergeVars);
         const resolvedBody = resolveMergeTags(params.content, mergeVars);
         const msgId = "msg-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
         const metadata = JSON.stringify({
-          subject: resolvedSubject,
+          channel,
+          subject: resolvedSubject2,
           campaign_id: campaignId,
           course: lead.preferred_course,
-          university: lead.preferred_university
+          university: lead.preferred_university,
+          phone: lead.whatsapp_number || lead.phone
         });
         insertMsg.run(
           msgId,
           lead.id,
-          lead.email,
+          channel,
+          recipient,
           params.sent_by || "Gems Group Services Admissions",
           validTemplateId,
           resolvedBody,
@@ -5697,20 +5729,33 @@ function sendBulkEmailCampaign(params) {
         insertLeadActivity.run(
           actId,
           lead.id,
-          `Bulk Email Sent: ${resolvedSubject}`,
-          `Personalized course outreach sent to ${lead.email}`,
+          channel === "WhatsApp" ? "WhatsApp" : "EMAIL_SENT",
+          channel === "WhatsApp" ? `Bulk WhatsApp Sent: ${params.campaign_name || resolvedSubject2}` : `Bulk Email Sent: ${resolvedSubject2}`,
+          channel === "WhatsApp" ? `Personalized WhatsApp message sent to ${recipient}` : `Personalized course outreach sent to ${lead.email}`,
           params.sent_by || "Super Admin",
           now
         );
+        if (channel === "WhatsApp") {
+          const logId = "LOG-WA-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+          insertIntegrationLog.run(
+            logId,
+            "WhatsApp Business API",
+            "/v18.0/messages",
+            JSON.stringify({ recipient, message: resolvedBody }),
+            JSON.stringify({ campaign_id: campaignId, status: "SUCCESS" })
+          );
+        }
         sentCount++;
-        if (samplePreviews.length < 3) {
+        if (samplePreviews.length < 5) {
           samplePreviews.push({
             student_name: studentName,
-            email: lead.email,
+            recipient,
+            channel,
             course: lead.preferred_course,
             university: lead.preferred_university,
-            subject: resolvedSubject,
-            content_snippet: resolvedBody.substring(0, 150) + "..."
+            subject: resolvedSubject2,
+            content_snippet: resolvedBody.substring(0, 150) + "...",
+            full_content: resolvedBody
           });
         }
       } catch (err) {
@@ -5719,17 +5764,18 @@ function sendBulkEmailCampaign(params) {
     }
     db.prepare(`
       INSERT INTO bulk_email_campaigns (
-        id, name, template_id, subject, content,
+        id, name, template_id, subject, content, channel,
         filter_course, filter_university, filter_status, filter_temperature,
         total_recipients, sent_count, failed_count, status, sent_by, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?)
     `).run(
       campaignId,
-      params.campaign_name || `Bulk Outreach - ${params.filter_course || "All Courses"} (${targetLeads.length} leads)`,
+      params.campaign_name || (channel === "WhatsApp" ? `Bulk WhatsApp - ${params.filter_course || "All Courses"} (${targetLeads.length} leads)` : `Bulk Email - ${params.filter_course || "All Courses"} (${targetLeads.length} leads)`),
       validTemplateId,
-      params.subject,
+      resolvedSubject,
       params.content,
+      channel,
       params.filter_course || null,
       params.filter_university || null,
       params.filter_status || null,
@@ -5742,10 +5788,11 @@ function sendBulkEmailCampaign(params) {
     );
     logAudit({
       userName: params.sent_by || "Super Admin",
-      action: "BULK_EMAIL_SENT",
+      action: channel === "WhatsApp" ? "BULK_WHATSAPP_SENT" : "BULK_EMAIL_SENT",
       entity: "bulk_email_campaign",
       entityId: campaignId,
       newValue: {
+        channel,
         total_recipients: targetLeads.length,
         course_filter: params.filter_course,
         university_filter: params.filter_university
@@ -5758,15 +5805,14 @@ function sendBulkEmailCampaign(params) {
     total_recipients: targetLeads.length,
     sent_count: sentCount,
     failed_count: failedCount,
-    sample_previews: samplePreviews
+    sample_previews: samplePreviews,
+    channel
   };
 }
 function getBulkEmailCampaigns() {
   return db.prepare("SELECT * FROM bulk_email_campaigns ORDER BY created_at DESC LIMIT 50").all();
 }
 function ensureInitialCourseEmailTemplatesSeed() {
-  const existingCount = db.prepare("SELECT count(*) as count FROM message_templates WHERE channel = 'Email'").get().count;
-  if (existingCount > 0) return;
   const templates = [
     {
       id: "tmpl-btech-sharda",
@@ -5888,10 +5934,54 @@ If you have already transferred the fee, please share the deposit voucher with {
 Sincerely,
 Accounts & Student Services
 Gems Group Services`
+    },
+    {
+      id: "tmpl-wa-course-scholarship",
+      name: "WhatsApp Course Admission & Scholarship Notification",
+      category: "COURSE_PROSPECTUS",
+      channel: "WhatsApp",
+      subject: "WhatsApp Course & Scholarship Alert",
+      description: "Instant WhatsApp message with course highlights, up to 50% scholarship alert, and counselor contact",
+      target_courses: ["B.Tech", "MBBS", "BBA", "MBA", "Nursing", "BCA", "Pharmacy"],
+      target_universities: ["Sharda University", "Chandigarh University", "Parul University", "Manipal University"],
+      content: `Namaste {{student_name}}! \u{1F393} Greetings from Gems Group Services.
+
+We noticed your high interest in *{{preferred_course}}* at *{{preferred_university}}*. 
+
+\u{1F31F} *Exclusive Update for Nepal Students:*
+\u2022 Merit Scholarships: Up to 50% tuition waiver
+\u2022 Direct Authorized Seat Allotment
+\u2022 Dedicated Nepal Student Hostels & Guidance
+
+Your Personal Admissions Counselor:
+\u{1F464} *{{counselor_name}}*
+\u{1F4DE} WhatsApp: {{counselor_phone}}
+
+Reply *YES* to receive the official fee breakdown & scholarship eligibility details!`
+    },
+    {
+      id: "tmpl-wa-counselor-session",
+      name: "WhatsApp Direct 1-on-1 Counselor Consultation",
+      category: "COUNSELOR_INTRO",
+      channel: "WhatsApp",
+      subject: "WhatsApp 1-on-1 Counselor Advisory",
+      description: "Friendly counselor introduction and invitation to schedule consultation on WhatsApp",
+      target_courses: [],
+      target_universities: [],
+      content: `Hello {{student_name}}! \u{1F44B} 
+
+This is {{counselor_name}} from *Gems Group Services*. I have been assigned as your dedicated university admission advisor for *{{preferred_university}}* ({{preferred_course}}).
+
+Are you available for a quick 5-minute call today to discuss your scholarship eligibility and application deadline ({{deadline}})?
+
+Feel free to reply right here on WhatsApp!`
     }
   ];
   for (const t of templates) {
-    saveEmailTemplate(t, "System");
+    const exists = db.prepare("SELECT id FROM message_templates WHERE id = ?").get(t.id);
+    if (!exists) {
+      saveEmailTemplate(t, "System");
+    }
   }
 }
 function ensureDiverseCourseLeads() {
@@ -8435,32 +8525,34 @@ apiRouter.get("/email/templates", (req, res) => {
     const filters = {
       course: req.query.course,
       university: req.query.university,
-      category: req.query.category
+      category: req.query.category,
+      channel: req.query.channel
     };
     const templates = getEmailTemplates(filters);
     res.json(templates);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to fetch email templates" });
+    res.status(500).json({ error: err.message || "Failed to fetch templates" });
   }
 });
 apiRouter.get("/email/filter-options", (req, res) => {
   try {
-    const options = getBulkEmailFilterOptions();
+    const channel = req.query.channel || "Email";
+    const options = getBulkEmailFilterOptions(channel);
     res.json(options);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to fetch email filter options" });
+    res.status(500).json({ error: err.message || "Failed to fetch filter options" });
   }
 });
 apiRouter.post("/email/templates", (req, res) => {
   try {
-    const { name, subject, content } = req.body;
-    if (!name || !subject || !content) {
-      return res.status(400).json({ error: "Template name, subject, and content are required" });
+    const { name, content } = req.body;
+    if (!name || !content) {
+      return res.status(400).json({ error: "Template name and content are required" });
     }
     const template = saveEmailTemplate(req.body, req.body.performedBy || "Super Admin");
     res.status(201).json(template);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to create email template" });
+    res.status(500).json({ error: err.message || "Failed to create template" });
   }
 });
 apiRouter.put("/email/templates/:id", (req, res) => {
@@ -8468,7 +8560,7 @@ apiRouter.put("/email/templates/:id", (req, res) => {
     const template = saveEmailTemplate({ id: req.params.id, ...req.body }, req.body.performedBy || "Super Admin");
     res.json(template);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to update email template" });
+    res.status(500).json({ error: err.message || "Failed to update template" });
   }
 });
 apiRouter.delete("/email/templates/:id", (req, res) => {
@@ -8480,7 +8572,7 @@ apiRouter.delete("/email/templates/:id", (req, res) => {
     }
     res.json({ success });
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to delete email template" });
+    res.status(500).json({ error: err.message || "Failed to delete template" });
   }
 });
 apiRouter.post("/email/preview", (req, res) => {
@@ -8489,11 +8581,12 @@ apiRouter.post("/email/preview", (req, res) => {
     const preview = previewEmailResolution(subject || "", content || "", sampleData);
     res.json(preview);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to preview email template" });
+    res.status(500).json({ error: err.message || "Failed to preview template" });
   }
 });
 apiRouter.post("/email/target-count", (req, res) => {
   try {
+    const channel = req.body?.channel || "Email";
     const matchingLeads = getTargetLeadsForBulkEmail(req.body || {});
     res.json({
       count: matchingLeads.length,
@@ -8501,6 +8594,9 @@ apiRouter.post("/email/target-count", (req, res) => {
         id: l.id,
         student_name: l.student_name,
         email: l.email,
+        phone: l.phone,
+        whatsapp_number: l.whatsapp_number,
+        recipient: channel === "WhatsApp" ? l.whatsapp_number || l.phone : l.email,
         course: l.preferred_course,
         university: l.preferred_university,
         city: l.city,
@@ -8513,14 +8609,18 @@ apiRouter.post("/email/target-count", (req, res) => {
 });
 apiRouter.post("/email/send-bulk", (req, res) => {
   try {
-    const { subject, content } = req.body;
-    if (!subject || !content) {
+    const { subject, content, channel } = req.body;
+    const outreachChannel = channel === "WhatsApp" ? "WhatsApp" : "Email";
+    if (outreachChannel === "Email" && (!subject || !content)) {
       return res.status(400).json({ error: "Subject and email content body are required" });
+    }
+    if (outreachChannel === "WhatsApp" && !content) {
+      return res.status(400).json({ error: "WhatsApp message content is required" });
     }
     const result = sendBulkEmailCampaign(req.body);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Failed to dispatch bulk email campaign" });
+    res.status(500).json({ error: err.message || "Failed to dispatch bulk outreach campaign" });
   }
 });
 apiRouter.get("/email/campaigns", (req, res) => {
