@@ -325,6 +325,18 @@ export async function deleteLeadFromNeon(leadId: string): Promise<boolean> {
     await sql.query(`DELETE FROM applications WHERE lead_id = $1`, [leadId]);
     await sql.query(`DELETE FROM documents WHERE lead_id = $1`, [leadId]);
     await sql.query(`DELETE FROM leads WHERE id = $1`, [leadId]);
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      `del_lead_${leadId}`,
+      'lead',
+      leadId,
+      leadId,
+      'Lead permanently deleted',
+      'User Action'
+    ]);
     return true;
   } catch (err: any) {
     console.error('[Neon Delete] Lead deletion failed:', err.message);
