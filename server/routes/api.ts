@@ -1686,28 +1686,61 @@ apiRouter.delete('/universities/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-apiRouter.get('/courses', (req: Request, res: Response) => {
+apiRouter.get('/courses', async (req: Request, res: Response) => {
   const { university_id, stream, course_level, search } = req.query;
-  let sql = 'SELECT * FROM courses WHERE 1=1';
+
+  if (isNeonEnabled() && sql) {
+    try {
+      let neonSql = 'SELECT * FROM courses WHERE 1=1';
+      const neonParams: any[] = [];
+      let pIdx = 1;
+      if (university_id) {
+        neonSql += ` AND university_id = $${pIdx++}`;
+        neonParams.push(university_id);
+      }
+      if (stream) {
+        neonSql += ` AND stream = $${pIdx++}`;
+        neonParams.push(stream);
+      }
+      if (course_level) {
+        neonSql += ` AND course_level = $${pIdx++}`;
+        neonParams.push(course_level);
+      }
+      if (search) {
+        neonSql += ` AND (course_name ILIKE $${pIdx} OR stream ILIKE $${pIdx} OR short_name ILIKE $${pIdx} OR university_name ILIKE $${pIdx})`;
+        neonParams.push(`%${search}%`);
+        pIdx++;
+      }
+      neonSql += ' ORDER BY course_name ASC LIMIT 1000';
+      const neonCourses = await sql.query(neonSql, neonParams);
+      if (neonCourses && neonCourses.length > 0) {
+        return res.json(neonCourses);
+      }
+    } catch (e: any) {
+      console.warn('[Neon Courses] Falling back to SQLite:', e.message);
+    }
+  }
+
+  let sqlQuery = 'SELECT * FROM courses WHERE 1=1';
   const params: any[] = [];
   if (university_id) {
-    sql += ' AND university_id = ?';
+    sqlQuery += ' AND university_id = ?';
     params.push(university_id);
   }
   if (stream) {
-    sql += ' AND stream = ?';
+    sqlQuery += ' AND stream = ?';
     params.push(stream);
   }
   if (course_level) {
-    sql += ' AND course_level = ?';
+    sqlQuery += ' AND course_level = ?';
     params.push(course_level);
   }
   if (search) {
-    sql += ' AND (course_name LIKE ? OR stream LIKE ? OR short_name LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    sqlQuery += ' AND (course_name LIKE ? OR stream LIKE ? OR short_name LIKE ? OR university_name LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
-  sql += ' ORDER BY course_name ASC';
-  const courses = db.prepare(sql).all(...params);
+  sqlQuery += ' ORDER BY course_name ASC LIMIT 1000';
+  const courses = db.prepare(sqlQuery).all(...params);
   res.json(courses);
 });
 
@@ -1965,8 +1998,83 @@ apiRouter.post('/courses/batch-import', async (req: Request, res: Response) => {
 // ==========================================
 // 7.1 UNIVERSITY COURSES & FEE DATABASE (SECTION 7)
 // ==========================================
-apiRouter.get('/university-courses', (req: Request, res: Response) => {
+apiRouter.get('/university-courses', async (req: Request, res: Response) => {
   const { search, university_id, course_id, stream, course_level, max_fee, city, state } = req.query;
+
+  if (isNeonEnabled() && sql) {
+    try {
+      let neonSql = `
+        SELECT 
+          uc.*,
+          u.name as university_name,
+          u.short_name as university_short_name,
+          u.city as university_city,
+          u.state as university_state,
+          u.country as university_country,
+          u.ranking as university_ranking,
+          u.accreditation as university_accreditation,
+          u.university_type,
+          c.course_name,
+          c.short_name as course_short_name,
+          c.course_level,
+          c.stream,
+          c.duration as course_duration,
+          c.eligibility as course_eligibility,
+          c.entrance_requirement
+        FROM university_courses uc
+        JOIN universities u ON uc.university_id = u.id
+        JOIN courses c ON uc.course_id = c.id
+        WHERE 1=1
+      `;
+      const neonParams: any[] = [];
+      let pIdx = 1;
+
+      if (search) {
+        neonSql += ` AND (u.name ILIKE $${pIdx} OR c.course_name ILIKE $${pIdx} OR u.city ILIKE $${pIdx} OR c.stream ILIKE $${pIdx} OR u.short_name ILIKE $${pIdx})`;
+        neonParams.push(`%${search}%`);
+        pIdx++;
+      }
+      if (university_id) {
+        neonSql += ` AND uc.university_id = $${pIdx++}`;
+        neonParams.push(university_id);
+      }
+      if (course_id) {
+        neonSql += ` AND uc.course_id = $${pIdx++}`;
+        neonParams.push(course_id);
+      }
+      if (stream) {
+        neonSql += ` AND c.stream = $${pIdx++}`;
+        neonParams.push(stream);
+      }
+      if (course_level) {
+        neonSql += ` AND c.course_level = $${pIdx++}`;
+        neonParams.push(course_level);
+      }
+      if (city) {
+        neonSql += ` AND u.city ILIKE $${pIdx++}`;
+        neonParams.push(`%${city}%`);
+      }
+      if (state) {
+        neonSql += ` AND u.state ILIKE $${pIdx++}`;
+        neonParams.push(`%${state}%`);
+      }
+      if (max_fee) {
+        const feeNum = parseFloat(max_fee as string);
+        if (!isNaN(feeNum)) {
+          neonSql += ` AND (uc.tuition_fee_per_year <= $${pIdx++} OR uc.total_first_year_fee <= $${pIdx++})`;
+          neonParams.push(feeNum, feeNum);
+        }
+      }
+      neonSql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC LIMIT 500`;
+      const neonResults = await sql.query(neonSql, neonParams);
+      if (neonResults && neonResults.length > 0) {
+        return res.json(neonResults);
+      }
+    } catch (e: any) {
+      console.warn('[Neon University Courses] Falling back to SQLite:', e.message);
+    }
+  }
+
   let sql = `
     SELECT 
       uc.*,
@@ -2027,7 +2135,7 @@ apiRouter.get('/university-courses', (req: Request, res: Response) => {
       params.push(feeNum, feeNum);
     }
   }
-  sql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC`;
+  sql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC LIMIT 500`;
   const results = db.prepare(sql).all(...params);
   res.json(results);
 });

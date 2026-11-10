@@ -18,6 +18,7 @@ import {
   ArrowUpDown,
   RefreshCw,
   ExternalLink,
+  ChevronLeft,
   ChevronRight,
   ShieldCheck,
   Check,
@@ -47,6 +48,8 @@ export const UniversityFeesPage: React.FC = () => {
   const [selectedLevel, setSelectedLevel] = useState('');
   const [maxBudget, setMaxBudget] = useState<number | ''>('');
   const [selectedCity, setSelectedCity] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 24;
 
   // Comparison selection
   const [selectedForComparison, setSelectedForComparison] = useState<string[]>([]);
@@ -125,6 +128,10 @@ export const UniversityFeesPage: React.FC = () => {
     }, 300);
     return () => clearTimeout(handler);
   }, [search]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedUniversity, selectedStream, selectedLevel, selectedCity, maxBudget, search]);
 
   const handleOpenAddModal = () => {
     setEditingItem(null);
@@ -435,8 +442,9 @@ export const UniversityFeesPage: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {feeStructures.map((item) => {
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {feeStructures.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((item) => {
             const isSelected = selectedForComparison.includes(item.id);
 
             return (
@@ -597,7 +605,44 @@ export const UniversityFeesPage: React.FC = () => {
             );
           })}
         </div>
-      )}
+
+        {feeStructures.length > pageSize && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-slate-200 text-xs shadow-xs">
+            <span className="text-slate-500 font-medium">
+              Showing <strong className="text-slate-800">{(currentPage - 1) * pageSize + 1}</strong> to{' '}
+              <strong className="text-slate-800">{Math.min(currentPage * pageSize, feeStructures.length)}</strong> of{' '}
+              <strong className="text-slate-800">{feeStructures.length}</strong> programs
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center gap-1 transition-all"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Previous</span>
+              </button>
+
+              <span className="px-3 py-1 text-blue-700 font-semibold bg-blue-50 rounded-lg border border-blue-100">
+                Page {currentPage} of {Math.ceil(feeStructures.length / pageSize)}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(Math.ceil(feeStructures.length / pageSize), p + 1))}
+                disabled={currentPage >= Math.ceil(feeStructures.length / pageSize)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center gap-1 transition-all"
+              >
+                <span>Next</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    )}
 
       {/* Floating Bottom Comparison Drawer (when items selected) */}
       {selectedForComparison.length > 0 && (

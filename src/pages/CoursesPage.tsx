@@ -18,7 +18,9 @@ import {
   Check,
   Building2,
   Landmark,
-  GraduationCap
+  GraduationCap,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Course, University } from '../types';
@@ -39,6 +41,8 @@ export const CoursesPage: React.FC = () => {
   const [selectedStream, setSelectedStream] = useState('');
   const [selectedLevel, setSelectedLevel] = useState('');
   const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 24;
 
   // Modals
   const [modalOpen, setModalOpen] = useState(false);
@@ -224,6 +228,10 @@ export const CoursesPage: React.FC = () => {
     return () => clearTimeout(handler);
   }, [search]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedUni, selectedStream, selectedLevel, search]);
+
   const handleOpenAdd = () => {
     setEditingCourse(null);
     setCourseName('');
@@ -401,78 +409,116 @@ export const CoursesPage: React.FC = () => {
           <p className="text-xs text-slate-500">No courses match the current filter selection.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {courses.map((c) => (
-            <div
-              key={c.id}
-              className="p-5 rounded-2xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all space-y-3 flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                    {c.course_level || c.degree_level} · {c.duration}
-                  </span>
-                  {c.stream && (
-                    <span className="text-[10px] font-medium text-slate-500 truncate max-w-[120px]">
-                      {c.stream}
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {courses.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((c) => (
+              <div
+                key={c.id}
+                className="p-5 rounded-2xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all space-y-3 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
+                      {c.course_level || c.degree_level} · {c.duration}
                     </span>
-                  )}
+                    {c.stream && (
+                      <span className="text-[10px] font-medium text-slate-500 truncate max-w-[120px]">
+                        {c.stream}
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="font-bold text-sm text-slate-900 mt-2 leading-snug">{c.course_name}</h3>
+                  <div className="text-xs font-semibold text-blue-600 mt-0.5">{c.university_name}</div>
+
+                  <div className="space-y-1.5 pt-3 text-xs">
+                    {c.eligibility && (
+                      <div className="text-slate-600 line-clamp-2">
+                        <span className="text-slate-400 font-medium">Eligibility:</span> {c.eligibility}
+                      </div>
+                    )}
+
+                    {c.entrance_requirement && (
+                      <div className="text-slate-600 text-[11px]">
+                        <span className="text-slate-400 font-medium">Entrance:</span> {c.entrance_requirement}
+                      </div>
+                    )}
+
+                    {c.fees_range && (
+                      <div className="text-slate-700 font-semibold bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        💰 Indicative Fee: <span className="text-blue-700">{c.fees_range}</span>
+                      </div>
+                    )}
+
+                    {c.scholarship_info && (
+                      <div className="text-emerald-700 text-[11px] font-medium line-clamp-1">
+                        🎓 {c.scholarship_info}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <h3 className="font-bold text-sm text-slate-900 mt-2 leading-snug">{c.course_name}</h3>
-                <div className="text-xs font-semibold text-blue-600 mt-0.5">{c.university_name}</div>
-
-                <div className="space-y-1.5 pt-3 text-xs">
-                  {c.eligibility && (
-                    <div className="text-slate-600 line-clamp-2">
-                      <span className="text-slate-400 font-medium">Eligibility:</span> {c.eligibility}
-                    </div>
-                  )}
-
-                  {c.entrance_requirement && (
-                    <div className="text-slate-600 text-[11px]">
-                      <span className="text-slate-400 font-medium">Entrance:</span> {c.entrance_requirement}
-                    </div>
-                  )}
-
-                  {c.fees_range && (
-                    <div className="text-slate-700 font-semibold bg-slate-50 p-2 rounded-lg border border-slate-100">
-                      💰 Indicative Fee: <span className="text-blue-700">{c.fees_range}</span>
-                    </div>
-                  )}
-
-                  {c.scholarship_info && (
-                    <div className="text-emerald-700 text-[11px] font-medium line-clamp-1">
-                      🎓 {c.scholarship_info}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Intake: <strong className="text-slate-700">{c.intake || 'Fall 2026'}</strong></span>
+                  {canManage && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleOpenEdit(c)}
+                        className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                        title="Edit Course"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c.id, c.course_name)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Delete Course"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   )}
                 </div>
               </div>
+            ))}
+          </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                <span>Intake: <strong className="text-slate-700">{c.intake || 'Fall 2026'}</strong></span>
-                {canManage && (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleOpenEdit(c)}
-                      className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                      title="Edit Course"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(c.id, c.course_name)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                      title="Delete Course"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
+          {courses.length > pageSize && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-white rounded-2xl border border-slate-200 text-xs shadow-xs">
+              <span className="text-slate-500 font-medium">
+                Showing <strong className="text-slate-800">{(currentPage - 1) * pageSize + 1}</strong> to{' '}
+                <strong className="text-slate-800">{Math.min(currentPage * pageSize, courses.length)}</strong> of{' '}
+                <strong className="text-slate-800">{courses.length}</strong> programs
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center gap-1 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Previous</span>
+                </button>
+
+                <span className="px-3 py-1 text-purple-700 font-semibold bg-purple-50 rounded-lg border border-purple-100">
+                  Page {currentPage} of {Math.ceil(courses.length / pageSize)}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(Math.ceil(courses.length / pageSize), p + 1))}
+                  disabled={currentPage >= Math.ceil(courses.length / pageSize)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center gap-1 transition-all"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Modal Add / Edit Course */}
