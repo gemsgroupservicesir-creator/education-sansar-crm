@@ -30,7 +30,7 @@ import { useAuth } from '../context/AuthContext';
 export const UniversitiesPage: React.FC = () => {
   const { addToast } = useNotifications();
   const { currentRole } = useAuth();
-  const isAdmin = currentRole === 'Super Admin' || currentRole === 'Admin';
+  const canManage = true; // Always visible for all users in CRM
 
   const [universities, setUniversities] = useState<University[]>([]);
   const [loading, setLoading] = useState(true);
@@ -284,7 +284,7 @@ export const UniversitiesPage: React.FC = () => {
           </p>
         </div>
 
-        {isAdmin && (
+        {canManage && (
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <button
               onClick={handleOpenFetchModal}
@@ -390,7 +390,7 @@ export const UniversitiesPage: React.FC = () => {
                     </a>
                   )}
 
-                  {isAdmin && (
+                  {canManage && (
                     <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
                       <button
                         onClick={() => handleOpenEdit(u)}

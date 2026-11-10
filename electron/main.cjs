@@ -86,7 +86,26 @@ function createAppMenu() {
         {
           label: 'Reload App',
           accelerator: 'CmdOrCtrl+R',
-          click: () => mainWindow && mainWindow.reload()
+          click: () => {
+            if (mainWindow) {
+              if (mainWindow.webContents && mainWindow.webContents.reloadIgnoringCache) {
+                mainWindow.webContents.reloadIgnoringCache();
+              } else {
+                mainWindow.reload();
+              }
+            }
+          }
+        },
+        {
+          label: 'Force Reload (Clear Cache)',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => {
+            if (mainWindow && mainWindow.webContents) {
+              mainWindow.webContents.session.clearCache().then(() => {
+                mainWindow.webContents.reloadIgnoringCache();
+              });
+            }
+          }
         },
         {
           label: 'Open Web Portal',

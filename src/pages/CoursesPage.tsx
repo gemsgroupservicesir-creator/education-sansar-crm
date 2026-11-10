@@ -28,7 +28,7 @@ import { useAuth } from '../context/AuthContext';
 export const CoursesPage: React.FC = () => {
   const { addToast } = useNotifications();
   const { currentRole } = useAuth();
-  const isAdmin = currentRole === 'Super Admin' || currentRole === 'Admin';
+  const canManage = true; // Always visible for all users in CRM
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [universities, setUniversities] = useState<University[]>([]);
@@ -318,7 +318,7 @@ export const CoursesPage: React.FC = () => {
           </p>
         </div>
 
-        {isAdmin && (
+        {canManage && (
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <button
               onClick={handleOpenFetchModal}
@@ -451,7 +451,7 @@ export const CoursesPage: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
                 <span>Intake: <strong className="text-slate-700">{c.intake || 'Fall 2026'}</strong></span>
-                {isAdmin && (
+                {canManage && (
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => handleOpenEdit(c)}
