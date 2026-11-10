@@ -1098,7 +1098,23 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       const upsertUni = db.prepare(`
         INSERT INTO universities (id, name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active, is_demo, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (id) DO UPDATE SET name = excluded.name, status = excluded.status
+        ON CONFLICT (id) DO UPDATE SET 
+          name = excluded.name,
+          short_name = excluded.short_name,
+          campus = excluded.campus,
+          city = excluded.city,
+          state = excluded.state,
+          country = excluded.country,
+          university_type = excluded.university_type,
+          accreditation = excluded.accreditation,
+          ranking = excluded.ranking,
+          website = excluded.website,
+          contact = excluded.contact,
+          description = excluded.description,
+          status = excluded.status,
+          is_active = excluded.is_active,
+          is_demo = excluded.is_demo,
+          updated_at = excluded.updated_at
       `);
       for (const u of universities) {
         if (tombstoneEntities.has('university:' + u.id)) {
