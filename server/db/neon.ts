@@ -706,6 +706,117 @@ export async function persistUniversityCourseToNeon(uc: any): Promise<boolean> {
 }
 
 /**
+ * Persist University to Neon
+ */
+export async function persistUniversityToNeon(uni: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO universities (
+        id, name, short_name, campus, city, state, country, university_type,
+        accreditation, ranking, website, contact, description, status, is_active, is_demo, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        short_name = EXCLUDED.short_name,
+        campus = EXCLUDED.campus,
+        city = EXCLUDED.city,
+        state = EXCLUDED.state,
+        country = EXCLUDED.country,
+        university_type = EXCLUDED.university_type,
+        accreditation = EXCLUDED.accreditation,
+        ranking = EXCLUDED.ranking,
+        website = EXCLUDED.website,
+        contact = EXCLUDED.contact,
+        description = EXCLUDED.description,
+        status = EXCLUDED.status,
+        is_active = EXCLUDED.is_active,
+        updated_at = NOW()
+    `, [
+      uni.id,
+      uni.name,
+      uni.short_name || '',
+      uni.campus || '',
+      uni.city,
+      uni.state,
+      uni.country || 'India',
+      uni.university_type || 'Private',
+      uni.accreditation || '',
+      uni.ranking || '',
+      uni.website || '',
+      uni.contact || '',
+      uni.description || '',
+      uni.status || 'Active',
+      uni.is_active !== undefined ? uni.is_active : 1,
+      uni.is_demo ? 1 : 0
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] University persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Persist Course to Neon
+ */
+export async function persistCourseToNeon(course: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO courses (
+        id, university_id, university_name, course_name, short_name, course_level, stream,
+        degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info,
+        intake, application_deadline, description, is_active, is_demo, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        university_id = EXCLUDED.university_id,
+        university_name = EXCLUDED.university_name,
+        course_name = EXCLUDED.course_name,
+        short_name = EXCLUDED.short_name,
+        course_level = EXCLUDED.course_level,
+        stream = EXCLUDED.stream,
+        degree_level = EXCLUDED.degree_level,
+        duration = EXCLUDED.duration,
+        eligibility = EXCLUDED.eligibility,
+        entrance_requirement = EXCLUDED.entrance_requirement,
+        fees_range = EXCLUDED.fees_range,
+        scholarship_info = EXCLUDED.scholarship_info,
+        intake = EXCLUDED.intake,
+        application_deadline = EXCLUDED.application_deadline,
+        description = EXCLUDED.description,
+        is_active = EXCLUDED.is_active,
+        updated_at = NOW()
+    `, [
+      course.id,
+      course.university_id || null,
+      course.university_name || 'Multiple Universities',
+      course.course_name,
+      course.short_name || '',
+      course.course_level || 'UG',
+      course.stream || 'General',
+      course.degree_level || 'Undergraduate',
+      course.duration || '4 Years',
+      course.eligibility || '',
+      course.entrance_requirement || '',
+      course.fees_range || '',
+      course.scholarship_info || '',
+      course.intake || 'Fall 2026',
+      course.application_deadline || null,
+      course.description || '',
+      course.is_active !== undefined ? course.is_active : 1,
+      course.is_demo ? 1 : 0
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Course persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
  * Persist Google Sheets Connection to Neon
  */
 export async function persistGoogleSheetConnectionToNeon(conn: any): Promise<boolean> {

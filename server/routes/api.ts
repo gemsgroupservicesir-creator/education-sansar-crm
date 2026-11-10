@@ -42,9 +42,13 @@ import {
   deleteRoutingRuleFromNeon,
   deleteMessageTemplateFromNeon,
   persistUniversityCourseToNeon,
+  persistUniversityToNeon,
+  persistCourseToNeon,
   findGoogleSheetInNeon,
   getAllGoogleSheetsFromNeon 
 } from '../db/neon.ts';
+
+import { scrapeUniversityAndCourses } from '../services/universityScraperService.ts';
 
 import {
   getRoutingRules,
@@ -1375,6 +1379,224 @@ apiRouter.get('/universities', (req: Request, res: Response) => {
   res.json(unis);
 });
 
+// Fetch university & courses directly from official university website link
+apiRouter.post('/universities/fetch-from-website', async (req: Request, res: Response) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ error: 'Please enter a valid website link (e.g. https://www.sharda.ac.in)' });
+    }
+    const result = await scrapeUniversityAndCourses(url);
+    res.json({ success: true, university: result, courses: result.courses, source_url: url });
+  } catch (err: any) {
+    console.error('[Fetch University Error]:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to extract university details from the provided website link.' });
+  }
+});
+
+// Import university along with selected courses and fee structures in one go
+apiRouter.post('/universities/import-with-courses', async (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to add universities.' });
+  }
+
+  try {
+    const { university, selectedCourses } = req.body;
+    if (!university || !university.name) {
+      return res.status(400).json({ error: 'University name is required.' });
+    }
+
+    // 1. Check if university already exists
+    let existingUni = db.prepare('SELECT * FROM universities WHERE name = ? COLLATE NOCASE').get(university.name) as any;
+    let uniId = existingUni ? existingUni.id : ('uni-' + Date.now());
+
+    if (!existingUni) {
+      db.prepare(`
+        INSERT INTO universities (
+          id, name, short_name, campus, city, state, country, university_type,
+          accreditation, ranking, website, contact, description, status, is_active, is_demo
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+      `).run(
+        uniId,
+        university.name,
+        university.short_name || '',
+        university.campus || '',
+        university.city || 'Greater Noida',
+        university.state || 'Uttar Pradesh',
+        university.country || 'India',
+        university.university_type || 'Private',
+        university.accreditation || '',
+        university.ranking || '',
+        university.website || '',
+        university.contact || '',
+        university.description || '',
+        university.status || 'Active'
+      );
+    } else {
+      // Update with new information
+      db.prepare(`
+        UPDATE universities 
+        SET short_name = COALESCE(NULLIF(?, ''), short_name),
+            campus = COALESCE(NULLIF(?, ''), campus),
+            city = COALESCE(NULLIF(?, ''), city),
+            state = COALESCE(NULLIF(?, ''), state),
+            country = COALESCE(NULLIF(?, ''), country),
+            university_type = COALESCE(NULLIF(?, ''), university_type),
+            accreditation = COALESCE(NULLIF(?, ''), accreditation),
+            ranking = COALESCE(NULLIF(?, ''), ranking),
+            website = COALESCE(NULLIF(?, ''), website),
+            contact = COALESCE(NULLIF(?, ''), contact),
+            description = COALESCE(NULLIF(?, ''), description),
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        university.short_name || '',
+        university.campus || '',
+        university.city || '',
+        university.state || '',
+        university.country || '',
+        university.university_type || '',
+        university.accreditation || '',
+        university.ranking || '',
+        university.website || '',
+        university.contact || '',
+        university.description || '',
+        uniId
+      );
+    }
+
+    const savedUni = db.prepare('SELECT * FROM universities WHERE id = ?').get(uniId) as any;
+    if (isNeonEnabled() && savedUni) {
+      persistUniversityToNeon(savedUni).catch(e => console.warn('[Neon Sync] University failed:', e.message));
+    }
+
+    // 2. Import selected courses
+    let coursesCreated = 0;
+    let feesCreated = 0;
+
+    if (Array.isArray(selectedCourses) && selectedCourses.length > 0) {
+      for (const crs of selectedCourses) {
+        if (!crs.course_name) continue;
+
+        let existingCourse = db.prepare(`
+          SELECT * FROM courses 
+          WHERE (university_id = ? OR university_name = ?) 
+            AND course_name = ? COLLATE NOCASE
+        `).get(uniId, university.name, crs.course_name) as any;
+
+        let courseId = existingCourse ? existingCourse.id : ('crs-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+
+        if (!existingCourse) {
+          db.prepare(`
+            INSERT INTO courses (
+              id, university_id, university_name, course_name, short_name, course_level, stream,
+              degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info,
+              intake, application_deadline, description, is_active, is_demo
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+          `).run(
+            courseId,
+            uniId,
+            university.name,
+            crs.course_name,
+            crs.short_name || '',
+            crs.course_level || 'UG',
+            crs.stream || 'General',
+            crs.degree_level || 'Undergraduate',
+            crs.duration || '4 Years',
+            crs.eligibility || '',
+            crs.entrance_requirement || '',
+            crs.fees_range || '',
+            crs.scholarship_info || '',
+            'Fall 2026',
+            null,
+            crs.description || ''
+          );
+          coursesCreated++;
+        }
+
+        const savedCourse = db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId) as any;
+        if (isNeonEnabled() && savedCourse) {
+          persistCourseToNeon(savedCourse).catch(e => console.warn('[Neon Sync] Course failed:', e.message));
+        }
+
+        // 3. Create or update fee structure in university_courses
+        const tuitionFee = typeof crs.tuition_fee_per_year === 'number' ? crs.tuition_fee_per_year : 0;
+        const hostelFee = typeof crs.hostel_fee_per_year === 'number' ? crs.hostel_fee_per_year : 0;
+        const totalFee = tuitionFee + hostelFee;
+
+        let existingFee = db.prepare(`
+          SELECT * FROM university_courses 
+          WHERE university_id = ? AND course_id = ?
+        `).get(uniId, courseId) as any;
+
+        const ucId = existingFee ? existingFee.id : ('uc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+
+        if (!existingFee) {
+          db.prepare(`
+            INSERT INTO university_courses (
+              id, university_id, course_id, tuition_fee_per_year, hostel_fee_per_year,
+              one_time_fee, other_charges, total_first_year_fee, total_full_course_fee,
+              currency, eligibility_notes, scholarship_available, scholarship_details,
+              application_deadline, admission_process, remarks, is_active,
+              tuition_fee, hostel_fee, total_fee, duration, eligibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+          `).run(
+            ucId,
+            uniId,
+            courseId,
+            tuitionFee,
+            hostelFee,
+            0,
+            0,
+            totalFee,
+            totalFee * (crs.duration?.includes('2') ? 2 : (crs.duration?.includes('3') ? 3 : (crs.duration?.includes('5') ? 5 : 4))),
+            'INR',
+            crs.eligibility || '',
+            crs.scholarship_info ? 1 : 0,
+            crs.scholarship_info || '',
+            null,
+            'Direct Merit / Counseling',
+            'Imported via University Website Fetcher',
+            tuitionFee,
+            hostelFee,
+            totalFee,
+            crs.duration || '4 Years',
+            crs.eligibility || ''
+          );
+          feesCreated++;
+        }
+
+        const savedUC = db.prepare('SELECT * FROM university_courses WHERE id = ?').get(ucId) as any;
+        if (isNeonEnabled() && savedUC) {
+          persistUniversityCourseToNeon(savedUC).catch(e => console.warn('[Neon Sync] UC failed:', e.message));
+        }
+      }
+    }
+
+    logAudit({
+      user_id: 'SYSTEM',
+      user_name: 'Admin',
+      action: 'IMPORT_UNIVERSITY_WEBSITE',
+      module: 'Universities',
+      entity_id: uniId,
+      entity_name: university.name,
+      new_values: { courses_imported: coursesCreated, fees_imported: feesCreated, website: university.website }
+    });
+
+    res.json({
+      success: true,
+      university_id: uniId,
+      university_name: university.name,
+      courses_created: coursesCreated,
+      fees_created: feesCreated
+    });
+  } catch (err: any) {
+    console.error('[Import University Error]:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to import university and courses.' });
+  }
+});
+
 apiRouter.post('/universities', (req: Request, res: Response) => {
   const userRole = (req.headers['x-user-role'] as string) || '';
   if (userRole.toLowerCase() === 'counselor') {
@@ -1545,6 +1767,180 @@ apiRouter.delete('/courses/:id', (req: Request, res: Response) => {
   }
 
   res.json({ success: true });
+});
+
+// Fetch course details & catalog from website URL
+apiRouter.post('/courses/fetch-from-website', async (req: Request, res: Response) => {
+  try {
+    const { url, university_id, university_name } = req.body;
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ error: 'Please enter a valid website link (e.g. https://chandigarhuniversity.ac.in)' });
+    }
+    const result = await scrapeUniversityAndCourses(url);
+    res.json({
+      success: true,
+      source_url: url,
+      detected_university: {
+        name: result.name,
+        short_name: result.short_name,
+        city: result.city,
+        state: result.state,
+        website: result.website
+      },
+      courses: result.courses
+    });
+  } catch (err: any) {
+    console.error('[Fetch Courses Error]:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to extract courses from the provided link.' });
+  }
+});
+
+// Batch import courses (with optional university linkage and fee structures)
+apiRouter.post('/courses/batch-import', async (req: Request, res: Response) => {
+  const userRole = (req.headers['x-user-role'] as string) || '';
+  if (userRole.toLowerCase() === 'counselor') {
+    return res.status(403).json({ error: 'Counselors do not have permission to add courses.' });
+  }
+
+  try {
+    const { university_id, university_name, courses } = req.body;
+    if (!Array.isArray(courses) || courses.length === 0) {
+      return res.status(400).json({ error: 'No courses provided to import.' });
+    }
+
+    let uniId = university_id || null;
+    let uniName = university_name || 'Multiple Universities';
+
+    // If university_id provided, fetch official name if not passed
+    if (uniId && (!uniName || uniName === 'Multiple Universities')) {
+      const u = db.prepare('SELECT id, name FROM universities WHERE id = ?').get(uniId) as any;
+      if (u) {
+        uniName = u.name;
+      }
+    }
+
+    let coursesCreated = 0;
+    let feesCreated = 0;
+
+    for (const crs of courses) {
+      if (!crs.course_name) continue;
+
+      let existingCourse = db.prepare(`
+        SELECT * FROM courses 
+        WHERE (university_id = ? OR university_name = ?) 
+          AND course_name = ? COLLATE NOCASE
+      `).get(uniId, uniName, crs.course_name) as any;
+
+      let courseId = existingCourse ? existingCourse.id : ('crs-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+
+      if (!existingCourse) {
+        db.prepare(`
+          INSERT INTO courses (
+            id, university_id, university_name, course_name, short_name, course_level, stream,
+            degree_level, duration, eligibility, entrance_requirement, fees_range, scholarship_info,
+            intake, application_deadline, description, is_active, is_demo
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+        `).run(
+          courseId,
+          uniId,
+          uniName,
+          crs.course_name,
+          crs.short_name || '',
+          crs.course_level || 'UG',
+          crs.stream || 'General',
+          crs.degree_level || 'Undergraduate',
+          crs.duration || '4 Years',
+          crs.eligibility || '',
+          crs.entrance_requirement || '',
+          crs.fees_range || '',
+          crs.scholarship_info || '',
+          'Fall 2026',
+          null,
+          crs.description || ''
+        );
+        coursesCreated++;
+      }
+
+      const savedCourse = db.prepare('SELECT * FROM courses WHERE id = ?').get(courseId) as any;
+      if (isNeonEnabled() && savedCourse) {
+        persistCourseToNeon(savedCourse).catch(e => console.warn('[Neon Sync] Course failed:', e.message));
+      }
+
+      // If linked to a university, create fee record in university_courses as well
+      if (uniId) {
+        const tuitionFee = typeof crs.tuition_fee_per_year === 'number' ? crs.tuition_fee_per_year : 0;
+        const hostelFee = typeof crs.hostel_fee_per_year === 'number' ? crs.hostel_fee_per_year : 0;
+        const totalFee = tuitionFee + hostelFee;
+
+        let existingFee = db.prepare(`
+          SELECT * FROM university_courses 
+          WHERE university_id = ? AND course_id = ?
+        `).get(uniId, courseId) as any;
+
+        const ucId = existingFee ? existingFee.id : ('uc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+
+        if (!existingFee) {
+          db.prepare(`
+            INSERT INTO university_courses (
+              id, university_id, course_id, tuition_fee_per_year, hostel_fee_per_year,
+              one_time_fee, other_charges, total_first_year_fee, total_full_course_fee,
+              currency, eligibility_notes, scholarship_available, scholarship_details,
+              application_deadline, admission_process, remarks, is_active,
+              tuition_fee, hostel_fee, total_fee, duration, eligibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+          `).run(
+            ucId,
+            uniId,
+            courseId,
+            tuitionFee,
+            hostelFee,
+            0,
+            0,
+            totalFee,
+            totalFee * (crs.duration?.includes('2') ? 2 : (crs.duration?.includes('3') ? 3 : (crs.duration?.includes('5') ? 5 : 4))),
+            'INR',
+            crs.eligibility || '',
+            crs.scholarship_info ? 1 : 0,
+            crs.scholarship_info || '',
+            null,
+            'Direct Merit / Counseling',
+            'Imported via Website Courses Fetcher',
+            tuitionFee,
+            hostelFee,
+            totalFee,
+            crs.duration || '4 Years',
+            crs.eligibility || ''
+          );
+          feesCreated++;
+        }
+
+        const savedUC = db.prepare('SELECT * FROM university_courses WHERE id = ?').get(ucId) as any;
+        if (isNeonEnabled() && savedUC) {
+          persistUniversityCourseToNeon(savedUC).catch(e => console.warn('[Neon Sync] UC failed:', e.message));
+        }
+      }
+    }
+
+    logAudit({
+      user_id: 'SYSTEM',
+      user_name: 'Admin',
+      action: 'BATCH_IMPORT_COURSES',
+      module: 'Courses',
+      entity_id: uniId || 'GLOBAL',
+      entity_name: uniName,
+      new_values: { courses_imported: coursesCreated, fees_imported: feesCreated }
+    });
+
+    res.json({
+      success: true,
+      courses_created: coursesCreated,
+      fees_created: feesCreated,
+      total_processed: courses.length
+    });
+  } catch (err: any) {
+    console.error('[Batch Import Courses Error]:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to batch import courses.' });
+  }
 });
 
 // ==========================================

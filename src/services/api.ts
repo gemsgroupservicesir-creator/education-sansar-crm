@@ -180,6 +180,16 @@ export const api = {
     fetchJson<any>(`/universities/${id}`, {
       method: 'DELETE',
     }),
+  fetchUniversityFromWebsite: (url: string) =>
+    fetchJson<any>('/universities/fetch-from-website', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  importUniversityWithCourses: (data: { university: any; selectedCourses: any[] }) =>
+    fetchJson<any>('/universities/import-with-courses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getCourses: (params?: { universityId?: string; stream?: string; courseLevel?: string; search?: string } | string) => {
     if (typeof params === 'string') {
       return fetchJson<any[]>(`/courses${params ? `?university_id=${params}` : ''}`);
@@ -205,6 +215,16 @@ export const api = {
   deleteCourse: (id: string) =>
     fetchJson<any>(`/courses/${id}`, {
       method: 'DELETE',
+    }),
+  fetchCoursesFromWebsite: (data: { url: string; university_id?: string; university_name?: string }) =>
+    fetchJson<any>('/courses/fetch-from-website', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  batchImportCourses: (data: { university_id?: string; university_name?: string; courses: any[] }) =>
+    fetchJson<any>('/courses/batch-import', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 
   // University Courses & Fee Structures (Section 7)
