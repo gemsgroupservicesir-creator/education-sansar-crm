@@ -8197,7 +8197,24 @@ apiRouter.delete("/students/:id", (req, res) => {
   }
   res.json({ success: true, message: "Student record deleted permanently." });
 });
-apiRouter.get("/universities", (req, res) => {
+apiRouter.get("/universities", async (req, res) => {
+  if (isNeonEnabled() && sql) {
+    try {
+      const neonUnis = await sql.query(`
+        SELECT u.*,
+          (SELECT count(*) FROM university_courses uc WHERE uc.university_id = u.id) as fee_structures_count,
+          (SELECT count(*) FROM courses c WHERE c.university_id = u.id) as legacy_courses_count,
+          (SELECT count(*) FROM applications a WHERE a.university_id = u.id) as applications_count
+        FROM universities u
+        ORDER BY u.name ASC
+      `);
+      if (neonUnis && neonUnis.length > 0) {
+        return res.json(neonUnis);
+      }
+    } catch (e) {
+      console.warn("[Neon Universities] Falling back to SQLite:", e.message);
+    }
+  }
   const unis = db.prepare(`
     SELECT u.*,
       (SELECT count(*) FROM university_courses uc WHERE uc.university_id = u.id) as fee_structures_count,

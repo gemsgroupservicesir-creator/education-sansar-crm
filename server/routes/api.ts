@@ -23,6 +23,7 @@ import { Lead, FollowUp, Application, Student, University, Course, Campaign, Doc
 
 import { 
   isNeonEnabled, 
+  sql,
   findUserInNeon, 
   persistUserToNeon, 
   persistCounselorToNeon, 
@@ -1367,7 +1368,25 @@ apiRouter.delete('/students/:id', (req: Request, res: Response) => {
 // ==========================================
 // 7. UNIVERSITIES & COURSES
 // ==========================================
-apiRouter.get('/universities', (req: Request, res: Response) => {
+apiRouter.get('/universities', async (req: Request, res: Response) => {
+  if (isNeonEnabled() && sql) {
+    try {
+      const neonUnis = await sql.query(`
+        SELECT u.*,
+          (SELECT count(*) FROM university_courses uc WHERE uc.university_id = u.id) as fee_structures_count,
+          (SELECT count(*) FROM courses c WHERE c.university_id = u.id) as legacy_courses_count,
+          (SELECT count(*) FROM applications a WHERE a.university_id = u.id) as applications_count
+        FROM universities u
+        ORDER BY u.name ASC
+      `);
+      if (neonUnis && neonUnis.length > 0) {
+        return res.json(neonUnis);
+      }
+    } catch (e: any) {
+      console.warn('[Neon Universities] Falling back to SQLite:', e.message);
+    }
+  }
+
   const unis = db.prepare(`
     SELECT u.*,
       (SELECT count(*) FROM university_courses uc WHERE uc.university_id = u.id) as fee_structures_count,
