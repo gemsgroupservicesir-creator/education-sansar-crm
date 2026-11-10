@@ -2075,7 +2075,7 @@ apiRouter.get('/university-courses', async (req: Request, res: Response) => {
     }
   }
 
-  let sql = `
+  let sqliteQuery = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -2101,42 +2101,42 @@ apiRouter.get('/university-courses', async (req: Request, res: Response) => {
   const params: any[] = [];
   if (search) {
     const s = `%${search}%`;
-    sql += ` AND (u.name LIKE ? OR c.course_name LIKE ? OR u.city LIKE ? OR c.stream LIKE ? OR u.short_name LIKE ?)`;
+    sqliteQuery += ` AND (u.name LIKE ? OR c.course_name LIKE ? OR u.city LIKE ? OR c.stream LIKE ? OR u.short_name LIKE ?)`;
     params.push(s, s, s, s, s);
   }
   if (university_id) {
-    sql += ` AND uc.university_id = ?`;
+    sqliteQuery += ` AND uc.university_id = ?`;
     params.push(university_id);
   }
   if (course_id) {
-    sql += ` AND uc.course_id = ?`;
+    sqliteQuery += ` AND uc.course_id = ?`;
     params.push(course_id);
   }
   if (stream) {
-    sql += ` AND c.stream = ?`;
+    sqliteQuery += ` AND c.stream = ?`;
     params.push(stream);
   }
   if (course_level) {
-    sql += ` AND c.course_level = ?`;
+    sqliteQuery += ` AND c.course_level = ?`;
     params.push(course_level);
   }
   if (city) {
-    sql += ` AND u.city LIKE ?`;
+    sqliteQuery += ` AND u.city LIKE ?`;
     params.push(`%${city}%`);
   }
   if (state) {
-    sql += ` AND u.state LIKE ?`;
+    sqliteQuery += ` AND u.state LIKE ?`;
     params.push(`%${state}%`);
   }
   if (max_fee) {
     const feeNum = parseFloat(max_fee as string);
     if (!isNaN(feeNum)) {
-      sql += ` AND (uc.tuition_fee_per_year <= ? OR uc.total_first_year_fee <= ?)`;
+      sqliteQuery += ` AND (uc.tuition_fee_per_year <= ? OR uc.total_first_year_fee <= ?)`;
       params.push(feeNum, feeNum);
     }
   }
-  sql += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC LIMIT 500`;
-  const results = db.prepare(sql).all(...params);
+  sqliteQuery += ` ORDER BY c.course_name ASC, uc.total_first_year_fee ASC LIMIT 500`;
+  const results = db.prepare(sqliteQuery).all(...params);
   res.json(results);
 });
 
@@ -2147,7 +2147,7 @@ apiRouter.get('/university-courses/compare', (req: Request, res: Response) => {
   if (idList.length === 0) return res.json([]);
 
   const placeholders = idList.map(() => '?').join(',');
-  const sql = `
+  const compareSql = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -2170,12 +2170,40 @@ apiRouter.get('/university-courses/compare', (req: Request, res: Response) => {
     JOIN courses c ON uc.course_id = c.id
     WHERE uc.id IN (${placeholders})
   `;
-  const results = db.prepare(sql).all(...idList);
+  const results = db.prepare(compareSql).all(...idList);
   res.json(results);
 });
 
-apiRouter.get('/university-courses/:id', (req: Request, res: Response) => {
-  const sql = `
+apiRouter.get('/university-courses/:id', async (req: Request, res: Response) => {
+  if (isNeonEnabled() && sql) {
+    try {
+      const neonItemSql = `
+        SELECT 
+          uc.*,
+          u.name as university_name,
+          u.short_name as university_short_name,
+          u.city as university_city,
+          u.state as university_state,
+          u.ranking as university_ranking,
+          u.accreditation as university_accreditation,
+          u.university_type,
+          c.course_name,
+          c.course_level,
+          c.stream,
+          c.duration as course_duration,
+          c.eligibility as course_eligibility,
+          c.entrance_requirement
+        FROM university_courses uc
+        JOIN universities u ON uc.university_id = u.id
+        JOIN courses c ON uc.course_id = c.id
+        WHERE uc.id = $1
+      `;
+      const rows = await sql.query(neonItemSql, [req.params.id]);
+      if (rows && rows.length > 0) return res.json(rows[0]);
+    } catch (e: any) {}
+  }
+
+  const itemSql = `
     SELECT 
       uc.*,
       u.name as university_name,
@@ -2196,7 +2224,7 @@ apiRouter.get('/university-courses/:id', (req: Request, res: Response) => {
     JOIN courses c ON uc.course_id = c.id
     WHERE uc.id = ?
   `;
-  const item = db.prepare(sql).get(req.params.id);
+  const item = db.prepare(itemSql).get(req.params.id);
   if (!item) return res.status(404).json({ error: 'Fee structure not found' });
   res.json(item);
 });
