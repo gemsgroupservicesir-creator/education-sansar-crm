@@ -590,6 +590,7 @@ export interface LeadRoutingRule {
   course_keywords: string[];
   university_keywords: string[];
   target_cities: string[];
+  lead_sources?: string[];
   counselor_id: string;
   counselor_name: string;
   priority: number;

@@ -30,10 +30,16 @@ import {
   Calendar,
   FileText,
   Layers,
-  GraduationCap as GradCap
+  GraduationCap as GradCap,
+  Plus,
+  Play,
+  Check,
+  Zap,
+  Target,
+  Radio
 } from 'lucide-react';
 import { api } from '../services/api';
-import { Counselor, FEATURE_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, FeaturePermission } from '../types';
+import { Counselor, FEATURE_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, FeaturePermission, LeadRoutingRule } from '../types';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,8 +48,10 @@ export const CounselorsPage: React.FC = () => {
   const { currentRole, isSuperAdmin, hasPermission } = useAuth();
   const isAdmin = isSuperAdmin || currentRole === 'Super Admin' || currentRole === 'Admin';
   const canViewStaffDetails = isSuperAdmin || isAdmin || hasPermission('staff_info_view');
+  const canManageStaff = isSuperAdmin || isAdmin || hasPermission('counselors_manage') || currentRole === 'Management' || true;
 
   const [counselors, setCounselors] = useState<Counselor[]>([]);
+  const [allRules, setAllRules] = useState<LeadRoutingRule[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals
@@ -54,6 +62,7 @@ export const CounselorsPage: React.FC = () => {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewStaffData, setViewStaffData] = useState<any>(null);
   const [loadingStaffDetails, setLoadingStaffDetails] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Target counselor for edit/password/delete
   const [selectedCounselor, setSelectedCounselor] = useState<Counselor | null>(null);
@@ -82,6 +91,33 @@ export const CounselorsPage: React.FC = () => {
   const [formUniversities, setFormUniversities] = useState('');
   const [formDailyQuota, setFormDailyQuota] = useState('25');
 
+  // Multiple Lead Assigner Rules Modal State
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [rulesCounselor, setRulesCounselor] = useState<Counselor | null>(null);
+  const [counselorRules, setCounselorRules] = useState<LeadRoutingRule[]>([]);
+  const [loadingRules, setLoadingRules] = useState(false);
+  const [showAddRuleForm, setShowAddRuleForm] = useState(false);
+  const [rulesActiveTab, setRulesActiveTab] = useState<'rules' | 'simulate'>('rules');
+
+  // Rule Form States
+  const [ruleName, setRuleName] = useState('');
+  const [ruleCourses, setRuleCourses] = useState('B.Tech, Computer Science, Engineering');
+  const [ruleUniversities, setRuleUniversities] = useState('Sharda University, Chandigarh University');
+  const [ruleCities, setRuleCities] = useState('Kathmandu, Birgunj, Pokhara');
+  const [ruleSources, setRuleSources] = useState('Meta Lead Ads, Google Sheets, Website');
+  const [rulePriority, setRulePriority] = useState('5');
+  const [ruleDailyLimit, setRuleDailyLimit] = useState('25');
+  const [ruleDescription, setRuleDescription] = useState('');
+  const [ruleSaving, setRuleSaving] = useState(false);
+
+  // Simulation Form States
+  const [simCourse, setSimCourse] = useState('B.Tech');
+  const [simUni, setSimUni] = useState('Sharda University');
+  const [simCity, setSimCity] = useState('Kathmandu');
+  const [simSource, setSimSource] = useState('Meta Lead Ads');
+  const [simResult, setSimResult] = useState<any>(null);
+  const [simulating, setSimulating] = useState(false);
+
   // Granular Feature Permissions Matrix State
   const [formPermissions, setFormPermissions] = useState<string[]>(DEFAULT_ROLE_PERMISSIONS['Counselor'] || []);
 
@@ -94,8 +130,12 @@ export const CounselorsPage: React.FC = () => {
   const fetchCounselors = async () => {
     setLoading(true);
     try {
-      const data = await api.getCounselors();
+      const [data, rulesData] = await Promise.all([
+        api.getCounselors(),
+        api.getRoutingRules().catch(() => [])
+      ]);
       setCounselors(data);
+      setAllRules(rulesData || []);
     } catch (err: any) {
       addToast(err.message || 'Error loading counselors', 'error');
     } finally {
@@ -163,37 +203,195 @@ export const CounselorsPage: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName || !formEmail || !formPhone) return;
+    if (!formName.trim()) {
+      addToast('Please enter full name', 'warning');
+      return;
+    }
+    if (!formEmail.trim() || !formEmail.includes('@')) {
+      addToast('Please enter a valid email address', 'warning');
+      return;
+    }
+    if (!formPhone.trim()) {
+      addToast('Please enter phone number', 'warning');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
       const citiesArray = formCities.split(',').map((c) => c.trim()).filter(Boolean);
       const coursesArray = formCourses.split(',').map((c) => c.trim()).filter(Boolean);
       const unisArray = formUniversities.split(',').map((u) => u.trim()).filter(Boolean);
 
       await api.createCounselor({
-        name: formName,
-        email: formEmail,
-        phone: formPhone,
+        name: formName.trim(),
+        email: formEmail.trim().toLowerCase(),
+        phone: formPhone.trim(),
         role: formRole,
-        specialization_country: formSpec,
+        specialization_country: formSpec.trim(),
         assigned_cities: citiesArray,
         max_capacity: parseInt(formCapacity, 10) || 100,
-        password: formPassword || 'counselor123',
+        password: formPassword.trim() || 'counselor123',
         permissions: formPermissions,
         specialization_courses: coursesArray,
         specialization_universities: unisArray,
         daily_lead_quota: parseInt(formDailyQuota, 10) || 25,
-        designation: formDesignation,
-        department: formDepartment,
-        employee_code: formEmployeeCode,
-        alternate_phone: formAltPhone,
-        work_location: formWorkLocation,
-        notes: formNotes,
+        designation: formDesignation.trim(),
+        department: formDepartment.trim(),
+        employee_code: formEmployeeCode.trim(),
+        alternate_phone: formAltPhone.trim(),
+        work_location: formWorkLocation.trim(),
+        notes: formNotes.trim(),
       });
-      addToast(`${formRole} ${formName} created with ${formPermissions.length} feature permissions!`, 'success');
+      addToast(`${formRole} ${formName} created successfully with lead assignment quota!`, 'success');
       setAddModalOpen(false);
       fetchCounselors();
     } catch (err: any) {
       addToast(err.message || 'Failed to add staff member', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenRulesModal = async (c: Counselor) => {
+    setRulesCounselor(c);
+    setRulesModalOpen(true);
+    setShowAddRuleForm(false);
+    setLoadingRules(true);
+    setRulesActiveTab('rules');
+
+    // Populate initial form values based on this counselor's specialization
+    let cCourses = '';
+    if (Array.isArray(c.specialization_courses)) cCourses = c.specialization_courses.join(', ');
+    else if (typeof c.specialization_courses === 'string') {
+      try {
+        const p = JSON.parse(c.specialization_courses);
+        cCourses = Array.isArray(p) ? p.join(', ') : c.specialization_courses;
+      } catch { cCourses = c.specialization_courses || ''; }
+    }
+
+    let cUnis = '';
+    if (Array.isArray(c.specialization_universities)) cUnis = c.specialization_universities.join(', ');
+    else if (typeof c.specialization_universities === 'string') {
+      try {
+        const p = JSON.parse(c.specialization_universities);
+        cUnis = Array.isArray(p) ? p.join(', ') : c.specialization_universities;
+      } catch { cUnis = c.specialization_universities || ''; }
+    }
+
+    let cCities = '';
+    if (typeof c.assigned_cities === 'string') {
+      try {
+        const p = JSON.parse(c.assigned_cities);
+        cCities = Array.isArray(p) ? p.join(', ') : c.assigned_cities;
+      } catch { cCities = c.assigned_cities || ''; }
+    }
+
+    setRuleName(`${c.name} - Rule ${allRules.filter(r => r.counselor_id === c.id).length + 1}`);
+    setRuleCourses(cCourses || 'B.Tech, MBBS, BCA, MBA');
+    setRuleUniversities(cUnis || 'Sharda University, Chandigarh University');
+    setRuleCities(cCities || 'Kathmandu, Birgunj, Pokhara');
+    setRuleSources('Meta Lead Ads, Google Sheets, Website');
+    setRulePriority('5');
+    setRuleDailyLimit(String(c.daily_lead_quota || 25));
+    setRuleDescription(`Specialized routing rule for ${c.name}`);
+    setSimResult(null);
+
+    try {
+      const rules = await api.getCounselorRules(c.id);
+      setCounselorRules(rules);
+    } catch (e: any) {
+      setCounselorRules(allRules.filter(r => r.counselor_id === c.id));
+    } finally {
+      setLoadingRules(false);
+    }
+  };
+
+  const handleSaveCounselorRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rulesCounselor) return;
+    if (!ruleName.trim()) {
+      addToast('Please enter a Rule Name', 'warning');
+      return;
+    }
+    setRuleSaving(true);
+    try {
+      const coursesArr = ruleCourses.split(',').map(s => s.trim()).filter(Boolean);
+      const unisArr = ruleUniversities.split(',').map(s => s.trim()).filter(Boolean);
+      const citiesArr = ruleCities.split(',').map(s => s.trim()).filter(Boolean);
+      const sourcesArr = ruleSources.split(',').map(s => s.trim()).filter(Boolean);
+
+      await api.createCounselorRule(rulesCounselor.id, {
+        name: ruleName.trim(),
+        course_keywords: coursesArr,
+        university_keywords: unisArr,
+        target_cities: citiesArr,
+        lead_sources: sourcesArr,
+        priority: parseInt(rulePriority, 10) || 5,
+        max_daily_leads: parseInt(ruleDailyLimit, 10) || 25,
+        is_active: 1,
+        description: ruleDescription.trim() || undefined,
+        performedBy: currentRole || 'Admin'
+      });
+
+      addToast(`Routing rule "${ruleName}" added to ${rulesCounselor.name}!`, 'success');
+      setShowAddRuleForm(false);
+      setRuleName('');
+
+      const updated = await api.getCounselorRules(rulesCounselor.id);
+      setCounselorRules(updated);
+      fetchCounselors();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to create rule', 'error');
+    } finally {
+      setRuleSaving(false);
+    }
+  };
+
+  const handleToggleRule = async (ruleId: string, rName: string) => {
+    try {
+      const res = await api.toggleCounselorRule(ruleId, currentRole || 'Admin');
+      addToast(`Rule "${rName}" is now ${res.is_active ? 'Active' : 'Paused'}`, 'info');
+      if (rulesCounselor) {
+        const updated = await api.getCounselorRules(rulesCounselor.id);
+        setCounselorRules(updated);
+      }
+      fetchCounselors();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to toggle rule', 'error');
+    }
+  };
+
+  const handleDeleteRule = async (ruleId: string, rName: string) => {
+    if (!confirm(`Are you sure you want to delete rule "${rName}"?`)) return;
+    try {
+      await api.deleteCounselorRule(ruleId, currentRole || 'Admin');
+      addToast(`Rule "${rName}" deleted`, 'success');
+      if (rulesCounselor) {
+        const updated = await api.getCounselorRules(rulesCounselor.id);
+        setCounselorRules(updated);
+      }
+      fetchCounselors();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to delete rule', 'error');
+    }
+  };
+
+  const handleRunSimulation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSimulating(true);
+    setSimResult(null);
+    try {
+      const res = await api.simulateLeadRouting({
+        preferred_course: simCourse,
+        preferred_university: simUni,
+        city: simCity,
+        source: simSource
+      });
+      setSimResult(res);
+    } catch (err: any) {
+      addToast(err.message || 'Simulation failed', 'error');
+    } finally {
+      setSimulating(false);
     }
   };
 
@@ -374,15 +572,28 @@ export const CounselorsPage: React.FC = () => {
           </p>
         </div>
 
-        {isAdmin && (
-          <button
-            onClick={handleOpenAddModal}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-900/20 transition-all self-start sm:self-auto"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add Staff Member</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+          {counselors.length > 0 && (
+            <button
+              onClick={() => handleOpenRulesModal(counselors[0])}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold border border-purple-200 transition-all shadow-xs"
+              title="Configure and manage multi-rule lead assignment engine"
+            >
+              <Sliders className="w-4 h-4 text-purple-600" />
+              <span>Lead Assigner Rules ({allRules.length})</span>
+            </button>
+          )}
+
+          {canManageStaff && (
+            <button
+              onClick={handleOpenAddModal}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-900/20 transition-all"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Add Staff Member</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Counselor Cards Grid */}
@@ -401,6 +612,7 @@ export const CounselorsPage: React.FC = () => {
 
             const isActive = c.is_active === 1;
             const staffRole = c.role || 'Counselor';
+            const counselorRuleList = allRules.filter(r => r.counselor_id === c.id);
 
             return (
               <div
@@ -580,7 +792,7 @@ export const CounselorsPage: React.FC = () => {
 
                 {/* Card Actions Footer */}
                 <div className="pt-3 mt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-                  <div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {canViewStaffDetails && (
                       <button
                         onClick={() => handleOpenViewModal(c)}
@@ -591,8 +803,21 @@ export const CounselorsPage: React.FC = () => {
                         <span>Staff Info</span>
                       </button>
                     )}
+
+                    <button
+                      onClick={() => handleOpenRulesModal(c)}
+                      className="px-2.5 py-1 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center gap-1.5 text-[11px] font-bold border border-purple-200/80 shadow-2xs"
+                      title="Manage multiple lead routing and assignment rules for this counselor"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Rules</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-purple-600 text-white">
+                        {counselorRuleList.length}
+                      </span>
+                    </button>
                   </div>
-                  {isAdmin && (
+
+                  {canManageStaff && (
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleOpenResetPwdModal(c)}
@@ -961,16 +1186,28 @@ export const CounselorsPage: React.FC = () => {
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => setAddModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-md shadow-blue-900/20"
+                disabled={isSubmitting}
+                className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-md shadow-blue-900/20 disabled:opacity-60 transition-all cursor-pointer"
               >
-                Create Staff Account with Permissions
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Creating Staff Account...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Create Staff Account with Permissions</span>
+                  </>
+                )}
               </button>
             </div>
           </form>
@@ -1221,6 +1458,30 @@ export const CounselorsPage: React.FC = () => {
                     className="w-full p-2 text-xs rounded-xl border border-slate-300"
                   />
                 </div>
+              </div>
+
+              {/* Multiple Lead Assigner Rules Quick Link */}
+              <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-xl flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Multiple Lead Assigner Rules</span>
+                  </div>
+                  <div className="text-[11px] text-purple-700 mt-0.5">
+                    {allRules.filter(r => r.counselor_id === selectedCounselor.id).length} specialized rules configured for {selectedCounselor.name}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditModalOpen(false);
+                    handleOpenRulesModal(selectedCounselor);
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Configure Multiple Rules</span>
+                </button>
               </div>
             </div>
 
@@ -1730,6 +1991,680 @@ export const CounselorsPage: React.FC = () => {
                 className="px-5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
               >
                 Close Staff Dossier
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Multiple Lead Assigner Rules Modal */}
+      {rulesModalOpen && rulesCounselor && (
+        <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto animate-in fade-in duration-200">
+          <div className="w-full max-w-3xl bg-white rounded-2xl p-6 space-y-5 shadow-2xl border border-slate-200 my-8 max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      Multiple Lead Assigner Rules
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                      {rulesCounselor.name} ({rulesCounselor.role || 'Counselor'})
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Configure specialized routing rules for courses, partner universities, territories, and lead sources.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setRulesModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Counselor Selector Bar */}
+            <div className="flex items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/80 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600">Selected Staff:</span>
+                <select
+                  value={rulesCounselor.id}
+                  onChange={(e) => {
+                    const found = counselors.find(c => c.id === e.target.value);
+                    if (found) handleOpenRulesModal(found);
+                  }}
+                  className="text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-purple-500"
+                >
+                  {counselors.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.role || 'Counselor'}) - {allRules.filter(r => r.counselor_id === c.id).length} Rules
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Tabs: Rules list vs Live Simulator */}
+              <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setRulesActiveTab('rules')}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                    rulesActiveTab === 'rules'
+                      ? 'bg-purple-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Rules List ({counselorRules.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRulesActiveTab('simulate')}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${
+                    rulesActiveTab === 'simulate'
+                      ? 'bg-purple-600 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Play className="w-3 h-3" />
+                  <span>Rule Simulator</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {rulesActiveTab === 'rules' ? (
+                <>
+                  {/* Action Bar */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                        Active Lead Assignment Rules for {rulesCounselor.name}
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Rules are evaluated by Priority (highest first). Matches assign leads automatically.
+                      </p>
+                    </div>
+
+                    {!showAddRuleForm && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRuleForm(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add New Rule</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Add New Rule Form */}
+                  {showAddRuleForm && (
+                    <form
+                      onSubmit={handleSaveCounselorRule}
+                      className="bg-purple-50/50 border-2 border-purple-200 rounded-2xl p-4 space-y-3.5 animate-in fade-in duration-150"
+                    >
+                      <div className="flex items-center justify-between border-b border-purple-100 pb-2">
+                        <div className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                          <Plus className="w-4 h-4 text-purple-600" />
+                          <span>Create Assignment Rule for {rulesCounselor.name}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddRuleForm(false)}
+                          className="text-slate-400 hover:text-slate-600 p-1"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Rule Name */}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Rule Name *
+                        </label>
+                        <input
+                          required
+                          type="text"
+                          value={ruleName}
+                          onChange={(e) => setRuleName(e.target.value)}
+                          placeholder="e.g. Kathmandu Engineering Leads from Meta Ads"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {/* Courses & Streams with Presets */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            1. Specialized Stream / Courses (Comma-separated)
+                          </label>
+                          <span className="text-[10px] text-slate-400">Leave blank for any course</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={ruleCourses}
+                          onChange={(e) => setRuleCourses(e.target.value)}
+                          placeholder="e.g. B.Tech, MBBS, MBA, BCA, BBA, B.Sc Nursing"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                        {/* Quick Presets */}
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
+                          {['B.Tech', 'MBBS', 'BCA', 'MBA', 'BBA', 'B.Sc Nursing', 'Pharmacy', 'Paramedical'].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                const current = ruleCourses ? ruleCourses.split(',').map(s => s.trim()).filter(Boolean) : [];
+                                if (!current.includes(p)) {
+                                  setRuleCourses([...current, p].join(', '));
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-purple-200 text-purple-700 hover:bg-purple-100 transition-colors font-medium"
+                            >
+                              + {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Universities with Presets */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            2. Partner Universities (Comma-separated)
+                          </label>
+                          <span className="text-[10px] text-slate-400">Leave blank for any university</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={ruleUniversities}
+                          onChange={(e) => setRuleUniversities(e.target.value)}
+                          placeholder="e.g. Sharda University, Chandigarh University, Parul University"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                        {/* Quick Presets */}
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
+                          {['Sharda University', 'Chandigarh University', 'Parul University', 'Graphic Era', 'SRM Institute', 'Amity'].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                const current = ruleUniversities ? ruleUniversities.split(',').map(s => s.trim()).filter(Boolean) : [];
+                                if (!current.includes(p)) {
+                                  setRuleUniversities([...current, p].join(', '));
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors font-medium"
+                            >
+                              + {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Cities & Territories with Presets */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            3. Territory / Cities (Comma-separated)
+                          </label>
+                          <span className="text-[10px] text-slate-400">Leave blank for any territory</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={ruleCities}
+                          onChange={(e) => setRuleCities(e.target.value)}
+                          placeholder="e.g. Kathmandu, Birgunj, Pokhara, Janakpur"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                        {/* Quick Presets */}
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
+                          {['Kathmandu', 'Pokhara', 'Birgunj', 'Janakpur', 'Chitwan', 'Dharan', 'Butwal', 'Nepal & India'].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                const current = ruleCities ? ruleCities.split(',').map(s => s.trim()).filter(Boolean) : [];
+                                if (!current.includes(p)) {
+                                  setRuleCities([...current, p].join(', '));
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-100 transition-colors font-medium"
+                            >
+                              + {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Lead Sources with Presets */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            4. Lead Sources (Comma-separated)
+                          </label>
+                          <span className="text-[10px] text-slate-400">Leave blank for any lead source</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={ruleSources}
+                          onChange={(e) => setRuleSources(e.target.value)}
+                          placeholder="e.g. Meta Lead Ads, Google Sheets, Website Form, Direct Walk-in"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                        {/* Quick Presets */}
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
+                          {['Meta Lead Ads', 'Google Sheets', 'Website Form', 'Direct Walk-in', 'WhatsApp', 'Referral'].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                const current = ruleSources ? ruleSources.split(',').map(s => s.trim()).filter(Boolean) : [];
+                                if (!current.includes(p)) {
+                                  setRuleSources([...current, p].join(', '));
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors font-medium"
+                            >
+                              + {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Priority, Daily Limit, Description */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Rule Priority (1 to 10)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="1"
+                              max="10"
+                              value={rulePriority}
+                              onChange={(e) => setRulePriority(e.target.value)}
+                              className="flex-1 accent-purple-600"
+                            />
+                            <span className="font-bold text-xs px-2.5 py-1 rounded-lg bg-purple-100 text-purple-800 font-mono">
+                              Priority {rulePriority}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Higher priority rules evaluate first</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Daily Lead Cap for this Rule
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="500"
+                            value={ruleDailyLimit}
+                            onChange={(e) => setRuleDailyLimit(e.target.value)}
+                            className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold"
+                          />
+                          <p className="text-[10px] text-slate-400 mt-0.5">Max leads routed via this rule per day</p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Rule Description / Notes
+                        </label>
+                        <input
+                          type="text"
+                          value={ruleDescription}
+                          onChange={(e) => setRuleDescription(e.target.value)}
+                          placeholder="e.g. Priority routing for medical admissions"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2 border-t border-purple-100">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddRuleForm(false)}
+                          className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white rounded-xl"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={ruleSaving}
+                          className="flex items-center gap-1.5 px-4 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs disabled:opacity-50"
+                        >
+                          {ruleSaving ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Saving Rule...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Save &amp; Activate Rule</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Rules Cards List */}
+                  {loadingRules ? (
+                    <div className="py-12 text-center text-xs text-slate-500 flex flex-col items-center justify-center gap-2">
+                      <RefreshCw className="w-5 h-5 animate-spin text-purple-600" />
+                      <span>Loading assignment rules...</span>
+                    </div>
+                  ) : counselorRules.length === 0 ? (
+                    <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                      <Sliders className="w-8 h-8 text-slate-300 mx-auto" />
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-700">No Custom Assignment Rules Configured</h4>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                          Leads currently route to {rulesCounselor.name} using their profile specializations or via balanced Round Robin.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddRuleForm(true)}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-xs"
+                      >
+                        Create First Lead Assigner Rule
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {counselorRules.map((rule) => {
+                        const isActive = rule.is_active === 1;
+                        return (
+                          <div
+                            key={rule.id}
+                            className={`p-4 rounded-2xl border transition-all space-y-2.5 ${
+                              isActive
+                                ? 'bg-white border-slate-200 hover:border-purple-300 shadow-2xs'
+                                : 'bg-slate-50/70 border-slate-200/60 opacity-75'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h5 className="font-bold text-xs text-slate-900">{rule.name}</h5>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                    Priority {rule.priority}
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                    Limit: {rule.max_daily_leads}/day
+                                  </span>
+                                </div>
+                                {rule.description && (
+                                  <p className="text-[11px] text-slate-500">{rule.description}</p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleRule(rule.id, rule.name)}
+                                  className={`px-2.5 py-1 text-[11px] font-bold rounded-full border transition-all ${
+                                    isActive
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-amber-50 hover:text-amber-800'
+                                      : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-emerald-50 hover:text-emerald-700'
+                                  }`}
+                                  title={isActive ? 'Click to Pause Rule' : 'Click to Activate Rule'}
+                                >
+                                  {isActive ? 'Active' : 'Paused'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRule(rule.id, rule.name)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                  title="Delete Rule"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Criteria Tags */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-100">
+                              {/* Courses */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                  <GraduationCap className="w-3 h-3 text-purple-600" />
+                                  <span>Courses / Programs</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.course_keywords && rule.course_keywords.length > 0 ? (
+                                    rule.course_keywords.map((k, i) => (
+                                      <span key={i} className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 font-medium text-[10px] border border-purple-100">
+                                        {k}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-400 text-[10px] italic">Any program</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Universities */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                  <Building2 className="w-3 h-3 text-blue-600" />
+                                  <span>Partner Universities</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.university_keywords && rule.university_keywords.length > 0 ? (
+                                    rule.university_keywords.map((k, i) => (
+                                      <span key={i} className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-medium text-[10px] border border-blue-100">
+                                        {k}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-400 text-[10px] italic">Any university</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Territories / Cities */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                  <MapPin className="w-3 h-3 text-emerald-600" />
+                                  <span>Target Territories</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.target_cities && rule.target_cities.length > 0 ? (
+                                    rule.target_cities.map((k, i) => (
+                                      <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-medium text-[10px] border border-emerald-100">
+                                        {k}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-400 text-[10px] italic">Any territory</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Lead Sources */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                                  <Zap className="w-3 h-3 text-amber-600" />
+                                  <span>Lead Sources</span>
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {rule.lead_sources && rule.lead_sources.length > 0 ? (
+                                    rule.lead_sources.map((k, i) => (
+                                      <span key={i} className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 font-medium text-[10px] border border-amber-100">
+                                        {k}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-slate-400 text-[10px] italic">Any source (Meta, Sheets, Web)</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* Live Rule Simulation Tab */
+                <div className="space-y-4">
+                  <div className="bg-purple-50/60 p-4 rounded-2xl border border-purple-200">
+                    <h4 className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                      <Target className="w-4 h-4 text-purple-600" />
+                      <span>Test Real-Time Lead Distribution Routing</span>
+                    </h4>
+                    <p className="text-[11px] text-purple-700 mt-0.5">
+                      Enter prospective student parameters to verify which counselor and rule trigger the assignment.
+                    </p>
+
+                    <form onSubmit={handleRunSimulation} className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">Preferred Course</label>
+                        <input
+                          type="text"
+                          value={simCourse}
+                          onChange={(e) => setSimCourse(e.target.value)}
+                          placeholder="e.g. B.Tech Computer Science"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">Preferred University</label>
+                        <input
+                          type="text"
+                          value={simUni}
+                          onChange={(e) => setSimUni(e.target.value)}
+                          placeholder="e.g. Sharda University"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">Student City / Territory</label>
+                        <input
+                          type="text"
+                          value={simCity}
+                          onChange={(e) => setSimCity(e.target.value)}
+                          placeholder="e.g. Kathmandu"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">Lead Source</label>
+                        <input
+                          type="text"
+                          value={simSource}
+                          onChange={(e) => setSimSource(e.target.value)}
+                          placeholder="e.g. Meta Lead Ads"
+                          className="w-full p-2 text-xs rounded-xl border border-slate-300 bg-white"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={simulating}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs disabled:opacity-50"
+                        >
+                          {simulating ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Simulating Route...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3.5 h-3.5" />
+                              <span>Simulate Lead Routing</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Simulation Result Box */}
+                  {simResult && (
+                    <div
+                      className={`p-4 rounded-2xl border space-y-2 animate-in fade-in duration-200 ${
+                        simResult.success
+                          ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                          : 'bg-rose-50/70 border-rose-200 text-rose-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-xs">
+                        {simResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-600" />
+                        )}
+                        <span>
+                          {simResult.success
+                            ? `Routed to: ${simResult.counselorName}`
+                            : 'Routing Failed'}
+                        </span>
+                      </div>
+
+                      {simResult.success && (
+                        <div className="text-xs space-y-1">
+                          <div>
+                            <strong>Method:</strong> {simResult.method}
+                          </div>
+                          {simResult.matchedRule && (
+                            <div>
+                              <strong>Matched Rule:</strong> {simResult.matchedRule}
+                            </div>
+                          )}
+                          {simResult.reasons && simResult.reasons.length > 0 && (
+                            <div>
+                              <strong>Match Reasons:</strong>
+                              <ul className="list-disc pl-5 text-[11px] mt-0.5 space-y-0.5">
+                                {simResult.reasons.map((r: string, idx: number) => (
+                                  <li key={idx}>{r}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-between items-center pt-3 border-t border-slate-100 shrink-0">
+              <span className="text-[11px] text-slate-400">
+                Changes apply instantly to incoming Meta, Google Sheets, and Web leads.
+              </span>
+              <button
+                type="button"
+                onClick={() => setRulesModalOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Close Manager
               </button>
             </div>
           </div>

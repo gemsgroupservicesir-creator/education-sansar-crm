@@ -547,6 +547,7 @@ CREATE TABLE IF NOT EXISTS lead_routing_rules (
   course_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["B.Tech", "Engineering", "CSE"]
   university_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["SRM", "VIT", "Chandigarh"]
   target_cities TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Kathmandu", "Birgunj"]
+  lead_sources TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Meta Lead Ads", "Google Sheets", "Website"]
   counselor_id TEXT NOT NULL REFERENCES counselors(id) ON DELETE CASCADE,
   counselor_name TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 1,
@@ -1108,6 +1109,85 @@ async function deleteRoutingRuleFromNeon(id) {
   } catch (err) {
     console.error("[Neon Delete] Routing rule deletion failed:", err.message);
     return false;
+  }
+}
+async function persistRoutingRuleToNeon(rule) {
+  if (!sql) return false;
+  try {
+    await sql.query(
+      `INSERT INTO lead_routing_rules (
+        id, name, course_keywords, university_keywords, target_cities, lead_sources,
+        counselor_id, counselor_name, priority, max_daily_leads, is_active, description, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        course_keywords = EXCLUDED.course_keywords,
+        university_keywords = EXCLUDED.university_keywords,
+        target_cities = EXCLUDED.target_cities,
+        lead_sources = EXCLUDED.lead_sources,
+        counselor_id = EXCLUDED.counselor_id,
+        counselor_name = EXCLUDED.counselor_name,
+        priority = EXCLUDED.priority,
+        max_daily_leads = EXCLUDED.max_daily_leads,
+        is_active = EXCLUDED.is_active,
+        description = EXCLUDED.description,
+        updated_at = NOW()`,
+      [
+        rule.id,
+        rule.name,
+        JSON.stringify(rule.course_keywords || []),
+        JSON.stringify(rule.university_keywords || []),
+        JSON.stringify(rule.target_cities || []),
+        JSON.stringify(rule.lead_sources || []),
+        rule.counselor_id,
+        rule.counselor_name,
+        rule.priority || 1,
+        rule.max_daily_leads || 20,
+        rule.is_active !== void 0 ? rule.is_active : 1,
+        rule.description || null
+      ]
+    );
+    return true;
+  } catch (err) {
+    try {
+      await sql.query(
+        `INSERT INTO lead_routing_rules (
+          id, name, course_keywords, university_keywords, target_cities,
+          counselor_id, counselor_name, priority, max_daily_leads, is_active, description, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          course_keywords = EXCLUDED.course_keywords,
+          university_keywords = EXCLUDED.university_keywords,
+          target_cities = EXCLUDED.target_cities,
+          counselor_id = EXCLUDED.counselor_id,
+          counselor_name = EXCLUDED.counselor_name,
+          priority = EXCLUDED.priority,
+          max_daily_leads = EXCLUDED.max_daily_leads,
+          is_active = EXCLUDED.is_active,
+          description = EXCLUDED.description,
+          updated_at = NOW()`,
+        [
+          rule.id,
+          rule.name,
+          JSON.stringify(rule.course_keywords || []),
+          JSON.stringify(rule.university_keywords || []),
+          JSON.stringify(rule.target_cities || []),
+          rule.counselor_id,
+          rule.counselor_name,
+          rule.priority || 1,
+          rule.max_daily_leads || 20,
+          rule.is_active !== void 0 ? rule.is_active : 1,
+          rule.description || null
+        ]
+      );
+      return true;
+    } catch (fallbackErr) {
+      console.warn("[Neon Sync] Routing rule sync warning:", fallbackErr.message);
+      return false;
+    }
   }
 }
 async function deleteMessageTemplateFromNeon(id) {
@@ -2111,6 +2191,7 @@ function runSafeMigrations() {
   addColumnIfNotExists("counselors", "daily_lead_quota", "INTEGER DEFAULT 25");
   addColumnIfNotExists("counselors", "leads_assigned_today", "INTEGER DEFAULT 0");
   addColumnIfNotExists("counselors", "last_assigned_date", "TEXT");
+  addColumnIfNotExists("lead_routing_rules", "lead_sources", "TEXT DEFAULT '[]'");
   addColumnIfNotExists("counselors", "designation", "TEXT DEFAULT 'Senior Counselor'");
   addColumnIfNotExists("counselors", "department", "TEXT DEFAULT 'Counseling & Admissions'");
   addColumnIfNotExists("counselors", "employee_code", "TEXT");
@@ -5095,20 +5176,27 @@ function parseKeywords(val) {
   }
   return [];
 }
-function getRoutingRules() {
+function getRoutingRules(counselorId) {
   try {
-    const rows = db.prepare(`
+    let query = `
       SELECT r.*, c.name as current_counselor_name, c.is_active as counselor_active, c.email as counselor_email
       FROM lead_routing_rules r
       LEFT JOIN counselors c ON r.counselor_id = c.id
-      ORDER BY r.priority DESC, r.created_at ASC
-    `).all();
+    `;
+    const params = [];
+    if (counselorId) {
+      query += ` WHERE r.counselor_id = ? `;
+      params.push(counselorId);
+    }
+    query += ` ORDER BY r.priority DESC, r.created_at ASC `;
+    const rows = db.prepare(query).all(...params);
     return rows.map((r) => ({
       ...r,
       counselor_name: r.current_counselor_name || r.counselor_name || "Counselor",
       course_keywords: parseKeywords(r.course_keywords),
       university_keywords: parseKeywords(r.university_keywords),
-      target_cities: parseKeywords(r.target_cities)
+      target_cities: parseKeywords(r.target_cities),
+      lead_sources: parseKeywords(r.lead_sources)
     }));
   } catch (err) {
     console.warn("[Routing Rules] Query failed:", err.message);
@@ -5125,18 +5213,20 @@ function createRoutingRule(data, performedBy = "Super Admin") {
   const courseKw = JSON.stringify(parseKeywords(data.course_keywords));
   const uniKw = JSON.stringify(parseKeywords(data.university_keywords));
   const cities = JSON.stringify(parseKeywords(data.target_cities));
+  const sources = JSON.stringify(parseKeywords(data.lead_sources));
   db.prepare(`
     INSERT INTO lead_routing_rules (
-      id, name, course_keywords, university_keywords, target_cities,
+      id, name, course_keywords, university_keywords, target_cities, lead_sources,
       counselor_id, counselor_name, priority, max_daily_leads, is_active, description
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.name || "Custom Routing Rule",
     courseKw,
     uniKw,
     cities,
+    sources,
     data.counselor_id,
     counselorName,
     data.priority !== void 0 ? Number(data.priority) : 1,
@@ -5144,6 +5234,25 @@ function createRoutingRule(data, performedBy = "Super Admin") {
     data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
     data.description || null
   );
+  const createdRule = {
+    id,
+    name: data.name || "Custom Routing Rule",
+    course_keywords: parseKeywords(data.course_keywords),
+    university_keywords: parseKeywords(data.university_keywords),
+    target_cities: parseKeywords(data.target_cities),
+    lead_sources: parseKeywords(data.lead_sources),
+    counselor_id: data.counselor_id,
+    counselor_name: counselorName,
+    priority: data.priority !== void 0 ? Number(data.priority) : 1,
+    max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
+    is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
+    description: data.description
+  };
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon(createdRule).catch(
+      (err) => console.warn("[Neon Sync] Routing rule create warning:", err.message)
+    );
+  }
   logAudit({
     userName: performedBy,
     action: "CREATE_LEAD_ROUTING_RULE",
@@ -5151,19 +5260,7 @@ function createRoutingRule(data, performedBy = "Super Admin") {
     entityId: id,
     newValue: { name: data.name, counselor_name: counselorName, priority: data.priority }
   });
-  return {
-    id,
-    name: data.name || "Custom Routing Rule",
-    course_keywords: parseKeywords(data.course_keywords),
-    university_keywords: parseKeywords(data.university_keywords),
-    target_cities: parseKeywords(data.target_cities),
-    counselor_id: data.counselor_id,
-    counselor_name: counselorName,
-    priority: data.priority || 1,
-    max_daily_leads: data.max_daily_leads || 20,
-    is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
-    description: data.description
-  };
+  return createdRule;
 }
 function updateRoutingRule(id, data, performedBy = "Super Admin") {
   const existing = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
@@ -5176,12 +5273,14 @@ function updateRoutingRule(id, data, performedBy = "Super Admin") {
   const courseKw = data.course_keywords !== void 0 ? JSON.stringify(parseKeywords(data.course_keywords)) : existing.course_keywords;
   const uniKw = data.university_keywords !== void 0 ? JSON.stringify(parseKeywords(data.university_keywords)) : existing.university_keywords;
   const cities = data.target_cities !== void 0 ? JSON.stringify(parseKeywords(data.target_cities)) : existing.target_cities;
+  const sources = data.lead_sources !== void 0 ? JSON.stringify(parseKeywords(data.lead_sources)) : existing.lead_sources || "[]";
   db.prepare(`
     UPDATE lead_routing_rules
     SET name = ?,
         course_keywords = ?,
         university_keywords = ?,
         target_cities = ?,
+        lead_sources = ?,
         counselor_id = ?,
         counselor_name = ?,
         priority = ?,
@@ -5195,6 +5294,7 @@ function updateRoutingRule(id, data, performedBy = "Super Admin") {
     courseKw,
     uniKw,
     cities,
+    sources,
     data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
     counselorName,
     data.priority !== void 0 ? Number(data.priority) : existing.priority,
@@ -5203,6 +5303,22 @@ function updateRoutingRule(id, data, performedBy = "Super Admin") {
     data.description !== void 0 ? data.description : existing.description,
     id
   );
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon({
+      id,
+      name: data.name !== void 0 ? data.name : existing.name,
+      course_keywords: parseKeywords(courseKw),
+      university_keywords: parseKeywords(uniKw),
+      target_cities: parseKeywords(cities),
+      lead_sources: parseKeywords(sources),
+      counselor_id: data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
+      counselor_name: counselorName,
+      priority: data.priority !== void 0 ? Number(data.priority) : existing.priority,
+      max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
+      is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
+      description: data.description !== void 0 ? data.description : existing.description
+    }).catch((err) => console.warn("[Neon Sync] Routing rule update warning:", err.message));
+  }
   logAudit({
     userName: performedBy,
     action: "UPDATE_LEAD_ROUTING_RULE",
@@ -5279,46 +5395,28 @@ function distributeLead(lead) {
     const hasCourseFilter = rule.course_keywords && rule.course_keywords.length > 0;
     const hasUniFilter = rule.university_keywords && rule.university_keywords.length > 0;
     const hasCityFilter = rule.target_cities && rule.target_cities.length > 0;
-    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter) continue;
+    const hasSourceFilter = rule.lead_sources && rule.lead_sources.length > 0;
+    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter && !hasSourceFilter) continue;
     const courseMatches = matchesKeywords(lead.preferred_course, rule.course_keywords);
     const uniMatches = matchesKeywords(lead.preferred_university, rule.university_keywords);
     const cityMatches = matchesKeywords(lead.city, rule.target_cities);
-    let isMatch = false;
+    const sourceMatches = matchesKeywords(lead.source, rule.lead_sources);
+    if (hasSourceFilter && !sourceMatches) continue;
+    if (hasCourseFilter && !courseMatches) continue;
+    if (hasUniFilter && !uniMatches) continue;
+    if (hasCityFilter && !cityMatches) continue;
     const matchReasons = [];
-    if (hasCourseFilter && hasUniFilter) {
-      if (courseMatches && uniMatches) {
-        isMatch = !hasCityFilter || cityMatches;
-        if (isMatch) {
-          matchReasons.push(`Matched Course [${lead.preferred_course}]`);
-          matchReasons.push(`Matched University [${lead.preferred_university}]`);
-          if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-        }
-      }
-    } else if (hasCourseFilter && courseMatches) {
-      isMatch = !hasCityFilter || cityMatches;
-      if (isMatch) {
-        matchReasons.push(`Matched Course [${lead.preferred_course}]`);
-        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-      }
-    } else if (hasUniFilter && uniMatches) {
-      isMatch = !hasCityFilter || cityMatches;
-      if (isMatch) {
-        matchReasons.push(`Matched University [${lead.preferred_university}]`);
-        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-      }
-    } else if (hasCityFilter && cityMatches && !hasCourseFilter && !hasUniFilter) {
-      isMatch = true;
-      matchReasons.push(`Matched City [${lead.city}]`);
-    }
-    if (isMatch) {
-      return {
-        counselorId: counselor.id,
-        counselorName: counselor.name,
-        method: `Automated Rule (${rule.name})`,
-        matchedRule: rule.name,
-        reasons: matchReasons
-      };
-    }
+    if (hasSourceFilter && sourceMatches) matchReasons.push(`Matched Source [${lead.source}]`);
+    if (hasCourseFilter && courseMatches) matchReasons.push(`Matched Course [${lead.preferred_course}]`);
+    if (hasUniFilter && uniMatches) matchReasons.push(`Matched University [${lead.preferred_university}]`);
+    if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
+    return {
+      counselorId: counselor.id,
+      counselorName: counselor.name,
+      method: `Automated Rule (${rule.name})`,
+      matchedRule: rule.name,
+      reasons: matchReasons.length > 0 ? matchReasons : [`Rule criteria satisfied (${rule.name})`]
+    };
   }
   for (const c of activeCounselors) {
     const specCourses = parseKeywords(c.specialization_courses);
@@ -5370,7 +5468,8 @@ async function distributeUnassignedLeads(performedBy = "Super Admin") {
       city: lead.city,
       preferred_course: lead.preferred_course,
       preferred_university: lead.preferred_university,
-      country: lead.country
+      country: lead.country,
+      source: lead.source
     });
     if (route) {
       db.prepare(`
@@ -5535,7 +5634,8 @@ function assignCounselor(lead) {
     city: lead.city,
     preferred_university: lead.preferred_university,
     preferred_course: lead.preferred_course,
-    country: lead.country
+    country: lead.country,
+    source: lead.source
   });
   if (route) {
     return {
@@ -5596,7 +5696,8 @@ function createLead(data, performedBy = "System") {
       city: data.city,
       preferred_university: data.preferred_university,
       preferred_course: data.preferred_course,
-      country: data.country
+      country: data.country,
+      source: data.source
     });
     if (assigned) {
       counselorId = assigned.counselorId;
@@ -9099,10 +9200,11 @@ apiRouter.post("/counselors", async (req, res) => {
       employee_code,
       alternate_phone,
       work_location,
-      notes
+      notes,
+      routing_rules
     } = req.body;
     if (!name || !email || !phone) {
-      return res.status(400).json({ error: "Name, email, and phone number are required" });
+      return res.status(400).json({ error: "Full Name, Email address, and Phone number are required" });
     }
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
@@ -9111,22 +9213,37 @@ apiRouter.post("/counselors", async (req, res) => {
     const permsJson = JSON.stringify(permissions || []);
     const specCoursesJson = JSON.stringify(specialization_courses || []);
     const specUnisJson = JSON.stringify(specialization_universities || []);
-    let existingUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(cleanEmail);
-    if (!existingUser && isNeonEnabled()) {
-      existingUser = await findUserInNeon(cleanEmail);
+    const existingCounselor = db.prepare("SELECT id, name FROM counselors WHERE LOWER(email) = ?").get(cleanEmail);
+    if (existingCounselor) {
+      return res.status(400).json({
+        error: `A staff/counselor with email "${cleanEmail}" already exists (${existingCounselor.name}). Please edit the existing staff member or use a different email.`
+      });
     }
-    if (existingUser) {
-      return res.status(400).json({ error: "A staff or login account with this email address already exists" });
+    let existingUser = db.prepare("SELECT id, name, role FROM users WHERE LOWER(email) = ?").get(cleanEmail);
+    if (!existingUser && isNeonEnabled()) {
+      try {
+        existingUser = await findUserInNeon(cleanEmail);
+      } catch (e) {
+        console.warn("[Neon Notice] findUserInNeon:", e.message);
+      }
     }
     const cId = "c-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
-    const uId = "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    const uId = existingUser ? existingUser.id : "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
     const pwd = password && password.trim().length >= 4 ? password.trim() : "counselor123";
     const uname = username ? username.trim() : cleanEmail.split("@")[0];
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
+    if (existingUser) {
+      db.prepare(`
+        UPDATE users 
+        SET name = ?, password_hash = ?, role = ?, phone = ?, is_active = 1, permissions = ?, updated_at = ?
+        WHERE id = ?
+      `).run(cleanName, pwd, userRole, cleanPhone, permsJson, now, uId);
+    } else {
+      db.prepare(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
+    }
     db.prepare(`
       INSERT INTO counselors (
         id, user_id, name, username, email, phone, specialization_country, assigned_cities,
@@ -9158,30 +9275,66 @@ apiRouter.post("/counselors", async (req, res) => {
       now,
       now
     );
-    if (isNeonEnabled()) {
-      await persistUserToNeon({
-        id: uId,
-        name: cleanName,
-        email: cleanEmail,
-        password_hash: pwd,
-        role: userRole,
-        phone: cleanPhone,
-        is_active: 1
-      });
-      await persistCounselorToNeon({
-        id: cId,
-        user_id: uId,
-        name: cleanName,
-        username: uname,
-        email: cleanEmail,
-        phone: cleanPhone,
-        specialization_country: specialization_country || "Nepal & India",
-        assigned_cities: JSON.stringify(assigned_cities || []),
-        max_capacity: max_capacity || 100,
+    if (Array.isArray(routing_rules) && routing_rules.length > 0) {
+      for (const r of routing_rules) {
+        if (r.name) {
+          createRoutingRule({
+            name: r.name,
+            counselor_id: cId,
+            counselor_name: cleanName,
+            course_keywords: r.course_keywords,
+            university_keywords: r.university_keywords,
+            target_cities: r.target_cities,
+            lead_sources: r.lead_sources,
+            priority: Number(r.priority) || 5,
+            max_daily_leads: Number(r.max_daily_leads) || (daily_lead_quota || 25),
+            is_active: r.is_active !== void 0 ? r.is_active ? 1 : 0 : 1,
+            description: r.description
+          }, req.body.performedBy || "Admin");
+        }
+      }
+    } else if (specialization_courses && specialization_courses.length > 0 || specialization_universities && specialization_universities.length > 0) {
+      createRoutingRule({
+        name: `${cleanName} - Default Specialization Rule`,
+        counselor_id: cId,
+        counselor_name: cleanName,
+        course_keywords: specialization_courses || [],
+        university_keywords: specialization_universities || [],
+        target_cities: assigned_cities || [],
+        priority: 5,
+        max_daily_leads: Number(daily_lead_quota) || 25,
         is_active: 1,
-        status: "Active",
-        joining_date: now
-      });
+        description: "Auto-created baseline routing rule from counselor profile specializations"
+      }, req.body.performedBy || "Admin");
+    }
+    if (isNeonEnabled()) {
+      try {
+        await persistUserToNeon({
+          id: uId,
+          name: cleanName,
+          email: cleanEmail,
+          password_hash: pwd,
+          role: userRole,
+          phone: cleanPhone,
+          is_active: 1
+        });
+        await persistCounselorToNeon({
+          id: cId,
+          user_id: uId,
+          name: cleanName,
+          username: uname,
+          email: cleanEmail,
+          phone: cleanPhone,
+          specialization_country: specialization_country || "Nepal & India",
+          assigned_cities: JSON.stringify(assigned_cities || []),
+          max_capacity: max_capacity || 100,
+          is_active: 1,
+          status: "Active",
+          joining_date: now
+        });
+      } catch (neonErr) {
+        console.warn("[Neon Sync] Counselor persist notice (local creation succeeded):", neonErr.message);
+      }
     }
     logAudit({
       userName: req.body.performedBy || "Admin",
@@ -9403,6 +9556,74 @@ apiRouter.post("/counselors/:id/reset-password", (req, res) => {
     newValue: { email: counselor.email }
   });
   res.json({ success: true, message: `Password reset successfully for ${counselor.name}.` });
+});
+apiRouter.get("/counselors/:id/rules", (req, res) => {
+  try {
+    const rules = getRoutingRules(req.params.id);
+    res.json(rules);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch rules for counselor" });
+  }
+});
+apiRouter.post("/counselors/:id/rules", (req, res) => {
+  try {
+    const counselor = db.prepare("SELECT id, name FROM counselors WHERE id = ?").get(req.params.id);
+    if (!counselor) return res.status(404).json({ error: "Counselor not found" });
+    const {
+      name,
+      course_keywords,
+      university_keywords,
+      target_cities,
+      lead_sources,
+      priority,
+      max_daily_leads,
+      is_active,
+      description,
+      performedBy
+    } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "Rule Name is required" });
+    }
+    const rule = createRoutingRule({
+      name,
+      counselor_id: counselor.id,
+      counselor_name: counselor.name,
+      course_keywords: course_keywords || [],
+      university_keywords: university_keywords || [],
+      target_cities: target_cities || [],
+      lead_sources: lead_sources || [],
+      priority: priority !== void 0 ? Number(priority) : 5,
+      max_daily_leads: max_daily_leads !== void 0 ? Number(max_daily_leads) : 20,
+      is_active: is_active !== void 0 ? is_active ? 1 : 0 : 1,
+      description
+    }, performedBy || "Admin");
+    res.status(201).json(rule);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create counselor routing rule" });
+  }
+});
+apiRouter.put("/counselors/rules/:ruleId/toggle", (req, res) => {
+  try {
+    const rule = db.prepare("SELECT id, is_active FROM lead_routing_rules WHERE id = ?").get(req.params.ruleId);
+    if (!rule) return res.status(404).json({ error: "Routing rule not found" });
+    const newActive = rule.is_active === 1 ? 0 : 1;
+    updateRoutingRule(rule.id, { is_active: newActive }, req.body.performedBy || "Admin");
+    res.json({ success: true, is_active: newActive });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to toggle rule" });
+  }
+});
+apiRouter.delete("/counselors/rules/:ruleId", (req, res) => {
+  try {
+    const success = deleteRoutingRule(req.params.ruleId, req.query.performedBy || "Admin");
+    if (!success) return res.status(404).json({ error: "Routing rule not found" });
+    if (isNeonEnabled()) {
+      deleteRoutingRuleFromNeon(req.params.ruleId).catch((e) => console.warn("[Neon Delete] Rule defer:", e.message));
+    }
+    res.json({ success: true, message: "Routing rule deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete routing rule" });
+  }
 });
 apiRouter.get("/followups", (req, res) => {
   const { counselorId, status, view, date } = req.query;
@@ -11377,7 +11598,8 @@ apiRouter.post("/import/leads", (req, res) => {
 });
 apiRouter.get("/lead-routing/rules", (req, res) => {
   try {
-    const rules = getRoutingRules();
+    const counselorId = req.query.counselor_id;
+    const rules = getRoutingRules(counselorId);
     res.json(rules);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch routing rules" });
@@ -11385,7 +11607,7 @@ apiRouter.get("/lead-routing/rules", (req, res) => {
 });
 apiRouter.post("/lead-routing/rules", (req, res) => {
   try {
-    const { name, counselor_id, course_keywords, university_keywords, target_cities, priority, max_daily_leads, is_active, description, performedBy } = req.body;
+    const { name, counselor_id, course_keywords, university_keywords, target_cities, lead_sources, priority, max_daily_leads, is_active, description, performedBy } = req.body;
     if (!name || !counselor_id) {
       return res.status(400).json({ error: "Rule name and assigned counselor are required" });
     }
@@ -11395,6 +11617,7 @@ apiRouter.post("/lead-routing/rules", (req, res) => {
       course_keywords,
       university_keywords,
       target_cities,
+      lead_sources,
       priority,
       max_daily_leads,
       is_active,

@@ -91,12 +91,14 @@ export function assignCounselor(lead: {
   preferred_university?: string;
   preferred_course?: string;
   country?: string;
+  source?: string;
 }): { counselorId: string; counselorName: string; method: string } | null {
   const route = distributeLead({
     city: lead.city,
     preferred_university: lead.preferred_university,
     preferred_course: lead.preferred_course,
-    country: lead.country
+    country: lead.country,
+    source: lead.source
   });
 
   if (route) {
@@ -166,7 +168,8 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
       city: data.city,
       preferred_university: data.preferred_university,
       preferred_course: data.preferred_course,
-      country: data.country
+      country: data.country,
+      source: data.source
     });
     if (assigned) {
       counselorId = assigned.counselorId;

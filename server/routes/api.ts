@@ -747,10 +747,11 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       name, email, phone, specialization_country, assigned_cities, 
       max_capacity, password, username, role, permissions,
       specialization_courses, specialization_universities, daily_lead_quota,
-      designation, department, employee_code, alternate_phone, work_location, notes
+      designation, department, employee_code, alternate_phone, work_location, notes,
+      routing_rules
     } = req.body;
     if (!name || !email || !phone) {
-      return res.status(400).json({ error: 'Name, email, and phone number are required' });
+      return res.status(400).json({ error: 'Full Name, Email address, and Phone number are required' });
     }
 
     const cleanEmail = email.trim().toLowerCase();
@@ -761,28 +762,45 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const specCoursesJson = JSON.stringify(specialization_courses || []);
     const specUnisJson = JSON.stringify(specialization_universities || []);
 
-    // Check duplicate in SQLite or Neon
-    let existingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail);
-    if (!existingUser && isNeonEnabled()) {
-      existingUser = await findUserInNeon(cleanEmail);
+    // 1. Check if a counselor account already exists with this email
+    const existingCounselor = db.prepare('SELECT id, name FROM counselors WHERE LOWER(email) = ?').get(cleanEmail) as any;
+    if (existingCounselor) {
+      return res.status(400).json({ 
+        error: `A staff/counselor with email "${cleanEmail}" already exists (${existingCounselor.name}). Please edit the existing staff member or use a different email.` 
+      });
     }
-    if (existingUser) {
-      return res.status(400).json({ error: 'A staff or login account with this email address already exists' });
+
+    // 2. Check if a login account already exists in users table
+    let existingUser = db.prepare('SELECT id, name, role FROM users WHERE LOWER(email) = ?').get(cleanEmail) as any;
+    if (!existingUser && isNeonEnabled()) {
+      try {
+        existingUser = await findUserInNeon(cleanEmail);
+      } catch (e: any) {
+        console.warn('[Neon Notice] findUserInNeon:', e.message);
+      }
     }
 
     const cId = 'c-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
-    const uId = 'u-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const uId = existingUser ? existingUser.id : ('u-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6));
     const pwd = password && password.trim().length >= 4 ? password.trim() : 'counselor123';
     const uname = username ? username.trim() : cleanEmail.split('@')[0];
     const now = new Date().toISOString();
 
-    // 1. Insert into users in SQLite with selected role & permissions FIRST
-    db.prepare(`
-      INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-    `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
+    // 3. Upsert login credentials into users table
+    if (existingUser) {
+      db.prepare(`
+        UPDATE users 
+        SET name = ?, password_hash = ?, role = ?, phone = ?, is_active = 1, permissions = ?, updated_at = ?
+        WHERE id = ?
+      `).run(cleanName, pwd, userRole, cleanPhone, permsJson, now, uId);
+    } else {
+      db.prepare(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(uId, cleanName, cleanEmail, pwd, userRole, cleanPhone, permsJson, now, now);
+    }
 
-    // 2. Insert into counselors in SQLite
+    // 4. Insert into counselors table
     db.prepare(`
       INSERT INTO counselors (
         id, user_id, name, username, email, phone, specialization_country, assigned_cities,
@@ -815,32 +833,70 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       now
     );
 
-    // 3. Persist to Neon PostgreSQL server-side
-    if (isNeonEnabled()) {
-      await persistUserToNeon({
-        id: uId,
-        name: cleanName,
-        email: cleanEmail,
-        password_hash: pwd,
-        role: userRole,
-        phone: cleanPhone,
-        is_active: 1
-      });
-
-      await persistCounselorToNeon({
-        id: cId,
-        user_id: uId,
-        name: cleanName,
-        username: uname,
-        email: cleanEmail,
-        phone: cleanPhone,
-        specialization_country: specialization_country || 'Nepal & India',
-        assigned_cities: JSON.stringify(assigned_cities || []),
-        max_capacity: max_capacity || 100,
+    // 5. Create lead routing rules if provided, or auto-create from specializations
+    if (Array.isArray(routing_rules) && routing_rules.length > 0) {
+      for (const r of routing_rules) {
+        if (r.name) {
+          createRoutingRule({
+            name: r.name,
+            counselor_id: cId,
+            counselor_name: cleanName,
+            course_keywords: r.course_keywords,
+            university_keywords: r.university_keywords,
+            target_cities: r.target_cities,
+            lead_sources: r.lead_sources,
+            priority: Number(r.priority) || 5,
+            max_daily_leads: Number(r.max_daily_leads) || (daily_lead_quota || 25),
+            is_active: r.is_active !== undefined ? (r.is_active ? 1 : 0) : 1,
+            description: r.description
+          }, req.body.performedBy || 'Admin');
+        }
+      }
+    } else if ((specialization_courses && specialization_courses.length > 0) || (specialization_universities && specialization_universities.length > 0)) {
+      createRoutingRule({
+        name: `${cleanName} - Default Specialization Rule`,
+        counselor_id: cId,
+        counselor_name: cleanName,
+        course_keywords: specialization_courses || [],
+        university_keywords: specialization_universities || [],
+        target_cities: assigned_cities || [],
+        priority: 5,
+        max_daily_leads: Number(daily_lead_quota) || 25,
         is_active: 1,
-        status: 'Active',
-        joining_date: now
-      });
+        description: 'Auto-created baseline routing rule from counselor profile specializations'
+      }, req.body.performedBy || 'Admin');
+    }
+
+    // 6. Persist to Neon PostgreSQL server-side (safely wrapped so errors don't fail creation)
+    if (isNeonEnabled()) {
+      try {
+        await persistUserToNeon({
+          id: uId,
+          name: cleanName,
+          email: cleanEmail,
+          password_hash: pwd,
+          role: userRole,
+          phone: cleanPhone,
+          is_active: 1
+        });
+
+        await persistCounselorToNeon({
+          id: cId,
+          user_id: uId,
+          name: cleanName,
+          username: uname,
+          email: cleanEmail,
+          phone: cleanPhone,
+          specialization_country: specialization_country || 'Nepal & India',
+          assigned_cities: JSON.stringify(assigned_cities || []),
+          max_capacity: max_capacity || 100,
+          is_active: 1,
+          status: 'Active',
+          joining_date: now
+        });
+      } catch (neonErr: any) {
+        console.warn('[Neon Sync] Counselor persist notice (local creation succeeded):', neonErr.message);
+      }
     }
 
     logAudit({
@@ -1069,6 +1125,76 @@ apiRouter.post('/counselors/:id/reset-password', (req: Request, res: Response) =
   });
 
   res.json({ success: true, message: `Password reset successfully for ${counselor.name}.` });
+});
+
+// Counselor-specific Lead Assigner Rules Endpoints
+apiRouter.get('/counselors/:id/rules', (req: Request, res: Response) => {
+  try {
+    const rules = getRoutingRules(req.params.id);
+    res.json(rules);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch rules for counselor' });
+  }
+});
+
+apiRouter.post('/counselors/:id/rules', (req: Request, res: Response) => {
+  try {
+    const counselor = db.prepare('SELECT id, name FROM counselors WHERE id = ?').get(req.params.id) as any;
+    if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
+
+    const {
+      name, course_keywords, university_keywords, target_cities, lead_sources,
+      priority, max_daily_leads, is_active, description, performedBy
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Rule Name is required' });
+    }
+
+    const rule = createRoutingRule({
+      name,
+      counselor_id: counselor.id,
+      counselor_name: counselor.name,
+      course_keywords: course_keywords || [],
+      university_keywords: university_keywords || [],
+      target_cities: target_cities || [],
+      lead_sources: lead_sources || [],
+      priority: priority !== undefined ? Number(priority) : 5,
+      max_daily_leads: max_daily_leads !== undefined ? Number(max_daily_leads) : 20,
+      is_active: is_active !== undefined ? (is_active ? 1 : 0) : 1,
+      description
+    }, performedBy || 'Admin');
+
+    res.status(201).json(rule);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create counselor routing rule' });
+  }
+});
+
+apiRouter.put('/counselors/rules/:ruleId/toggle', (req: Request, res: Response) => {
+  try {
+    const rule = db.prepare('SELECT id, is_active FROM lead_routing_rules WHERE id = ?').get(req.params.ruleId) as any;
+    if (!rule) return res.status(404).json({ error: 'Routing rule not found' });
+
+    const newActive = rule.is_active === 1 ? 0 : 1;
+    updateRoutingRule(rule.id, { is_active: newActive }, req.body.performedBy || 'Admin');
+    res.json({ success: true, is_active: newActive });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to toggle rule' });
+  }
+});
+
+apiRouter.delete('/counselors/rules/:ruleId', (req: Request, res: Response) => {
+  try {
+    const success = deleteRoutingRule(req.params.ruleId, (req.query.performedBy as string) || 'Admin');
+    if (!success) return res.status(404).json({ error: 'Routing rule not found' });
+    if (isNeonEnabled()) {
+      deleteRoutingRuleFromNeon(req.params.ruleId).catch(e => console.warn('[Neon Delete] Rule defer:', e.message));
+    }
+    res.json({ success: true, message: 'Routing rule deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete routing rule' });
+  }
 });
 
 // ==========================================
@@ -3297,7 +3423,8 @@ apiRouter.post('/import/leads', (req: Request, res: Response) => {
 // ==========================================
 apiRouter.get('/lead-routing/rules', (req: Request, res: Response) => {
   try {
-    const rules = getRoutingRules();
+    const counselorId = req.query.counselor_id as string | undefined;
+    const rules = getRoutingRules(counselorId);
     res.json(rules);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch routing rules' });
@@ -3306,7 +3433,7 @@ apiRouter.get('/lead-routing/rules', (req: Request, res: Response) => {
 
 apiRouter.post('/lead-routing/rules', (req: Request, res: Response) => {
   try {
-    const { name, counselor_id, course_keywords, university_keywords, target_cities, priority, max_daily_leads, is_active, description, performedBy } = req.body;
+    const { name, counselor_id, course_keywords, university_keywords, target_cities, lead_sources, priority, max_daily_leads, is_active, description, performedBy } = req.body;
     if (!name || !counselor_id) {
       return res.status(400).json({ error: 'Rule name and assigned counselor are required' });
     }
@@ -3316,6 +3443,7 @@ apiRouter.post('/lead-routing/rules', (req: Request, res: Response) => {
       course_keywords,
       university_keywords,
       target_cities,
+      lead_sources,
       priority,
       max_daily_leads,
       is_active,

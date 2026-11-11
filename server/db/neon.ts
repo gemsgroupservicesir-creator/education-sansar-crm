@@ -511,6 +511,90 @@ export async function deleteRoutingRuleFromNeon(id: string): Promise<boolean> {
 }
 
 /**
+ * Persist or Update Routing Rule in Neon
+ */
+export async function persistRoutingRuleToNeon(rule: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(
+      `INSERT INTO lead_routing_rules (
+        id, name, course_keywords, university_keywords, target_cities, lead_sources,
+        counselor_id, counselor_name, priority, max_daily_leads, is_active, description, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        course_keywords = EXCLUDED.course_keywords,
+        university_keywords = EXCLUDED.university_keywords,
+        target_cities = EXCLUDED.target_cities,
+        lead_sources = EXCLUDED.lead_sources,
+        counselor_id = EXCLUDED.counselor_id,
+        counselor_name = EXCLUDED.counselor_name,
+        priority = EXCLUDED.priority,
+        max_daily_leads = EXCLUDED.max_daily_leads,
+        is_active = EXCLUDED.is_active,
+        description = EXCLUDED.description,
+        updated_at = NOW()`,
+      [
+        rule.id,
+        rule.name,
+        JSON.stringify(rule.course_keywords || []),
+        JSON.stringify(rule.university_keywords || []),
+        JSON.stringify(rule.target_cities || []),
+        JSON.stringify(rule.lead_sources || []),
+        rule.counselor_id,
+        rule.counselor_name,
+        rule.priority || 1,
+        rule.max_daily_leads || 20,
+        rule.is_active !== undefined ? rule.is_active : 1,
+        rule.description || null
+      ]
+    );
+    return true;
+  } catch (err: any) {
+    // Fallback if lead_sources column doesn't exist yet on Neon schema
+    try {
+      await sql.query(
+        `INSERT INTO lead_routing_rules (
+          id, name, course_keywords, university_keywords, target_cities,
+          counselor_id, counselor_name, priority, max_daily_leads, is_active, description, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          course_keywords = EXCLUDED.course_keywords,
+          university_keywords = EXCLUDED.university_keywords,
+          target_cities = EXCLUDED.target_cities,
+          counselor_id = EXCLUDED.counselor_id,
+          counselor_name = EXCLUDED.counselor_name,
+          priority = EXCLUDED.priority,
+          max_daily_leads = EXCLUDED.max_daily_leads,
+          is_active = EXCLUDED.is_active,
+          description = EXCLUDED.description,
+          updated_at = NOW()`,
+        [
+          rule.id,
+          rule.name,
+          JSON.stringify(rule.course_keywords || []),
+          JSON.stringify(rule.university_keywords || []),
+          JSON.stringify(rule.target_cities || []),
+          rule.counselor_id,
+          rule.counselor_name,
+          rule.priority || 1,
+          rule.max_daily_leads || 20,
+          rule.is_active !== undefined ? rule.is_active : 1,
+          rule.description || null
+        ]
+      );
+      return true;
+    } catch (fallbackErr: any) {
+      console.warn('[Neon Sync] Routing rule sync warning:', fallbackErr.message);
+      return false;
+    }
+  }
+}
+
+/**
  * Delete Message Template permanently from Neon
  */
 export async function deleteMessageTemplateFromNeon(id: string): Promise<boolean> {

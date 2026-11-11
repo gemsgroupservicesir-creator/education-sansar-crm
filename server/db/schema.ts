@@ -516,6 +516,7 @@ CREATE TABLE IF NOT EXISTS lead_routing_rules (
   course_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["B.Tech", "Engineering", "CSE"]
   university_keywords TEXT DEFAULT '[]', -- JSON array of strings e.g. ["SRM", "VIT", "Chandigarh"]
   target_cities TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Kathmandu", "Birgunj"]
+  lead_sources TEXT DEFAULT '[]', -- JSON array of strings e.g. ["Meta Lead Ads", "Google Sheets", "Website"]
   counselor_id TEXT NOT NULL REFERENCES counselors(id) ON DELETE CASCADE,
   counselor_name TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 1,

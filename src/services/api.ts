@@ -415,7 +415,23 @@ export const api = {
     }),
 
   // Lead Routing Rules & Distribution Engine
-  getRoutingRules: () => fetchJson<any[]>('/lead-routing/rules'),
+  getRoutingRules: (counselorId?: string) =>
+    fetchJson<any[]>(`/lead-routing/rules${counselorId ? `?counselor_id=${encodeURIComponent(counselorId)}` : ''}`),
+  getCounselorRules: (counselorId: string) => fetchJson<any[]>(`/counselors/${counselorId}/rules`),
+  createCounselorRule: (counselorId: string, data: any) =>
+    fetchJson<any>(`/counselors/${counselorId}/rules`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  toggleCounselorRule: (ruleId: string, performedBy?: string) =>
+    fetchJson<any>(`/counselors/rules/${ruleId}/toggle`, {
+      method: 'PUT',
+      body: JSON.stringify({ performedBy }),
+    }),
+  deleteCounselorRule: (ruleId: string, performedBy?: string) =>
+    fetchJson<any>(`/counselors/rules/${ruleId}?performedBy=${encodeURIComponent(performedBy || 'Admin')}`, {
+      method: 'DELETE',
+    }),
   createRoutingRule: (data: any) =>
     fetchJson<any>('/lead-routing/rules', {
       method: 'POST',
@@ -435,7 +451,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ performedBy }),
     }),
-  simulateLeadRouting: (data: { preferred_course?: string; preferred_university?: string; city?: string }) =>
+  simulateLeadRouting: (data: { preferred_course?: string; preferred_university?: string; city?: string; source?: string }) =>
     fetchJson<any>('/lead-routing/simulate', {
       method: 'POST',
       body: JSON.stringify(data),

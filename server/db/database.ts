@@ -181,6 +181,7 @@ function runSafeMigrations() {
   addColumnIfNotExists('counselors', 'daily_lead_quota', 'INTEGER DEFAULT 25');
   addColumnIfNotExists('counselors', 'leads_assigned_today', 'INTEGER DEFAULT 0');
   addColumnIfNotExists('counselors', 'last_assigned_date', 'TEXT');
+  addColumnIfNotExists('lead_routing_rules', 'lead_sources', "TEXT DEFAULT '[]'");
 
   // Staff Extended Information fields
   addColumnIfNotExists('counselors', 'designation', "TEXT DEFAULT 'Senior Counselor'");

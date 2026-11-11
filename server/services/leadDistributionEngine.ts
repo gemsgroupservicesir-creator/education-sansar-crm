@@ -1,5 +1,5 @@
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
-import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
+import { isNeonEnabled, persistLeadToNeon, persistRoutingRuleToNeon } from '../db/neon.ts';
 import type { Lead, Counselor } from '../types/index.ts';
 
 export interface LeadRoutingRule {
@@ -8,6 +8,7 @@ export interface LeadRoutingRule {
   course_keywords: string[];
   university_keywords: string[];
   target_cities: string[];
+  lead_sources?: string[];
   counselor_id: string;
   counselor_name: string;
   priority: number;
@@ -33,16 +34,23 @@ export function parseKeywords(val: any): string[] {
 }
 
 /**
- * Get all configured Lead Routing Rules
+ * Get all configured Lead Routing Rules (optionally filtered by counselorId)
  */
-export function getRoutingRules(): LeadRoutingRule[] {
+export function getRoutingRules(counselorId?: string): LeadRoutingRule[] {
   try {
-    const rows = db.prepare(`
+    let query = `
       SELECT r.*, c.name as current_counselor_name, c.is_active as counselor_active, c.email as counselor_email
       FROM lead_routing_rules r
       LEFT JOIN counselors c ON r.counselor_id = c.id
-      ORDER BY r.priority DESC, r.created_at ASC
-    `).all() as any[];
+    `;
+    const params: any[] = [];
+    if (counselorId) {
+      query += ` WHERE r.counselor_id = ? `;
+      params.push(counselorId);
+    }
+    query += ` ORDER BY r.priority DESC, r.created_at ASC `;
+
+    const rows = db.prepare(query).all(...params) as any[];
 
     return rows.map(r => ({
       ...r,
@@ -50,6 +58,7 @@ export function getRoutingRules(): LeadRoutingRule[] {
       course_keywords: parseKeywords(r.course_keywords),
       university_keywords: parseKeywords(r.university_keywords),
       target_cities: parseKeywords(r.target_cities),
+      lead_sources: parseKeywords(r.lead_sources),
     }));
   } catch (err: any) {
     console.warn('[Routing Rules] Query failed:', err.message);
@@ -73,19 +82,21 @@ export function createRoutingRule(data: Partial<LeadRoutingRule>, performedBy: s
   const courseKw = JSON.stringify(parseKeywords(data.course_keywords));
   const uniKw = JSON.stringify(parseKeywords(data.university_keywords));
   const cities = JSON.stringify(parseKeywords(data.target_cities));
+  const sources = JSON.stringify(parseKeywords(data.lead_sources));
 
   db.prepare(`
     INSERT INTO lead_routing_rules (
-      id, name, course_keywords, university_keywords, target_cities,
+      id, name, course_keywords, university_keywords, target_cities, lead_sources,
       counselor_id, counselor_name, priority, max_daily_leads, is_active, description
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.name || 'Custom Routing Rule',
     courseKw,
     uniKw,
     cities,
+    sources,
     data.counselor_id,
     counselorName,
     data.priority !== undefined ? Number(data.priority) : 1,
@@ -93,6 +104,27 @@ export function createRoutingRule(data: Partial<LeadRoutingRule>, performedBy: s
     data.is_active !== undefined ? (data.is_active ? 1 : 0) : 1,
     data.description || null
   );
+
+  const createdRule: LeadRoutingRule = {
+    id,
+    name: data.name || 'Custom Routing Rule',
+    course_keywords: parseKeywords(data.course_keywords),
+    university_keywords: parseKeywords(data.university_keywords),
+    target_cities: parseKeywords(data.target_cities),
+    lead_sources: parseKeywords(data.lead_sources),
+    counselor_id: data.counselor_id!,
+    counselor_name: counselorName,
+    priority: data.priority !== undefined ? Number(data.priority) : 1,
+    max_daily_leads: data.max_daily_leads !== undefined ? Number(data.max_daily_leads) : 20,
+    is_active: data.is_active !== undefined ? (data.is_active ? 1 : 0) : 1,
+    description: data.description
+  };
+
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon(createdRule).catch(err =>
+      console.warn('[Neon Sync] Routing rule create warning:', err.message)
+    );
+  }
 
   logAudit({
     userName: performedBy,
@@ -102,19 +134,7 @@ export function createRoutingRule(data: Partial<LeadRoutingRule>, performedBy: s
     newValue: { name: data.name, counselor_name: counselorName, priority: data.priority }
   });
 
-  return {
-    id,
-    name: data.name || 'Custom Routing Rule',
-    course_keywords: parseKeywords(data.course_keywords),
-    university_keywords: parseKeywords(data.university_keywords),
-    target_cities: parseKeywords(data.target_cities),
-    counselor_id: data.counselor_id!,
-    counselor_name: counselorName,
-    priority: data.priority || 1,
-    max_daily_leads: data.max_daily_leads || 20,
-    is_active: data.is_active !== undefined ? (data.is_active ? 1 : 0) : 1,
-    description: data.description
-  };
+  return createdRule;
 }
 
 /**
@@ -133,6 +153,7 @@ export function updateRoutingRule(id: string, data: Partial<LeadRoutingRule>, pe
   const courseKw = data.course_keywords !== undefined ? JSON.stringify(parseKeywords(data.course_keywords)) : existing.course_keywords;
   const uniKw = data.university_keywords !== undefined ? JSON.stringify(parseKeywords(data.university_keywords)) : existing.university_keywords;
   const cities = data.target_cities !== undefined ? JSON.stringify(parseKeywords(data.target_cities)) : existing.target_cities;
+  const sources = data.lead_sources !== undefined ? JSON.stringify(parseKeywords(data.lead_sources)) : (existing.lead_sources || '[]');
 
   db.prepare(`
     UPDATE lead_routing_rules
@@ -140,6 +161,7 @@ export function updateRoutingRule(id: string, data: Partial<LeadRoutingRule>, pe
         course_keywords = ?,
         university_keywords = ?,
         target_cities = ?,
+        lead_sources = ?,
         counselor_id = ?,
         counselor_name = ?,
         priority = ?,
@@ -153,6 +175,7 @@ export function updateRoutingRule(id: string, data: Partial<LeadRoutingRule>, pe
     courseKw,
     uniKw,
     cities,
+    sources,
     data.counselor_id !== undefined ? data.counselor_id : existing.counselor_id,
     counselorName,
     data.priority !== undefined ? Number(data.priority) : existing.priority,
@@ -161,6 +184,23 @@ export function updateRoutingRule(id: string, data: Partial<LeadRoutingRule>, pe
     data.description !== undefined ? data.description : existing.description,
     id
   );
+
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon({
+      id,
+      name: data.name !== undefined ? data.name : existing.name,
+      course_keywords: parseKeywords(courseKw),
+      university_keywords: parseKeywords(uniKw),
+      target_cities: parseKeywords(cities),
+      lead_sources: parseKeywords(sources),
+      counselor_id: data.counselor_id !== undefined ? data.counselor_id : existing.counselor_id,
+      counselor_name: counselorName,
+      priority: data.priority !== undefined ? Number(data.priority) : existing.priority,
+      max_daily_leads: data.max_daily_leads !== undefined ? Number(data.max_daily_leads) : existing.max_daily_leads,
+      is_active: data.is_active !== undefined ? (data.is_active ? 1 : 0) : existing.is_active,
+      description: data.description !== undefined ? data.description : existing.description
+    }).catch(err => console.warn('[Neon Sync] Routing rule update warning:', err.message));
+  }
 
   logAudit({
     userName: performedBy,
@@ -224,13 +264,14 @@ function matchesKeywords(text?: string | null, keywords?: string[]): boolean {
 
 /**
  * Automated Lead Distribution Core Engine
- * Routes student leads based on Course keywords, University keywords, City, Priority, and Counselor Capacity.
+ * Routes student leads based on Course keywords, University keywords, City, Lead Source, Priority, and Counselor Capacity.
  */
 export function distributeLead(lead: {
   city?: string | null;
   preferred_university?: string | null;
   preferred_course?: string | null;
   country?: string | null;
+  source?: string | null;
 }): { counselorId: string; counselorName: string; method: string; matchedRule?: string; reasons: string[] } | null {
   
   // 1. Fetch all active counselors with available capacity
@@ -276,55 +317,35 @@ export function distributeLead(lead: {
     const hasCourseFilter = rule.course_keywords && rule.course_keywords.length > 0;
     const hasUniFilter = rule.university_keywords && rule.university_keywords.length > 0;
     const hasCityFilter = rule.target_cities && rule.target_cities.length > 0;
+    const hasSourceFilter = rule.lead_sources && rule.lead_sources.length > 0;
 
     // Skip if rule has no criteria
-    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter) continue;
+    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter && !hasSourceFilter) continue;
 
     const courseMatches = matchesKeywords(lead.preferred_course, rule.course_keywords);
     const uniMatches = matchesKeywords(lead.preferred_university, rule.university_keywords);
     const cityMatches = matchesKeywords(lead.city, rule.target_cities);
+    const sourceMatches = matchesKeywords(lead.source, rule.lead_sources);
 
-    // Rule criteria evaluation:
-    // If both course and university are defined on the rule, BOTH must match for a high-precision match.
-    // Otherwise, each defined filter must match.
-    let isMatch = false;
+    // Multi-criteria evaluation: every active criterion on the rule must match
+    if (hasSourceFilter && !sourceMatches) continue;
+    if (hasCourseFilter && !courseMatches) continue;
+    if (hasUniFilter && !uniMatches) continue;
+    if (hasCityFilter && !cityMatches) continue;
+
     const matchReasons: string[] = [];
+    if (hasSourceFilter && sourceMatches) matchReasons.push(`Matched Source [${lead.source}]`);
+    if (hasCourseFilter && courseMatches) matchReasons.push(`Matched Course [${lead.preferred_course}]`);
+    if (hasUniFilter && uniMatches) matchReasons.push(`Matched University [${lead.preferred_university}]`);
+    if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
 
-    if (hasCourseFilter && hasUniFilter) {
-      if (courseMatches && uniMatches) {
-        isMatch = !hasCityFilter || cityMatches;
-        if (isMatch) {
-          matchReasons.push(`Matched Course [${lead.preferred_course}]`);
-          matchReasons.push(`Matched University [${lead.preferred_university}]`);
-          if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-        }
-      }
-    } else if (hasCourseFilter && courseMatches) {
-      isMatch = !hasCityFilter || cityMatches;
-      if (isMatch) {
-        matchReasons.push(`Matched Course [${lead.preferred_course}]`);
-        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-      }
-    } else if (hasUniFilter && uniMatches) {
-      isMatch = !hasCityFilter || cityMatches;
-      if (isMatch) {
-        matchReasons.push(`Matched University [${lead.preferred_university}]`);
-        if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-      }
-    } else if (hasCityFilter && cityMatches && !hasCourseFilter && !hasUniFilter) {
-      isMatch = true;
-      matchReasons.push(`Matched City [${lead.city}]`);
-    }
-
-    if (isMatch) {
-      return {
-        counselorId: counselor.id,
-        counselorName: counselor.name,
-        method: `Automated Rule (${rule.name})`,
-        matchedRule: rule.name,
-        reasons: matchReasons
-      };
-    }
+    return {
+      counselorId: counselor.id,
+      counselorName: counselor.name,
+      method: `Automated Rule (${rule.name})`,
+      matchedRule: rule.name,
+      reasons: matchReasons.length > 0 ? matchReasons : [`Rule criteria satisfied (${rule.name})`]
+    };
   }
 
   // 3. Direct Counselor Specialization Check (Stored on counselor profile)
@@ -394,7 +415,8 @@ export async function distributeUnassignedLeads(performedBy: string = 'Super Adm
       city: lead.city,
       preferred_course: lead.preferred_course,
       preferred_university: lead.preferred_university,
-      country: lead.country
+      country: lead.country,
+      source: lead.source
     });
 
     if (route) {
@@ -487,6 +509,7 @@ export function simulateLeadRouting(params: {
   preferred_course?: string;
   preferred_university?: string;
   city?: string;
+  source?: string;
 }) {
   const result = distributeLead(params);
   if (!result) {
