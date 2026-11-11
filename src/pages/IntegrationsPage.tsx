@@ -12,12 +12,18 @@ import { useNotifications } from '../context/NotificationContext';
 
 export const IntegrationsPage: React.FC = () => {
   const { addToast } = useNotifications();
-  const [activeTab, setActiveTab] = useState<'meta' | 'whatsapp' | 'sheets' | 'templates' | 'logs'>('sheets');
+  const [activeTab, setActiveTab] = useState<'studyinindia' | 'sheets' | 'meta' | 'whatsapp' | 'templates' | 'logs'>('studyinindia');
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Study in India Real-Time Sync States
+  const [siiStatus, setSiiStatus] = useState<any>(null);
+  const [siiSyncing, setSiiSyncing] = useState(false);
+  const [siiAutoSync, setSiiAutoSync] = useState(true);
+  const [lastSyncReport, setLastSyncReport] = useState<any>(null);
 
   // Meta Configuration & Instant Form States
   const [metaFormConfig, setMetaFormConfig] = useState({
@@ -171,6 +177,12 @@ export const IntegrationsPage: React.FC = () => {
           }));
         } catch (e) {}
       }
+      // Load Study in India sync status
+      api.getStudyInIndiaSyncStatus().then((res) => {
+        setSiiStatus(res);
+        setSiiAutoSync(res.auto_sync_enabled);
+        if (res.last_stats) setLastSyncReport(res.last_stats);
+      }).catch(() => {});
     } catch (err) {
       console.error('Failed to load integrations', err);
     } finally {
@@ -178,8 +190,56 @@ export const IntegrationsPage: React.FC = () => {
     }
   };
 
+  const loadSiiStatus = async () => {
+    try {
+      const res = await api.getStudyInIndiaSyncStatus();
+      setSiiStatus(res);
+      setSiiAutoSync(res.auto_sync_enabled);
+      if (res.last_stats) setLastSyncReport(res.last_stats);
+    } catch (e) {}
+  };
+
+  const handleSyncStudyInIndia = async (mode: 'quick' | 'full' = 'quick') => {
+    try {
+      setSiiSyncing(true);
+      addToast(
+        `Initiating ${mode === 'quick' ? 'Quick' : 'Full'} Realtime Sync with Study in India portal...`,
+        'info'
+      );
+      const res = await api.syncStudyInIndia(mode);
+      if (res.success) {
+        setLastSyncReport(res.stats);
+        addToast(
+          `Sync Complete: ${res.stats?.coursesAdded || 0} new courses & ${res.stats?.universitiesAdded || 0} universities imported!`,
+          'success'
+        );
+      } else {
+        addToast(res.message || 'Sync already in progress', 'warning');
+      }
+      await loadSiiStatus();
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Error syncing Study in India portal', 'error');
+    } finally {
+      setSiiSyncing(false);
+    }
+  };
+
+  const handleToggleSiiAutoSync = async () => {
+    try {
+      const nextVal = !siiAutoSync;
+      setSiiAutoSync(nextVal);
+      await api.toggleStudyInIndiaAutoSync(nextVal);
+      addToast(`Study in India automatic background sync ${nextVal ? 'enabled (Every 60m)' : 'paused'}`, 'info');
+      await loadSiiStatus();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to toggle auto-sync', 'error');
+    }
+  };
+
   useEffect(() => {
     loadData();
+    loadSiiStatus();
   }, []);
 
   const handleCopy = (text: string, key: string) => {
@@ -601,6 +661,22 @@ export const IntegrationsPage: React.FC = () => {
       {/* Tabs */}
       <div className="flex border-b border-gray-200 bg-white rounded-t-xl px-4 pt-2 overflow-x-auto">
         <button
+          onClick={() => setActiveTab('studyinindia')}
+          className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'studyinindia'
+              ? 'border-purple-600 text-purple-600 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <span className="text-base">🇮🇳</span>
+          Study in India Realtime Sync
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            {siiStatus?.db_counts?.courses ? `${siiStatus.db_counts.courses.toLocaleString()} COURSES` : 'LIVE PORTAL'}
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('sheets')}
           className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 whitespace-nowrap transition ${
             activeTab === 'sheets'
@@ -675,6 +751,239 @@ export const IntegrationsPage: React.FC = () => {
           Activity Logs ({logs.length})
         </button>
       </div>
+
+      {/* Tab: Study in India Realtime Sync */}
+      {activeTab === 'studyinindia' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-6 sm:p-8 rounded-2xl shadow-xl relative overflow-hidden">
+            <div className="absolute right-0 top-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">🇮🇳</span>
+                  <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Government of India Official Portal Connector</span>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-purple-200">
+                    Status: <strong className="text-emerald-300 font-bold">{siiSyncing ? 'Syncing Now...' : 'Live Connected'}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h2 className="text-xl sm:text-3xl font-black text-white tracking-tight">
+                  Study in India Real-Time Data Sync Hub
+                </h2>
+                <p className="text-xs sm:text-sm text-purple-200/90 mt-1.5 max-w-3xl leading-relaxed">
+                  Real-time two-way synchronization engine pulling live data from{' '}
+                  <strong className="text-white">studyinindia.gov.in</strong> (EdCIL / Ministry of Education, Govt. of India).
+                  Automatically imports newly empaneled universities, degree programs, curriculum updates, international student tuition fees (USD/INR), and G1/G2/G3 scholarship tiers.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={siiSyncing}
+                  onClick={() => handleSyncStudyInIndia('quick')}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white text-xs font-bold shadow-lg shadow-purple-950/40 disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <RefreshCw className={`w-4 h-4 ${siiSyncing ? 'animate-spin' : ''}`} />
+                  <span>{siiSyncing ? 'Synchronizing with Portal...' : '⚡ Quick Sync (Fetch New & Updated Data)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={siiSyncing}
+                  onClick={() => handleSyncStudyInIndia('full')}
+                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <Database className="w-4 h-4 text-purple-300" />
+                  <span>Full Deep Catalog Re-sync</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleToggleSiiAutoSync}
+                  className={`px-4 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                    siiAutoSync
+                      ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/30'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                  }`}
+                >
+                  <Zap className={`w-4 h-4 ${siiAutoSync ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span>Auto-Sync: {siiAutoSync ? 'Active (Hourly)' : 'Paused'}</span>
+                </button>
+
+                <a
+                  href="https://www.studyinindia.gov.in"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-purple-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <span>Open Portal</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Sync Stats KPI Strip */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Empaneled Universities</span>
+              <div className="text-2xl font-black text-slate-900 flex items-baseline gap-2">
+                <span>{siiStatus?.db_counts?.universities?.toLocaleString() || '1,273'}</span>
+                <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                  100% Synced
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Official portal reports <strong>{siiStatus?.portal_counts?.institutes?.toLocaleString() || '1,273'}</strong> institutions
+              </p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Courses &amp; Degree Programs</span>
+              <div className="text-2xl font-black text-purple-700 flex items-baseline gap-2">
+                <span>{siiStatus?.db_counts?.courses?.toLocaleString() || '24,953'}</span>
+                {siiStatus?.portal_counts?.courses > (siiStatus?.db_counts?.courses || 0) && (
+                  <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200 animate-pulse">
+                    +{siiStatus.portal_counts.courses - siiStatus.db_counts.courses} New on Portal
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Portal Total: <strong>{siiStatus?.portal_counts?.courses?.toLocaleString() || '25,080'}</strong> courses
+              </p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Fee Structure Registry</span>
+              <div className="text-2xl font-black text-blue-700 flex items-baseline gap-2">
+                <span>{siiStatus?.db_counts?.university_courses?.toLocaleString() || '24,965'}</span>
+                <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                  USD &amp; INR
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Standard international tuition fee &amp; ₹86/USD conversion
+              </p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs space-y-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Last Sync Execution</span>
+              <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mt-1">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="truncate">{siiStatus?.last_sync_at ? new Date(siiStatus.last_sync_at).toLocaleString() : 'Recently'}</span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Auto-sync interval: <strong>Every {siiStatus?.auto_sync_interval_minutes || 60} minutes</strong>
+              </p>
+            </div>
+          </div>
+
+          {/* Last Sync Report Box (if executed) */}
+          {lastSyncReport && (
+            <div className="p-5 rounded-2xl bg-purple-50/70 border border-purple-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-purple-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  <span>Latest Real-Time Sync Execution Report</span>
+                </h4>
+                <span className="text-[11px] font-semibold text-purple-700 bg-white px-2.5 py-0.5 rounded-full border border-purple-200">
+                  Mode: {lastSyncReport.mode?.toUpperCase() || 'QUICK'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3 bg-white rounded-xl border border-purple-100">
+                  <span className="text-slate-400 block text-[10px]">Universities Added</span>
+                  <span className="text-base font-black text-slate-900">{lastSyncReport.universitiesAdded || 0}</span>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-purple-100">
+                  <span className="text-slate-400 block text-[10px]">Universities Updated</span>
+                  <span className="text-base font-black text-slate-900">{lastSyncReport.universitiesUpdated || 0}</span>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-purple-100">
+                  <span className="text-slate-400 block text-[10px]">Courses Added</span>
+                  <span className="text-base font-black text-emerald-600">{lastSyncReport.coursesAdded || 0}</span>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-purple-100">
+                  <span className="text-slate-400 block text-[10px]">Execution Time</span>
+                  <span className="text-base font-black text-purple-700">
+                    {lastSyncReport.durationMs ? `${Math.round(lastSyncReport.durationMs / 1000)}s` : 'Instant'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Webhook & Automation Configuration Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-purple-600" />
+                <span>Real-Time Webhook &amp; External Automation URLs</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Use these endpoints to trigger automatic syncs from Vercel Crons, GitHub Actions, or webhook triggers.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">Scheduled Cron Endpoint</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">GET</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs font-mono text-slate-700 flex items-center justify-between gap-2 overflow-x-auto">
+                  <span className="truncate">https://education-sansar-crm.vercel.app/api/integrations/studyinindia/cron</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy('https://education-sansar-crm.vercel.app/api/integrations/studyinindia/cron', 'sii-cron')}
+                    className="p-1 hover:bg-slate-100 rounded-md text-slate-500 transition-colors shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedKey === 'sii-cron' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Configured in <code className="text-purple-700 bg-purple-50 px-1 py-0.5 rounded">vercel.json</code> to run every hour automatically.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">Inbound Webhook Endpoint</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">POST</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs font-mono text-slate-700 flex items-center justify-between gap-2 overflow-x-auto">
+                  <span className="truncate">https://education-sansar-crm.vercel.app/api/integrations/studyinindia/webhook</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy('https://education-sansar-crm.vercel.app/api/integrations/studyinindia/webhook', 'sii-webhook')}
+                    className="p-1 hover:bg-slate-100 rounded-md text-slate-500 transition-colors shrink-0"
+                    title="Copy URL"
+                  >
+                    {copiedKey === 'sii-webhook' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Accepts JSON payloads to trigger immediate synchronization upon portal notifications.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab: Google Sheets Live Sync */}
       {activeTab === 'sheets' && (

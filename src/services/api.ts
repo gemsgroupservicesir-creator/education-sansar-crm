@@ -375,6 +375,19 @@ export const api = {
       body: JSON.stringify({ performedBy }),
     }),
 
+  // Study in India Realtime Data Sync
+  getStudyInIndiaSyncStatus: () => fetchJson<any>('/integrations/studyinindia/status'),
+  syncStudyInIndia: (mode: 'quick' | 'full' = 'quick') =>
+    fetchJson<any>('/integrations/studyinindia/sync', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    }),
+  toggleStudyInIndiaAutoSync: (autoSyncEnabled: boolean, autoSyncIntervalMinutes?: number) =>
+    fetchJson<any>('/integrations/studyinindia/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ autoSyncEnabled, autoSyncIntervalMinutes }),
+    }),
+
   // Settings & Audit
   getSettings: () => fetchJson<Record<string, string>>('/settings'),
   updateSettings: (data: any) =>

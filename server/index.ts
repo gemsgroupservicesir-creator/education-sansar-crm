@@ -103,6 +103,14 @@ if (!isVercel) {
     }
   }, 15 * 60 * 1000);
 
+  // Periodic Background Study in India Realtime Data Sync (Every 60 minutes)
+  try {
+    const { startStudyInIndiaBackgroundSync } = await import('./services/studyInIndiaSyncService.ts');
+    startStudyInIndiaBackgroundSync(60);
+  } catch (err: any) {
+    console.warn('Study in India background sync init note:', err.message);
+  }
+
   const server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 Gems Group Services CRM Server is LIVE on port ${PORT}:`);
     console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);

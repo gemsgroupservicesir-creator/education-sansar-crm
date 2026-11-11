@@ -2982,6 +2982,72 @@ apiRouter.post('/integrations/google-sheets/disconnect', (req: Request, res: Res
 });
 
 // ==========================================
+// 11.B. STUDY IN INDIA REALTIME DATA SYNC
+// ==========================================
+
+// Get Study in India real-time sync status, health metrics, and database vs portal record counts
+apiRouter.get('/integrations/studyinindia/status', async (req: Request, res: Response) => {
+  try {
+    const { getStudyInIndiaSyncStatus } = await import('../services/studyInIndiaSyncService.ts');
+    const status = await getStudyInIndiaSyncStatus();
+    res.json(status);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch Study in India sync status' });
+  }
+});
+
+// Trigger real-time sync on demand (Quick or Full mode)
+apiRouter.post('/integrations/studyinindia/sync', async (req: Request, res: Response) => {
+  try {
+    const { syncStudyInIndiaData } = await import('../services/studyInIndiaSyncService.ts');
+    const mode = (req.body.mode || req.query.mode || 'quick') as 'quick' | 'full';
+    const triggeredBy = req.body.triggeredBy || (req.headers['x-user-name'] as string) || 'Admissions Counselor';
+
+    const result = await syncStudyInIndiaData({ mode, triggeredBy });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Study in India sync failed' });
+  }
+});
+
+// Toggle auto-sync or update polling interval
+apiRouter.post('/integrations/studyinindia/toggle', async (req: Request, res: Response) => {
+  try {
+    const { updateStudyInIndiaSyncConfig, getStudyInIndiaSyncStatus } = await import('../services/studyInIndiaSyncService.ts');
+    updateStudyInIndiaSyncConfig({
+      autoSyncEnabled: req.body.autoSyncEnabled,
+      autoSyncIntervalMinutes: req.body.autoSyncIntervalMinutes
+    });
+    const status = await getStudyInIndiaSyncStatus();
+    res.json({ success: true, status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scheduled Cron Endpoint (for Vercel Cron or external schedulers)
+apiRouter.get('/integrations/studyinindia/cron', async (req: Request, res: Response) => {
+  try {
+    const { syncStudyInIndiaData } = await import('../services/studyInIndiaSyncService.ts');
+    const result = await syncStudyInIndiaData({ mode: 'quick', triggeredBy: 'Vercel Scheduled Cron' });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Inbound webhook for immediate push notification / data payload ingestion
+apiRouter.post('/integrations/studyinindia/webhook', async (req: Request, res: Response) => {
+  try {
+    const { syncStudyInIndiaData } = await import('../services/studyInIndiaSyncService.ts');
+    const result = await syncStudyInIndiaData({ mode: 'quick', triggeredBy: 'Portal Inbound Webhook' });
+    res.json({ received: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // 12. SETTINGS & AUDIT LOGS
 // ==========================================
 apiRouter.get('/settings', (req: Request, res: Response) => {

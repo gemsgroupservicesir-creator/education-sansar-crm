@@ -7,6 +7,12 @@
       "includeFiles": "server/db/**"
     }
   },
+  "crons": [
+    {
+      "path": "/api/integrations/studyinindia/cron",
+      "schedule": "0 * * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

@@ -77,6 +77,28 @@ export const CoursesPage: React.FC = () => {
   const [courseDetailsModalOpen, setCourseDetailsModalOpen] = useState(false);
   const [currencyMode, setCurrencyMode] = useState<'USD' | 'INR'>('USD');
   const [copiedPitchCourseId, setCopiedPitchCourseId] = useState<string | null>(null);
+  const [isSyncingSii, setIsSyncingSii] = useState(false);
+
+  const handleSyncStudyInIndiaPortal = async () => {
+    try {
+      setIsSyncingSii(true);
+      addToast('Syncing latest courses and fees from Study in India portal...', 'info');
+      const res = await api.syncStudyInIndia('quick');
+      if (res.success) {
+        addToast(
+          `Study in India Sync Complete! ${res.stats?.coursesAdded || 0} new courses & ${res.stats?.universitiesAdded || 0} universities imported.`,
+          'success'
+        );
+        fetchCourses();
+      } else {
+        addToast(res.message || 'Sync in progress', 'warning');
+      }
+    } catch (err: any) {
+      addToast(err.message || 'Failed to sync with Study in India', 'error');
+    } finally {
+      setIsSyncingSii(false);
+    }
+  };
 
   const handleOpenCourseDetails = (c: Course) => {
     setSelectedCourseForDetails(c);
@@ -391,7 +413,17 @@ Connect with Gems Group Services counselor desk for direct seat locking & schola
         </div>
 
         {canManage && (
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            <button
+              type="button"
+              onClick={handleSyncStudyInIndiaPortal}
+              disabled={isSyncingSii}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-purple-900/20 disabled:opacity-50 transition-all cursor-pointer"
+              title="Pull latest courses and fee structure updates directly from studyinindia.gov.in"
+            >
+              <RefreshCw className={`w-4 h-4 text-purple-200 ${isSyncingSii ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSii ? 'Syncing Portal...' : 'Sync Study in India'}</span>
+            </button>
             <button
               onClick={handleOpenFetchModal}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-purple-900/20 transition-all"
