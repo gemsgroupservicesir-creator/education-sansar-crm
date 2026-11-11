@@ -1676,6 +1676,73 @@ apiRouter.put('/universities/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// Get all courses and Study in India fee structures for a specific university
+apiRouter.get('/universities/:id/courses', async (req: Request, res: Response) => {
+  const uniId = req.params.id;
+  try {
+    if (isNeonEnabled() && sql) {
+      try {
+        const rows = await sql`
+          SELECT 
+            uc.*,
+            c.course_name,
+            c.short_name as course_short_name,
+            c.course_level,
+            c.degree_level,
+            c.stream,
+            c.duration as course_duration,
+            c.eligibility as course_eligibility,
+            c.entrance_requirement,
+            c.fees_range,
+            c.scholarship_info
+          FROM university_courses uc
+          JOIN courses c ON uc.course_id = c.id
+          WHERE uc.university_id = ${uniId}
+          ORDER BY c.course_name ASC
+        `;
+        if (rows && rows.length > 0) {
+          return res.json(rows);
+        }
+      } catch (e: any) {
+        console.warn('[Neon Uni Courses] Falling back to SQLite:', e.message);
+      }
+    }
+
+    const rows = db.prepare(`
+      SELECT 
+        uc.*,
+        c.course_name,
+        c.short_name as course_short_name,
+        c.course_level,
+        c.degree_level,
+        c.stream,
+        c.duration as course_duration,
+        c.eligibility as course_eligibility,
+        c.entrance_requirement,
+        c.fees_range,
+        c.scholarship_info
+      FROM university_courses uc
+      JOIN courses c ON uc.course_id = c.id
+      WHERE uc.university_id = ?
+      ORDER BY c.course_name ASC
+    `).all(uniId);
+
+    if (!rows || rows.length === 0) {
+      const fallbackCourses = db.prepare(`
+        SELECT *, duration as course_duration, eligibility as course_eligibility, course_name, stream, course_level
+        FROM courses 
+        WHERE university_id = ?
+        ORDER BY course_name ASC
+      `).all(uniId);
+      return res.json(fallbackCourses);
+    }
+
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch university courses' });
+  }
+});
+
 apiRouter.delete('/universities/:id', (req: Request, res: Response) => {
   const userRole = (req.headers['x-user-role'] as string) || '';
   if (userRole.toLowerCase() === 'counselor') {

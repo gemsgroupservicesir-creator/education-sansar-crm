@@ -23,7 +23,13 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
-  Filter
+  Filter,
+  Copy,
+  Share2,
+  Phone,
+  Coins,
+  ArrowRight,
+  MessageSquare
 } from 'lucide-react';
 import { api } from '../services/api';
 import { University } from '../types';
@@ -70,6 +76,62 @@ export const UniversitiesPage: React.FC = () => {
   const [selectedCourseIndices, setSelectedCourseIndices] = useState<Set<number>>(new Set());
   const [courseStreamFilter, setCourseStreamFilter] = useState('All');
   const [activeTab, setActiveTab] = useState<'profile' | 'courses'>('courses');
+
+  // Study in India University Details & Courses Explorer Modal
+  const [selectedUniForDetails, setSelectedUniForDetails] = useState<University | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [uniCourses, setUniCourses] = useState<any[]>([]);
+  const [loadingUniCourses, setLoadingUniCourses] = useState(false);
+  const [uniCoursesSearch, setUniCoursesSearch] = useState('');
+  const [uniCoursesLevelFilter, setUniCoursesLevelFilter] = useState('All');
+  const [uniCoursesStreamFilter, setUniCoursesStreamFilter] = useState('All');
+  const [currencyMode, setCurrencyMode] = useState<'USD' | 'INR'>('USD');
+  const [quickFilter, setQuickFilter] = useState<'ALL' | 'SII_PARTNER' | 'NIRF_TOP' | 'GOVT' | 'PRIVATE' | 'DELHI_NCR'>('ALL');
+  const [copiedCourseId, setCopiedCourseId] = useState<string | null>(null);
+
+  const handleOpenUniDetails = async (u: University) => {
+    setSelectedUniForDetails(u);
+    setDetailsModalOpen(true);
+    setLoadingUniCourses(true);
+    setUniCourses([]);
+    setUniCoursesSearch('');
+    setUniCoursesLevelFilter('All');
+    setUniCoursesStreamFilter('All');
+    try {
+      const courses = await api.getUniversityCoursesById(u.id);
+      setUniCourses(courses || []);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to load courses for this university', 'error');
+    } finally {
+      setLoadingUniCourses(false);
+    }
+  };
+
+  const handleCopyPitch = (course: any, uni: University) => {
+    const tuitionUSD = Number(course.tuition_fee_per_year) || 0;
+    const usdFee = tuitionUSD > 0 ? `$${tuitionUSD.toLocaleString()}/year` : course.fees_range || 'Standard Fees';
+    const inrFee = tuitionUSD > 0 ? `₹${Math.round(tuitionUSD * 86).toLocaleString()}/year` : '';
+    const feeStr = inrFee ? `${usdFee} (Approx ${inrFee})` : usdFee;
+
+    const pitchText = `Namaste! 🙏
+Official admission details for *${course.course_name}* at *${uni.name}*:
+
+🏛️ *University:* ${uni.name} (${uni.city}, ${uni.state})
+🏆 *Accreditation:* ${uni.ranking || 'Study in India Partner'} | ${uni.accreditation || 'UGC / AICTE Approved'}
+📚 *Course:* ${course.course_name} (${course.course_level || course.degree_level || 'Degree'})
+⏱️ *Duration:* ${course.course_duration || course.duration || 'Standard Duration'}
+💰 *Tuition Fee:* ${feeStr}
+🎓 *Scholarships:* ${course.scholarship_details || course.scholarship_info || 'Up to 25%-50% merit concession for Nepal students'}
+📋 *Eligibility:* ${course.course_eligibility || course.eligibility || '10+2 / Higher Secondary'}
+🌐 *Official Website:* ${uni.website || 'https://education-sansar-crm.vercel.app'}
+
+For direct seat reservation and scholarship assistance, contact Gems Group Services Admissions Desk.`;
+
+    navigator.clipboard.writeText(pitchText);
+    setCopiedCourseId(course.id);
+    setTimeout(() => setCopiedCourseId(null), 2500);
+    addToast('Pitch copied to clipboard! Ready to paste on WhatsApp or Email.', 'success');
+  };
 
   const PRESET_UNIVERSITIES = [
     { name: 'Sharda University', url: 'https://www.sharda.ac.in', location: 'Greater Noida' },
@@ -273,10 +335,25 @@ export const UniversitiesPage: React.FC = () => {
       u.name.toLowerCase().includes(q) ||
       u.city.toLowerCase().includes(q) ||
       (u.state && u.state.toLowerCase().includes(q)) ||
-      (u.short_name && u.short_name.toLowerCase().includes(q));
+      (u.short_name && u.short_name.toLowerCase().includes(q)) ||
+      (u.ranking && u.ranking.toLowerCase().includes(q));
     const matchesState = selectedState === 'All' || u.state?.toLowerCase() === selectedState.toLowerCase();
     const matchesType = selectedType === 'All' || u.university_type?.toLowerCase() === selectedType.toLowerCase();
-    return matchesSearch && matchesState && matchesType;
+
+    let matchesQuick = true;
+    if (quickFilter === 'SII_PARTNER') {
+      matchesQuick = u.id.startsWith('sii_') || Boolean(u.ranking && u.ranking.includes('SII')) || Boolean(u.description && u.description.includes('Study in India'));
+    } else if (quickFilter === 'NIRF_TOP') {
+      matchesQuick = Boolean(u.ranking && u.ranking.toLowerCase().includes('nirf') && !u.ranking.toLowerCase().includes('na'));
+    } else if (quickFilter === 'GOVT') {
+      matchesQuick = Boolean(u.university_type && (u.university_type.toLowerCase().includes('gov') || u.university_type.toLowerCase().includes('public') || u.university_type.toLowerCase().includes('central') || u.university_type.toLowerCase().includes('state')));
+    } else if (quickFilter === 'PRIVATE') {
+      matchesQuick = Boolean(u.university_type && (u.university_type.toLowerCase().includes('private') || u.university_type.toLowerCase().includes('deemed')));
+    } else if (quickFilter === 'DELHI_NCR') {
+      matchesQuick = ['delhi', 'noida', 'greater noida', 'gurgaon', 'gurugram', 'ghaziabad', 'faridabad'].some(c => u.city?.toLowerCase().includes(c) || u.state?.toLowerCase().includes(c));
+    }
+
+    return matchesSearch && matchesState && matchesType && matchesQuick;
   });
 
   const totalPages = Math.ceil(filtered.length / pageSize) || 1;
@@ -287,18 +364,18 @@ export const UniversitiesPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
-          <div className="flex items-center gap-2 text-sky-600 font-semibold text-xs tracking-wider uppercase mb-1">
-            <Building2 className="w-4 h-4" />
-            <span>Institutional Partners Directory</span>
+          <div className="flex items-center gap-2 text-emerald-600 font-semibold text-xs tracking-wider uppercase mb-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Official Study in India (SII) &amp; Partner Institutions Directory</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-            Partner Universities Directory
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 font-mono">
-              {universities.length} Institutions
+            Partner Universities &amp; Institutes
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono">
+              {universities.length} Empaneled
             </span>
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Partner colleges across India with admission tie-ups, accreditation, campus locations &amp; direct seat allotments.
+            Official Study in India empanelled colleges &amp; universities across India. Direct admission tie-ups, AISHE verified, NIRF rankings, and exclusive Nepal merit fee concessions.
           </p>
         </div>
 
@@ -322,6 +399,84 @@ export const UniversitiesPage: React.FC = () => {
         )}
       </div>
 
+      {/* Quick Filter Category Pills */}
+      <div className="flex flex-wrap items-center gap-2 pb-1">
+        <button
+          onClick={() => { setQuickFilter('ALL'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'ALL'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <span>All Universities</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-200">
+            {universities.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => { setQuickFilter('SII_PARTNER'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'SII_PARTNER'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200'
+          }`}
+        >
+          <span>🇮🇳 Study in India Empaneled</span>
+          <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${quickFilter === 'SII_PARTNER' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800'}`}>
+            1,273
+          </span>
+        </button>
+
+        <button
+          onClick={() => { setQuickFilter('NIRF_TOP'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'NIRF_TOP'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-white text-amber-700 hover:bg-amber-50 border border-amber-200'
+          }`}
+        >
+          <Award className="w-3.5 h-3.5" />
+          <span>NIRF Top Ranked</span>
+        </button>
+
+        <button
+          onClick={() => { setQuickFilter('DELHI_NCR'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'DELHI_NCR'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white text-blue-700 hover:bg-blue-50 border border-blue-200'
+          }`}
+        >
+          <MapPin className="w-3.5 h-3.5" />
+          <span>Delhi NCR (Noida / Greater Noida)</span>
+        </button>
+
+        <button
+          onClick={() => { setQuickFilter('GOVT'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'GOVT'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'bg-white text-purple-700 hover:bg-purple-50 border border-purple-200'
+          }`}
+        >
+          <Landmark className="w-3.5 h-3.5" />
+          <span>Government / Central</span>
+        </button>
+
+        <button
+          onClick={() => { setQuickFilter('PRIVATE'); setPage(1); }}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            quickFilter === 'PRIVATE'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <span>Private &amp; Deemed</span>
+        </button>
+      </div>
+
       {/* Filter & Search Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
@@ -333,7 +488,7 @@ export const UniversitiesPage: React.FC = () => {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search universities by name, code, city or state..."
+            placeholder="Search universities by name, AISHE code, ranking, city or state..."
             className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-sky-500 transition-all"
           />
         </div>
@@ -375,12 +530,13 @@ export const UniversitiesPage: React.FC = () => {
             <option value="Autonomous">Autonomous</option>
           </select>
 
-          {(search || selectedState !== 'All' || selectedType !== 'All') && (
+          {(search || selectedState !== 'All' || selectedType !== 'All' || quickFilter !== 'ALL') && (
             <button
               onClick={() => {
                 setSearch('');
                 setSelectedState('All');
                 setSelectedType('All');
+                setQuickFilter('ALL');
                 setPage(1);
               }}
               className="px-2.5 py-1.5 rounded-lg text-xs text-rose-600 hover:bg-rose-50 font-medium transition-colors"
@@ -390,7 +546,7 @@ export const UniversitiesPage: React.FC = () => {
           )}
 
           <div className="text-slate-500 font-medium text-[11px] ml-auto">
-            Showing <strong className="text-slate-800">{filtered.length}</strong> matching
+            Showing <strong className="text-slate-800">{filtered.length}</strong> institutions
           </div>
         </div>
       </div>
@@ -417,10 +573,15 @@ export const UniversitiesPage: React.FC = () => {
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-sky-600 to-blue-500 text-white flex items-center justify-center font-bold text-base shadow-sm">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-sky-600 to-blue-500 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
                       {u.short_name ? u.short_name.slice(0, 3) : u.name.charAt(0)}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {u.id.startsWith('sii_') && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300">
+                          🇮🇳 SII Partner
+                        </span>
+                      )}
                       {u.accreditation && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                           {u.accreditation}
@@ -433,10 +594,16 @@ export const UniversitiesPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900 leading-snug">{u.name}</h3>
+                    <h3 
+                      onClick={() => handleOpenUniDetails(u)}
+                      className="font-bold text-sm text-slate-900 leading-snug cursor-pointer hover:text-sky-600 transition-colors"
+                      title="Click to view Study in India course catalog & fees"
+                    >
+                      {u.name}
+                    </h3>
                     {u.short_name && (
                       <div className="text-[11px] text-blue-600 font-semibold font-mono mt-0.5">
-                        {u.short_name}
+                        AISHE: {u.short_name}
                       </div>
                     )}
                     <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
@@ -460,11 +627,21 @@ export const UniversitiesPage: React.FC = () => {
                       {u.description}
                     </p>
                   )}
+
+                  {/* Primary Study in India Courses Trigger Button */}
+                  <button
+                    onClick={() => handleOpenUniDetails(u)}
+                    className="w-full mt-1 py-2 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-sky-900/10 cursor-pointer"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-sky-200" />
+                    <span>View Courses &amp; Study in India Fees ({(u as any).fee_structures_count || (u as any).legacy_courses_count || (u as any).courses_count || 'View'})</span>
+                    <ArrowRight className="w-3 h-3 text-sky-200" />
+                  </button>
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
                   <div className="text-slate-500 font-medium">
-                    📚 {(u as any).fee_structures_count || (u as any).courses_count || 0} Programs
+                    📚 {(u as any).fee_structures_count || (u as any).legacy_courses_count || (u as any).courses_count || 0} Programs
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1152,6 +1329,348 @@ export const UniversitiesPage: React.FC = () => {
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Study in India University Details & Courses Explorer Modal */}
+      {detailsModalOpen && selectedUniForDetails && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 p-6 text-white shrink-0 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="flex items-start justify-between gap-4 relative z-10">
+                <div className="space-y-2 max-w-3xl">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      <span>🇮🇳</span> Official Study in India (SII) Empaneled Institute
+                    </span>
+                    {selectedUniForDetails.short_name && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-white/10 text-sky-200 border border-white/10">
+                        AISHE: {selectedUniForDetails.short_name}
+                      </span>
+                    )}
+                    {selectedUniForDetails.ranking && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/30 flex items-center gap-1">
+                        <Award className="w-3.5 h-3.5" />
+                        {selectedUniForDetails.ranking}
+                      </span>
+                    )}
+                    {selectedUniForDetails.accreditation && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                        {selectedUniForDetails.accreditation}
+                      </span>
+                    )}
+                  </div>
+
+                  <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    {selectedUniForDetails.name}
+                  </h2>
+
+                  <p className="text-xs sm:text-sm text-slate-300 flex items-center gap-2 flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-sky-400" />
+                      {selectedUniForDetails.campus ? `${selectedUniForDetails.campus}, ` : ''}{selectedUniForDetails.city}, {selectedUniForDetails.state}, {selectedUniForDetails.country}
+                    </span>
+                    <span>&bull;</span>
+                    <span className="text-sky-300 font-semibold">{selectedUniForDetails.university_type} Institution</span>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 relative z-10 shrink-0">
+                  {selectedUniForDetails.website && (
+                    <a
+                      href={selectedUniForDetails.website}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+                      title="Open Official Website"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-sky-300" />
+                      <span className="hidden sm:inline">Website</span>
+                      <ExternalLink className="w-3 h-3 text-slate-300" />
+                    </a>
+                  )}
+
+                  <button
+                    onClick={() => setDetailsModalOpen(false)}
+                    className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-all"
+                    title="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-white/10 text-xs">
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <div className="text-slate-400 text-[11px]">Academic Programs</div>
+                  <div className="text-lg font-black text-white mt-0.5">
+                    {uniCourses.length} <span className="text-xs font-normal text-slate-400">Courses</span>
+                  </div>
+                </div>
+
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <div className="text-slate-400 text-[11px]">Nepal / International Quota</div>
+                  <div className="text-lg font-black text-emerald-400 mt-0.5">
+                    Authorized <span className="text-xs font-normal text-slate-400">Direct Seats</span>
+                  </div>
+                </div>
+
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <div className="text-slate-400 text-[11px]">Merit Scholarship Waiver</div>
+                  <div className="text-lg font-black text-amber-300 mt-0.5">
+                    Up to 50% <span className="text-xs font-normal text-slate-400">Tuition Off</span>
+                  </div>
+                </div>
+
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <div className="text-slate-400 text-[11px]">Fee Currency Display</div>
+                    <div className="text-xs font-bold text-sky-300 mt-0.5">
+                      {currencyMode === 'USD' ? 'Official USD ($)' : 'Converted INR (₹)'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setCurrencyMode(prev => prev === 'USD' ? 'INR' : 'USD')}
+                    className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-400/30 text-[10px] font-bold"
+                  >
+                    Switch to {currencyMode === 'USD' ? '₹ INR' : '$ USD'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Course Filter & Search Bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={uniCoursesSearch}
+                  onChange={(e) => setUniCoursesSearch(e.target.value)}
+                  placeholder="Search program by name, degree, specialization..."
+                  className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-sky-500 transition-all font-medium"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {/* Level Filter */}
+                <select
+                  value={uniCoursesLevelFilter}
+                  onChange={(e) => setUniCoursesLevelFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold focus:outline-hidden"
+                >
+                  <option value="All">All Degrees / Levels</option>
+                  <option value="UG">Undergraduate (UG / B.Tech / B.Sc / BBA)</option>
+                  <option value="PG">Postgraduate (PG / M.Tech / MBA / M.Sc)</option>
+                  <option value="PhD">Doctorate (PhD)</option>
+                  <option value="Diploma">Diploma / Polytechnic</option>
+                </select>
+
+                {/* Stream Filter */}
+                <select
+                  value={uniCoursesStreamFilter}
+                  onChange={(e) => setUniCoursesStreamFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold focus:outline-hidden"
+                >
+                  <option value="All">All Disciplines / Streams</option>
+                  <option value="Engineering & Technology">Engineering &amp; Technology</option>
+                  <option value="Management & Business">Management &amp; Business</option>
+                  <option value="Sciences & Mathematics">Sciences &amp; Mathematics</option>
+                  <option value="Medical & Allied Health">Medical &amp; Allied Health</option>
+                  <option value="Law & Legal Studies">Law &amp; Legal Studies</option>
+                  <option value="Humanities & Social Sciences">Humanities &amp; Social Sciences</option>
+                  <option value="Commerce & Finance">Commerce &amp; Finance</option>
+                  <option value="Arts & Design">Arts &amp; Design</option>
+                </select>
+
+                {(uniCoursesSearch || uniCoursesLevelFilter !== 'All' || uniCoursesStreamFilter !== 'All') && (
+                  <button
+                    onClick={() => {
+                      setUniCoursesSearch('');
+                      setUniCoursesLevelFilter('All');
+                      setUniCoursesStreamFilter('All');
+                    }}
+                    className="text-xs text-rose-600 hover:underline font-bold px-2"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Courses List Scrollable Area */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/50">
+              {loadingUniCourses ? (
+                <div className="py-24 text-center text-slate-500 space-y-3">
+                  <RefreshCw className="w-8 h-8 animate-spin text-sky-600 mx-auto" />
+                  <p className="text-sm font-semibold">Loading official Study in India course catalog &amp; fee structures...</p>
+                </div>
+              ) : (
+                (() => {
+                  const filteredCourses = uniCourses.filter((c: any) => {
+                    const q = uniCoursesSearch.trim().toLowerCase();
+                    const matchesSearch = !q || c.course_name?.toLowerCase().includes(q) || c.stream?.toLowerCase().includes(q) || c.short_name?.toLowerCase().includes(q);
+                    const matchesLevel = uniCoursesLevelFilter === 'All' || c.course_level === uniCoursesLevelFilter || c.degree_level?.toLowerCase().includes(uniCoursesLevelFilter.toLowerCase());
+                    const matchesStream = uniCoursesStreamFilter === 'All' || c.stream?.toLowerCase() === uniCoursesStreamFilter.toLowerCase();
+                    return matchesSearch && matchesLevel && matchesStream;
+                  });
+
+                  if (filteredCourses.length === 0) {
+                    return (
+                      <div className="py-20 text-center bg-white rounded-2xl border border-slate-200 p-8 space-y-2">
+                        <BookOpen className="w-10 h-10 text-slate-300 mx-auto" />
+                        <h4 className="text-sm font-bold text-slate-800">No courses match the selected filters</h4>
+                        <p className="text-xs text-slate-500">Try clearing the search or choosing "All Disciplines".</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+                        <span>Showing <strong className="text-slate-800">{filteredCourses.length}</strong> Study in India course offerings for {selectedUniForDetails.name}</span>
+                        <span className="text-[11px] italic text-slate-400">*Estimated INR fees calculated at ₹86/USD standard conversion</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {filteredCourses.map((c: any) => {
+                          const tuitionUSD = Number(c.tuition_fee_per_year) || 0;
+                          const totalFullUSD = Number(c.total_full_course_fee) || 0;
+                          const tuitionINR = tuitionUSD > 0 ? Math.round(tuitionUSD * 86) : 0;
+                          const totalFullINR = totalFullUSD > 0 ? Math.round(totalFullUSD * 86) : 0;
+
+                          return (
+                            <div
+                              key={c.id || c.course_id}
+                              className="p-5 rounded-2xl bg-white border border-slate-200 hover:border-sky-300 hover:shadow-md transition-all flex flex-col justify-between space-y-3"
+                            >
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-50 text-sky-800 border border-sky-200">
+                                    {c.course_level || c.degree_level || 'UG'} &bull; {c.course_duration || c.duration || '4 Years'}
+                                  </span>
+                                  {c.stream && (
+                                    <span className="text-[10px] font-bold text-slate-500 truncate max-w-[180px]">
+                                      {c.stream}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h4 className="font-bold text-sm text-slate-900 leading-snug">
+                                  {c.course_name}
+                                </h4>
+
+                                {/* Fee Box */}
+                                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-500 font-medium">Annual Tuition Fee:</span>
+                                    <span className="font-black text-sky-700 text-sm">
+                                      {currencyMode === 'USD'
+                                        ? (tuitionUSD > 0 ? `$${tuitionUSD.toLocaleString()}/yr` : c.fees_range || 'Contact Desk')
+                                        : (tuitionINR > 0 ? `₹${tuitionINR.toLocaleString()}/yr` : (tuitionUSD > 0 ? `$${tuitionUSD.toLocaleString()}` : c.fees_range || 'Contact Desk'))}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-200/60 pt-1">
+                                    <span>Full Course Cost:</span>
+                                    <span className="font-semibold text-slate-800">
+                                      {currencyMode === 'USD'
+                                        ? (totalFullUSD > 0 ? `$${totalFullUSD.toLocaleString()}` : (tuitionUSD > 0 ? `$${(tuitionUSD * 4).toLocaleString()} est.` : 'Standard Fees'))
+                                        : (totalFullINR > 0 ? `₹${totalFullINR.toLocaleString()}` : (tuitionINR > 0 ? `₹${(tuitionINR * 4).toLocaleString()} est.` : 'Standard Fees'))}
+                                    </span>
+                                  </div>
+
+                                  {currencyMode === 'USD' && tuitionINR > 0 && (
+                                    <div className="text-[10px] text-slate-400 text-right">
+                                      Approx ₹{tuitionINR.toLocaleString()} INR / year
+                                    </div>
+                                  )}
+                                  {currencyMode === 'INR' && tuitionUSD > 0 && (
+                                    <div className="text-[10px] text-slate-400 text-right">
+                                      Official ${tuitionUSD.toLocaleString()} USD / year
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Eligibility & Scholarship Details */}
+                                <div className="space-y-1 text-xs">
+                                  {(c.course_eligibility || c.eligibility) && (
+                                    <p className="text-slate-600 line-clamp-2 text-[11px] leading-relaxed">
+                                      <strong className="text-slate-700">Eligibility:</strong> {c.course_eligibility || c.eligibility}
+                                    </p>
+                                  )}
+                                  <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200/60 text-emerald-800 text-[11px] flex items-start gap-1.5 font-medium">
+                                    <span className="shrink-0 mt-0.5">🎓</span>
+                                    <span>{c.scholarship_details || c.scholarship_info || 'Study in India Merit Scholarship / Concession Applicable'}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Action Buttons for Counselors */}
+                              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                <button
+                                  onClick={() => handleCopyPitch(c, selectedUniForDetails)}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                                  title="Copy structured admission pitch for counselor"
+                                >
+                                  {copiedCourseId === c.id ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span className="text-emerald-700 font-bold">Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                      <span>Copy Pitch</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <a
+                                  href={`https://wa.me/?text=${encodeURIComponent(
+                                    `Namaste! Here are the admission details for ${c.course_name} at ${selectedUniForDetails.name}:\n\n` +
+                                    `• Institution: ${selectedUniForDetails.name} (${selectedUniForDetails.city}, ${selectedUniForDetails.state})\n` +
+                                    `• Program: ${c.course_name} (${c.course_level || 'Degree'})\n` +
+                                    `• Tuition Fee: ${c.tuition_fee_per_year ? `$${Number(c.tuition_fee_per_year).toLocaleString()}/yr` : c.fees_range || 'Standard'}\n` +
+                                    `• Scholarship: ${c.scholarship_details || 'Up to 30%-50% waiver'}\n\n` +
+                                    `For counseling and seat reservation, connect with Gems Group Services.`
+                                  )}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Share WhatsApp</span>
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-xs text-slate-500">
+                <span>Direct authorized admission partner &bull; Gems Group Services (Sector 94, Noida)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailsModalOpen(false)}
+                className="px-5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl border border-slate-200 transition-colors"
+              >
+                Close Explorer
+              </button>
             </div>
           </div>
         </div>

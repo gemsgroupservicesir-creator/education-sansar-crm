@@ -9320,6 +9320,68 @@ apiRouter.put("/universities/:id", (req, res) => {
   `).run(name, short_name, campus, city, state, country, university_type, accreditation, ranking, website, contact, description, status, is_active, req.params.id);
   res.json({ success: true });
 });
+apiRouter.get("/universities/:id/courses", async (req, res) => {
+  const uniId = req.params.id;
+  try {
+    if (isNeonEnabled() && sql) {
+      try {
+        const rows2 = await sql`
+          SELECT 
+            uc.*,
+            c.course_name,
+            c.short_name as course_short_name,
+            c.course_level,
+            c.degree_level,
+            c.stream,
+            c.duration as course_duration,
+            c.eligibility as course_eligibility,
+            c.entrance_requirement,
+            c.fees_range,
+            c.scholarship_info
+          FROM university_courses uc
+          JOIN courses c ON uc.course_id = c.id
+          WHERE uc.university_id = ${uniId}
+          ORDER BY c.course_name ASC
+        `;
+        if (rows2 && rows2.length > 0) {
+          return res.json(rows2);
+        }
+      } catch (e) {
+        console.warn("[Neon Uni Courses] Falling back to SQLite:", e.message);
+      }
+    }
+    const rows = db.prepare(`
+      SELECT 
+        uc.*,
+        c.course_name,
+        c.short_name as course_short_name,
+        c.course_level,
+        c.degree_level,
+        c.stream,
+        c.duration as course_duration,
+        c.eligibility as course_eligibility,
+        c.entrance_requirement,
+        c.fees_range,
+        c.scholarship_info
+      FROM university_courses uc
+      JOIN courses c ON uc.course_id = c.id
+      WHERE uc.university_id = ?
+      ORDER BY c.course_name ASC
+    `).all(uniId);
+    if (!rows || rows.length === 0) {
+      const fallbackCourses = db.prepare(`
+        SELECT *, duration as course_duration, eligibility as course_eligibility, course_name, stream, course_level
+        FROM courses 
+        WHERE university_id = ?
+        ORDER BY course_name ASC
+      `).all(uniId);
+      return res.json(fallbackCourses);
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch university courses" });
+  }
+});
 apiRouter.delete("/universities/:id", (req, res) => {
   const userRole = req.headers["x-user-role"] || "";
   if (userRole.toLowerCase() === "counselor") {

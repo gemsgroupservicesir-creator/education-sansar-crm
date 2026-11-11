@@ -20,12 +20,40 @@ import {
   Landmark,
   GraduationCap,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Copy,
+  MessageSquare,
+  Share2,
+  ExternalLink,
+  Coins,
+  Award,
+  MapPin,
+  ArrowRight
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Course, University } from '../types';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
+
+const parseFeeNumbers = (feeStr?: string) => {
+  if (!feeStr) return { usd: 0, inr: 0, raw: '' };
+  const usdMatch = feeStr.match(/\$\s*([\d,]+)/);
+  if (usdMatch) {
+    const usd = Number(usdMatch[1].replace(/,/g, ''));
+    return { usd, inr: Math.round(usd * 86), raw: feeStr };
+  }
+  const plainMatch = feeStr.match(/([\d,]+)\s*(?:USD|\$)/i);
+  if (plainMatch) {
+    const usd = Number(plainMatch[1].replace(/,/g, ''));
+    return { usd, inr: Math.round(usd * 86), raw: feeStr };
+  }
+  const inrMatch = feeStr.match(/₹\s*([\d,]+)/);
+  if (inrMatch) {
+    const inr = Number(inrMatch[1].replace(/,/g, ''));
+    return { usd: Math.round(inr / 86), inr, raw: feeStr };
+  }
+  return { usd: 0, inr: 0, raw: feeStr };
+};
 
 export const CoursesPage: React.FC = () => {
   const { addToast } = useNotifications();
@@ -43,6 +71,42 @@ export const CoursesPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 24;
+
+  // Study in India Course Details Modal
+  const [selectedCourseForDetails, setSelectedCourseForDetails] = useState<Course | null>(null);
+  const [courseDetailsModalOpen, setCourseDetailsModalOpen] = useState(false);
+  const [currencyMode, setCurrencyMode] = useState<'USD' | 'INR'>('USD');
+  const [copiedPitchCourseId, setCopiedPitchCourseId] = useState<string | null>(null);
+
+  const handleOpenCourseDetails = (c: Course) => {
+    setSelectedCourseForDetails(c);
+    setCourseDetailsModalOpen(true);
+  };
+
+  const handleCopyCoursePitch = (c: Course) => {
+    const feeInfo = parseFeeNumbers(c.fees_range);
+    const feeDisplay = feeInfo.usd > 0
+      ? `$${feeInfo.usd.toLocaleString()}/year (Approx ₹${feeInfo.inr.toLocaleString()} INR/yr)`
+      : c.fees_range || 'Official Study in India Rates';
+
+    const text = `Namaste! 🙏
+Here are the official admission details for *${c.course_name}*:
+
+🏛️ *University:* ${c.university_name}
+📚 *Program:* ${c.course_name} (${c.course_level || c.degree_level || 'Degree'})
+⏱️ *Duration:* ${c.duration || 'Standard Duration'}
+💰 *Tuition Fee:* ${feeDisplay}
+🎓 *Scholarships:* ${c.scholarship_info || 'Merit concession up to 30%-50% for Nepal students'}
+📋 *Eligibility:* ${c.eligibility || '10+2 / Higher Secondary'}
+📝 *Entrance / Admission:* ${c.entrance_requirement || 'Direct Counseling / Merit Allotment'}
+
+Connect with Gems Group Services counselor desk for direct seat locking & scholarship application.`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedPitchCourseId(c.id);
+    setTimeout(() => setCopiedPitchCourseId(null), 2500);
+    addToast('Course pitch copied to clipboard! Ready to paste on WhatsApp.', 'success');
+  };
 
   // Modals
   const [modalOpen, setModalOpen] = useState(false);
@@ -346,6 +410,36 @@ export const CoursesPage: React.FC = () => {
         )}
       </div>
 
+      {/* Quick Stream Filter Pills */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {[
+          { label: 'All Streams', val: '' },
+          { label: 'Engineering & Tech', val: 'Engineering & Technology' },
+          { label: 'Management & Business', val: 'Management & Business' },
+          { label: 'Medical & Health Sciences', val: 'Medical & Health Sciences' },
+          { label: 'Computer Applications & IT', val: 'Computer Applications & IT' },
+          { label: 'Law & Legal Studies', val: 'Law & Legal Studies' },
+          { label: 'General / Sciences', val: 'General' }
+        ].map((item) => {
+          const isActive = selectedStream === item.val;
+          return (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => setSelectedStream(item.val)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                isActive
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <span>{item.label}</span>
+              {isActive && <Check className="w-3.5 h-3.5" />}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filter Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="relative">
@@ -411,76 +505,150 @@ export const CoursesPage: React.FC = () => {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {courses.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((c) => (
-              <div
-                key={c.id}
-                className="p-5 rounded-2xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all space-y-3 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
-                      {c.course_level || c.degree_level} · {c.duration}
-                    </span>
-                    {c.stream && (
-                      <span className="text-[10px] font-medium text-slate-500 truncate max-w-[120px]">
-                        {c.stream}
+            {courses.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((c) => {
+              const feeData = parseFeeNumbers(c.fees_range);
+              return (
+                <div
+                  key={c.id}
+                  className="p-5 rounded-2xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all space-y-3 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">
+                        {c.course_level || c.degree_level} · {c.duration}
                       </span>
-                    )}
-                  </div>
-
-                  <h3 className="font-bold text-sm text-slate-900 mt-2 leading-snug">{c.course_name}</h3>
-                  <div className="text-xs font-semibold text-blue-600 mt-0.5">{c.university_name}</div>
-
-                  <div className="space-y-1.5 pt-3 text-xs">
-                    {c.eligibility && (
-                      <div className="text-slate-600 line-clamp-2">
-                        <span className="text-slate-400 font-medium">Eligibility:</span> {c.eligibility}
-                      </div>
-                    )}
-
-                    {c.entrance_requirement && (
-                      <div className="text-slate-600 text-[11px]">
-                        <span className="text-slate-400 font-medium">Entrance:</span> {c.entrance_requirement}
-                      </div>
-                    )}
-
-                    {c.fees_range && (
-                      <div className="text-slate-700 font-semibold bg-slate-50 p-2 rounded-lg border border-slate-100">
-                        💰 Indicative Fee: <span className="text-blue-700">{c.fees_range}</span>
-                      </div>
-                    )}
-
-                    {c.scholarship_info && (
-                      <div className="text-emerald-700 text-[11px] font-medium line-clamp-1">
-                        🎓 {c.scholarship_info}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Intake: <strong className="text-slate-700">{c.intake || 'Fall 2026'}</strong></span>
-                  {canManage && (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleOpenEdit(c)}
-                        className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                        title="Edit Course"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c.id, c.course_name)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="Delete Course"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {c.stream && (
+                        <span className="text-[10px] font-medium text-slate-500 truncate max-w-[130px]">
+                          {c.stream}
+                        </span>
+                      )}
                     </div>
-                  )}
+
+                    <h3
+                      onClick={() => handleOpenCourseDetails(c)}
+                      className="font-bold text-sm text-slate-900 mt-2 leading-snug hover:text-purple-600 cursor-pointer transition-colors"
+                      title="Click to view full course details and Study in India fee breakdown"
+                    >
+                      {c.course_name}
+                    </h3>
+                    <div className="text-xs font-semibold text-blue-600 mt-0.5 flex items-center gap-1.5">
+                      <Building2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span className="truncate">{c.university_name}</span>
+                    </div>
+
+                    <div className="space-y-1.5 pt-3 text-xs">
+                      {c.eligibility && (
+                        <div className="text-slate-600 line-clamp-2 text-[11px]">
+                          <span className="text-slate-400 font-medium">Eligibility:</span> {c.eligibility}
+                        </div>
+                      )}
+
+                      {c.entrance_requirement && (
+                        <div className="text-slate-600 text-[11px]">
+                          <span className="text-slate-400 font-medium">Entrance:</span> {c.entrance_requirement}
+                        </div>
+                      )}
+
+                      {c.fees_range && (
+                        <div className="text-slate-700 font-semibold bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs flex items-center justify-between">
+                          <span className="text-slate-500">💰 Fee:</span>
+                          <span className="text-purple-700 font-bold">
+                            {c.fees_range}
+                            {feeData.inr > 0 && !c.fees_range.includes('₹') && (
+                              <span className="text-[10px] text-slate-400 font-normal ml-1">
+                                (~₹{feeData.inr.toLocaleString()})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {c.scholarship_info && (
+                        <div className="text-emerald-700 text-[11px] font-medium line-clamp-1 flex items-center gap-1">
+                          <Award className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                          <span>{c.scholarship_info}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCourseDetails(c)}
+                      className="w-full py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <span>View Study in India Fees &amp; Details</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCoursePitch(c)}
+                          className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[11px] flex items-center gap-1 transition-colors"
+                          title="Copy structured WhatsApp pitch"
+                        >
+                          {copiedPitchCourseId === c.id ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span className="text-emerald-700 font-bold">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-slate-500" />
+                              <span>Copy Pitch</span>
+                            </>
+                          )}
+                        </button>
+
+                        <a
+                          href={`https://wa.me/?text=${encodeURIComponent(
+                            `Namaste! 🙏\nHere are the official admission details for *${c.course_name}*:\n\n` +
+                            `🏛️ University: ${c.university_name}\n` +
+                            `📚 Degree: ${c.course_level || c.degree_level || 'Degree'}\n` +
+                            `⏱️ Duration: ${c.duration || 'Standard'}\n` +
+                            `💰 Tuition Fee: ${c.fees_range || 'Official Rates'}\n` +
+                            `🎓 Scholarship: ${c.scholarship_info || 'Up to 30%-50% merit waiver'}\n` +
+                            `📋 Eligibility: ${c.eligibility || 'Higher Secondary'}\n\n` +
+                            `For seat reservation and application assistance, contact Gems Group Services.`
+                          )}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-[11px] flex items-center gap-1 transition-colors"
+                          title="Share directly via WhatsApp"
+                        >
+                          <MessageSquare className="w-3 h-3 text-emerald-600" />
+                          <span>WhatsApp</span>
+                        </a>
+                      </div>
+
+                      {canManage && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(c)}
+                            className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Edit Course"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(c.id, c.course_name)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Delete Course"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {courses.length > pageSize && (
@@ -973,6 +1141,257 @@ export const CoursesPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Study in India Course & Fee Details Explorer Modal */}
+      {courseDetailsModalOpen && selectedCourseForDetails && (() => {
+        const c = selectedCourseForDetails;
+        const feeData = parseFeeNumbers(c.fees_range);
+        const tuitionUSD = feeData.usd;
+        const tuitionINR = feeData.inr;
+        const durationYears = parseInt(c.duration || '4', 10) || 4;
+        const totalFullUSD = tuitionUSD > 0 ? tuitionUSD * durationYears : 0;
+        const totalFullINR = tuitionINR > 0 ? tuitionINR * durationYears : 0;
+
+        return (
+          <div className="fixed inset-0 z-50 p-4 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+            <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
+              {/* Header Banner */}
+              <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-6 relative">
+                <button
+                  type="button"
+                  onClick={() => setCourseDetailsModalOpen(false)}
+                  className="absolute top-5 right-5 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider bg-purple-500 text-white flex items-center gap-1">
+                    <span>🇮🇳</span>
+                    <span>Study in India Empaneled Course</span>
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white/20 text-white">
+                    {c.course_level || c.degree_level || 'Degree'}
+                  </span>
+                  {c.stream && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white/10 text-purple-200">
+                      {c.stream}
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-snug">
+                  {c.course_name}
+                </h2>
+
+                <div className="flex flex-wrap items-center gap-3 text-xs text-purple-200 mt-2 font-medium">
+                  <span className="flex items-center gap-1">
+                    <Building2 className="w-4 h-4 text-purple-300" />
+                    <strong className="text-white">{c.university_name}</strong>
+                  </span>
+                  <span>•</span>
+                  <span>Duration: <strong className="text-white">{c.duration || 'Standard'}</strong></span>
+                  <span>•</span>
+                  <span>Intake: <strong className="text-white">{c.intake || 'Academic Year 2026-27'}</strong></span>
+                </div>
+              </div>
+
+              {/* Currency Selector Bar */}
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Coins className="w-4 h-4 text-purple-600" />
+                  <span className="text-xs font-bold text-slate-700">Tuition Fee Currency:</span>
+                  <div className="inline-flex rounded-xl p-0.5 bg-slate-200 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setCurrencyMode('USD')}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        currencyMode === 'USD' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      USD ($)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrencyMode('INR')}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        currencyMode === 'INR' ? 'bg-white text-purple-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      INR (₹ Approx)
+                    </button>
+                  </div>
+                </div>
+
+                <span className="text-[11px] text-slate-400 italic">
+                  *Standard exchange rate benchmark ₹86 / USD for international fee calculation
+                </span>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Fee Breakdown Cards */}
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                    <Coins className="w-4 h-4 text-purple-600" />
+                    <span>Official Tuition &amp; Course Cost Structure</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200">
+                      <span className="text-xs font-bold text-purple-800">Annual Tuition Fee</span>
+                      <div className="text-2xl font-black text-purple-900 mt-1">
+                        {currencyMode === 'USD'
+                          ? (tuitionUSD > 0 ? `$${tuitionUSD.toLocaleString()}/year` : c.fees_range || 'Official Rates')
+                          : (tuitionINR > 0 ? `₹${tuitionINR.toLocaleString()}/year` : (tuitionUSD > 0 ? `$${tuitionUSD.toLocaleString()}` : c.fees_range || 'Official Rates'))}
+                      </div>
+                      <div className="text-[11px] text-purple-600 mt-1">
+                        {currencyMode === 'USD' && tuitionINR > 0 && `Equivalent to approx ₹${tuitionINR.toLocaleString()} INR / year`}
+                        {currencyMode === 'INR' && tuitionUSD > 0 && `Official USD benchmark $${tuitionUSD.toLocaleString()} / year`}
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200">
+                      <span className="text-xs font-bold text-slate-700">Estimated Total Full Program Cost</span>
+                      <div className="text-2xl font-black text-slate-900 mt-1">
+                        {currencyMode === 'USD'
+                          ? (totalFullUSD > 0 ? `$${totalFullUSD.toLocaleString()}` : 'Calculated per Duration')
+                          : (totalFullINR > 0 ? `₹${totalFullINR.toLocaleString()}` : 'Calculated per Duration')}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Covering all {durationYears} years / academic semesters
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Eligibility & Entrance Requirements */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2">
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <GraduationCap className="w-4 h-4 text-purple-600" />
+                      <span>Academic Eligibility</span>
+                    </h5>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {c.eligibility || 'Completion of 10+2 / Higher Secondary / A-Levels with relevant subject combinations and minimum 50%-60% aggregate score.'}
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2">
+                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <BookOpen className="w-4 h-4 text-purple-600" />
+                      <span>Entrance &amp; Selection Mode</span>
+                    </h5>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {c.entrance_requirement || 'Direct merit-based allocation via Study in India PRAGATII, CUET, or institutional counseling.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Study in India Scholarship Schemes */}
+                <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-5 h-5 text-emerald-700 shrink-0" />
+                    <h5 className="text-xs font-bold text-emerald-900">
+                      Study in India Fee Waiver &amp; Scholarship Schemes
+                    </h5>
+                  </div>
+                  <p className="text-xs text-emerald-800 leading-relaxed">
+                    {c.scholarship_info || 'Eligible international and SAARC/Nepal applicants can receive up to 25% to 50% tuition fee concessions based on high school merit.'}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 text-[11px]">
+                    <div className="p-2 rounded-xl bg-white/80 border border-emerald-200 font-semibold text-emerald-800">
+                      ⭐ G1 Tier: 100% Tuition Fee Waiver
+                    </div>
+                    <div className="p-2 rounded-xl bg-white/80 border border-emerald-200 font-semibold text-emerald-800">
+                      🥈 G2 Tier: 50% Tuition Fee Waiver
+                    </div>
+                    <div className="p-2 rounded-xl bg-white/80 border border-emerald-200 font-semibold text-emerald-800">
+                      🥉 G3 Tier: 25% Tuition Fee Waiver
+                    </div>
+                  </div>
+                </div>
+
+                {/* International Application Checklist */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                  <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <CheckSquare className="w-4 h-4 text-purple-600" />
+                    <span>Required Admission Documents (Nepal &amp; International)</span>
+                  </h5>
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-slate-600">
+                    <li className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>Class 10th &amp; 12th Grade Transcript / Marks Card</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>Citizenship Certificate / Valid Passport copy</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>Character &amp; Transfer / Migration Certificate</span>
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span>4 Passport size photographs &amp; Statement of Purpose</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Modal Footer with Counselor Action Buttons */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCoursePitch(c)}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                  >
+                    {copiedPitchCourseId === c.id ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 font-bold">Pitch Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-500" />
+                        <span>Copy Pitch for WhatsApp</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={`https://wa.me/?text=${encodeURIComponent(
+                      `Namaste! 🙏\nHere are the official admission details for *${c.course_name}*:\n\n` +
+                      `🏛️ University: ${c.university_name}\n` +
+                      `📚 Degree: ${c.course_level || c.degree_level || 'Degree'}\n` +
+                      `⏱️ Duration: ${c.duration || 'Standard'}\n` +
+                      `💰 Tuition Fee: ${c.fees_range || 'Official Rates'}\n` +
+                      `🎓 Scholarship: ${c.scholarship_info || 'Up to 30%-50% merit waiver'}\n` +
+                      `📋 Eligibility: ${c.eligibility || 'Higher Secondary'}\n\n` +
+                      `For seat reservation and application assistance, contact Gems Group Services.`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Send on WhatsApp</span>
+                  </a>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCourseDetailsModalOpen(false)}
+                  className="px-5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

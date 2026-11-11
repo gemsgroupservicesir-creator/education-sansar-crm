@@ -190,6 +190,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getUniversityCoursesById: (id: string) => fetchJson<any[]>(`/universities/${id}/courses`),
   getCourses: (params?: { universityId?: string; stream?: string; courseLevel?: string; search?: string } | string) => {
     if (typeof params === 'string') {
       return fetchJson<any[]>(`/courses${params ? `?university_id=${params}` : ''}`);
