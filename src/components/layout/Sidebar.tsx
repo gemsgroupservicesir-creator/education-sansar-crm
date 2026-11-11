@@ -27,7 +27,8 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
-  Mail
+  Mail,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -52,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { name: 'Dashboard', path: '/', icon: LayoutDashboard, permission: 'dashboard' },
     { name: 'Leads', path: '/leads', icon: Users, permission: 'leads_view' },
     { name: 'My Leads', path: '/my-leads', icon: UserCheck, permission: 'leads_view', roles: ['Super Admin', 'Admin', 'Counselor', 'Telecaller'] },
+    { name: 'AI Sales Copilot', path: '/ai-sales', icon: Sparkles, tag: 'AI', permission: 'leads_view' },
     { name: 'Admission Pipeline', path: '/pipeline', icon: Kanban, permission: 'pipeline' },
     { name: 'Follow-ups', path: '/followups', icon: CalendarClock, permission: 'leads_view' },
     { name: 'Applications', path: '/applications', icon: GraduationCap, permission: 'applications' },
@@ -184,6 +186,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!isCollapsed && <span className="truncate">{item.name}</span>}
                 </div>
 
+                {!isCollapsed && (item as any).tag && (
+                  <span className="px-1.5 py-0.5 text-[9px] font-extrabold rounded bg-gradient-to-r from-purple-500 to-indigo-600 text-white shrink-0 tracking-wider shadow-sm">
+                    {(item as any).tag}
+                  </span>
+                )}
+
                 {!isCollapsed && item.badge !== undefined && item.badge > 0 && (
                   <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white animate-pulse shrink-0">
                     {item.badge}
@@ -194,7 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-slate-900" />
                 )}
 
-                {!isCollapsed && (item.badge === undefined || item.badge === 0) && (
+                {!isCollapsed && (item.badge === undefined || item.badge === 0) && !(item as any).tag && (
                   <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-40 transition-opacity shrink-0" />
                 )}
               </NavLink>

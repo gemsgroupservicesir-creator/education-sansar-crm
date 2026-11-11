@@ -101,6 +101,18 @@ import {
   getBulkEmailFilterOptions
 } from '../services/emailService.ts';
 
+import {
+  getAISettings,
+  updateAISettings,
+  testGeminiConnection,
+  autoDispatchWelcomeOutreach,
+  analyzeLeadAndScore,
+  generateSalesPitch,
+  handleSalesChat,
+  getAIDashboardMetrics,
+  resolveCounselorProfile
+} from '../services/aiSalesService.ts';
+
 export const apiRouter = Router();
 
 // ==========================================
@@ -3614,3 +3626,123 @@ apiRouter.get('/email/campaigns', (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || 'Failed to fetch bulk email campaigns' });
   }
 });
+
+// ==========================================
+// 15. AI SALES COPILOT & AUTO-OUTREACH
+// ==========================================
+apiRouter.get('/ai/settings', (req: Request, res: Response) => {
+  try {
+    const settings = getAISettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load AI settings' });
+  }
+});
+
+apiRouter.put('/ai/settings', (req: Request, res: Response) => {
+  try {
+    const updated = updateAISettings(req.body);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update AI settings' });
+  }
+});
+
+apiRouter.post('/ai/test-connection', async (req: Request, res: Response) => {
+  try {
+    const result = await testGeminiConnection(req.body?.apiKey);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to test Gemini connection' });
+  }
+});
+
+apiRouter.post('/ai/outreach/auto-send', async (req: Request, res: Response) => {
+  try {
+    const { leadId } = req.body;
+    if (!leadId) {
+      return res.status(400).json({ error: 'leadId is required' });
+    }
+
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as any;
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const result = await autoDispatchWelcomeOutreach(lead, 'Manual / Counselor Trigger');
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to trigger AI outreach' });
+  }
+});
+
+apiRouter.post('/ai/pitch/generate', async (req: Request, res: Response) => {
+  try {
+    const { leadId, channel, objection, tone, customNotes } = req.body;
+    if (!leadId) {
+      return res.status(400).json({ error: 'leadId is required' });
+    }
+
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as any;
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const counselor = resolveCounselorProfile(lead);
+    const pitch = await generateSalesPitch(lead, counselor, {
+      channel: channel || 'WhatsApp',
+      objection: objection || 'CLOSING',
+      tone,
+      customNotes
+    });
+
+    res.json({
+      ...pitch,
+      student_name: lead.student_name,
+      phone: lead.whatsapp_number || lead.phone,
+      email: lead.email,
+      counselorName: counselor.name,
+      counselorPhone: counselor.phone
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate AI pitch' });
+  }
+});
+
+apiRouter.get('/ai/lead-score/:id', (req: Request, res: Response) => {
+  try {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id) as any;
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const insight = analyzeLeadAndScore(lead);
+    res.json(insight);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to compute AI lead score' });
+  }
+});
+
+apiRouter.post('/ai/chat', async (req: Request, res: Response) => {
+  try {
+    const { message, leadContext } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    const reply = await handleSalesChat(message, leadContext);
+    res.json(reply);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to process AI chat' });
+  }
+});
+
+apiRouter.get('/ai/dashboard', (req: Request, res: Response) => {
+  try {
+    const metrics = getAIDashboardMetrics();
+    res.json(metrics);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load AI dashboard metrics' });
+  }
+});
+

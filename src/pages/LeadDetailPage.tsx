@@ -54,7 +54,18 @@ export const LeadDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Active tab
-  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'finder' | 'applications' | 'documents' | 'timeline' | 'followups'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'finder' | 'ai-sales' | 'applications' | 'documents' | 'timeline' | 'followups'>('profile');
+
+  // AI Sales Copilot states
+  const [aiScoreData, setAiScoreData] = useState<any>(null);
+  const [aiPitchChannel, setAiPitchChannel] = useState<'WhatsApp' | 'Email' | 'Call Script'>('WhatsApp');
+  const [aiPitchObjection, setAiPitchObjection] = useState<string>('CLOSING');
+  const [aiPitchTone, setAiPitchTone] = useState<string>('Empathetic & Highly Persuasive');
+  const [aiCustomNotes, setAiCustomNotes] = useState<string>('');
+  const [aiGeneratedPitch, setAiGeneratedPitch] = useState<any>(null);
+  const [aiPitchLoading, setAiPitchLoading] = useState(false);
+  const [aiDispatching, setAiDispatching] = useState(false);
+  const [copiedPitch, setCopiedPitch] = useState(false);
 
   // Modals
   const [showNoteModal, setShowNoteModal] = useState(false);
@@ -249,6 +260,53 @@ export const LeadDetailPage: React.FC = () => {
       searchUniversityCourses();
     }
   }, [activeTab, finderStream, finderLevel, finderMaxBudget]);
+
+  useEffect(() => {
+    if (lead?.id && (activeTab === 'ai-sales' || !aiScoreData)) {
+      api.getAILeadScore(lead.id).then(setAiScoreData).catch(() => {});
+    }
+  }, [activeTab, lead?.id]);
+
+  const handleGenerateAIPitch = async () => {
+    if (!lead?.id) return;
+    setAiPitchLoading(true);
+    try {
+      const res = await api.generateAIPitch({
+        leadId: lead.id,
+        channel: aiPitchChannel,
+        objection: aiPitchObjection,
+        tone: aiPitchTone,
+        customNotes: aiCustomNotes
+      });
+      setAiGeneratedPitch(res);
+      showToast(`AI sales pitch generated successfully (${res.mode})!`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to craft AI pitch', 'error');
+    } finally {
+      setAiPitchLoading(false);
+    }
+  };
+
+  const handleTriggerAIOutreach = async () => {
+    if (!lead?.id) return;
+    setAiDispatching(true);
+    try {
+      const res = await api.triggerAIOutreach(lead.id);
+      if (res.success) {
+        showToast(
+          `AI outreach dispatched on behalf of ${res.counselorName}! (WhatsApp: ${res.whatsappSent ? 'Sent' : 'Skipped'}, Email: ${res.emailSent ? 'Sent' : 'Skipped'})`,
+          'success'
+        );
+        loadLeadDetails();
+      } else {
+        showToast(res.error || 'Outreach could not be dispatched', 'warning');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to trigger AI outreach', 'error');
+    } finally {
+      setAiDispatching(false);
+    }
+  };
 
   if (loading && !lead) {
     return (
@@ -499,6 +557,14 @@ export const LeadDetailPage: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('ai-sales')}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold shadow-xs transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>AI Sales Copilot</span>
+          </button>
+
+          <button
             onClick={handleOpenEditLeadModal}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold"
           >
@@ -549,6 +615,7 @@ export const LeadDetailPage: React.FC = () => {
       <div className="flex border-b border-slate-200 overflow-x-auto text-xs font-medium text-slate-600 gap-1">
         {[
           { key: 'profile', label: 'Personal Information' },
+          { key: 'ai-sales', label: '✨ AI Sales Copilot' },
           { key: 'academic', label: 'Academic & Entrance' },
           { key: 'preferences', label: 'Course Preferences' },
           { key: 'finder', label: '⚡ University & Course Finder' },
@@ -640,6 +707,263 @@ export const LeadDetailPage: React.FC = () => {
             <div className="text-slate-800 bg-slate-50 p-3 rounded-xl border border-slate-100 mt-1">
               {lead.remarks || 'No remarks recorded yet.'}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: AI Sales Copilot & Objection Solver */}
+      {activeTab === 'ai-sales' && (
+        <div className="space-y-6">
+          {/* AI Score & Overview Card */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-900 text-white rounded-2xl p-6 shadow-md border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-400/30 text-[10px] font-bold tracking-wide uppercase">
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>AI Predictive Lead Intelligence</span>
+                </div>
+                <h3 className="text-xl font-extrabold text-white">
+                  Conversion Probability &amp; Sales Strategy for {lead.student_name}
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Assigned Counselor: <strong className="text-white">{lead.assigned_counselor_name || 'Gems Admissions Desk'}</strong> &bull; Target Course: <strong className="text-white">{lead.preferred_course || 'Chosen Program'}</strong>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10 text-center min-w-[100px]">
+                  <div className="text-[10px] text-purple-200 uppercase font-semibold">AI Lead Score</div>
+                  <div className="text-2xl font-black text-white font-mono mt-0.5">
+                    {aiScoreData?.score ?? 75}<span className="text-sm font-normal text-purple-300">/100</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10 text-center min-w-[110px]">
+                  <div className="text-[10px] text-purple-200 uppercase font-semibold">Win Probability</div>
+                  <div className="text-sm font-extrabold text-emerald-400 mt-1">
+                    {aiScoreData?.winProbability ?? 'HIGH'} WIN %
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleTriggerAIOutreach}
+                  disabled={aiDispatching}
+                  className="px-4 py-3 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-lg shadow-purple-900/30 disabled:opacity-50 flex items-center gap-2 transition-all shrink-0"
+                  title="Dispatches WhatsApp and Email outreach on behalf of the counselor"
+                >
+                  {aiDispatching ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  <span>Auto-Send Welcome Outreach</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AI Insights & Recommended Move */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-white/10 text-xs">
+              <div className="space-y-2 bg-white/5 p-3.5 rounded-xl border border-white/10">
+                <div className="font-bold text-purple-200 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Key Conversion Drivers:</span>
+                </div>
+                <ul className="space-y-1 text-slate-300 text-[11px]">
+                  {aiScoreData?.keyDrivers?.length ? (
+                    aiScoreData.keyDrivers.map((d: string, i: number) => (
+                      <li key={i} className="flex items-start gap-1.5">
+                        <span className="text-purple-400">&bull;</span>
+                        <span>{d}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <>
+                      <li>&bull; Active academic interest in {lead.preferred_course || 'Higher Education'}</li>
+                      <li>&bull; Verified contact details available for multi-channel counselor outreach</li>
+                      <li>&bull; Eligible for direct merit-based tuition scholarship</li>
+                    </>
+                  )}
+                </ul>
+              </div>
+
+              <div className="space-y-2 bg-white/5 p-3.5 rounded-xl border border-white/10">
+                <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>Recommended Next Move:</span>
+                </div>
+                <p className="text-slate-200 text-[11px] leading-relaxed">
+                  {aiScoreData?.recommendedAction || 'Schedule a 5-minute introductory call to review academic eligibility and present top university options with tuition scholarship concessions.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Sales Pitch & Objection Generator */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  <span>Counselor Sales Pitch &amp; Objection Solver</span>
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Select student scenario to generate persuasive copy ready for WhatsApp, Email, or Telephone calls.
+                </p>
+              </div>
+            </div>
+
+            {/* Objection Selection */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Student Objection / Closing Objective</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  { id: 'CLOSING', label: '🎯 Push to Close & Apply' },
+                  { id: 'FEE_HIGH', label: '💰 Fees Too High / Budget' },
+                  { id: 'COMPARING', label: '⚖️ Comparing Universities' },
+                  { id: 'HOSTEL_SAFETY', label: '🏠 Hostel & Campus Safety' },
+                  { id: 'ENTRANCE_EXAM', label: '📝 Fear of Entrance Cutoffs' },
+                  { id: 'UNRESPONSIVE', label: '👻 Unresponsive Lead Hook' }
+                ].map(obj => (
+                  <button
+                    key={obj.id}
+                    type="button"
+                    onClick={() => setAiPitchObjection(obj.id)}
+                    className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition-all ${
+                      aiPitchObjection === obj.id
+                        ? 'border-purple-600 bg-purple-50 text-purple-900 ring-2 ring-purple-500/20'
+                        : 'border-slate-200 hover:border-purple-300 text-slate-700 bg-white'
+                    }`}
+                  >
+                    {obj.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Channel & Tone Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Channel</label>
+                <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-semibold">
+                  {(['WhatsApp', 'Email', 'Call Script'] as const).map(ch => (
+                    <button
+                      key={ch}
+                      type="button"
+                      onClick={() => setAiPitchChannel(ch)}
+                      className={`flex-1 py-1.5 rounded-lg transition-all ${
+                        aiPitchChannel === ch ? 'bg-white text-purple-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {ch}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tone</label>
+                <select
+                  value={aiPitchTone}
+                  onChange={(e) => setAiPitchTone(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-800"
+                >
+                  <option value="Empathetic & Highly Persuasive">Empathetic &amp; Highly Persuasive</option>
+                  <option value="Friendly Academic Advisor">Friendly Academic Advisor</option>
+                  <option value="Urgent & Deadline-Driven">Urgent &amp; Deadline-Driven</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Custom Context</label>
+                <input
+                  type="text"
+                  value={aiCustomNotes}
+                  onChange={(e) => setAiCustomNotes(e.target.value)}
+                  placeholder="e.g. Needs $3,000 budget option..."
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50"
+                />
+              </div>
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={handleGenerateAIPitch}
+              disabled={aiPitchLoading}
+              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs shadow-md shadow-purple-900/20 disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+            >
+              {aiPitchLoading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Generating Persuasive Pitch...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Generate AI Pitch for {aiPitchChannel}</span>
+                </>
+              )}
+            </button>
+
+            {/* Generated Output Card */}
+            {aiGeneratedPitch && (
+              <div className="p-4 rounded-2xl bg-purple-50/60 border border-purple-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Pitch Ready &bull; Signed as {aiGeneratedPitch.counselorName} ({aiGeneratedPitch.mode})</span>
+                  </span>
+
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(aiGeneratedPitch.pitch);
+                      setCopiedPitch(true);
+                      setTimeout(() => setCopiedPitch(false), 2000);
+                      showToast('Pitch copied to clipboard!', 'success');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-purple-200 text-purple-700 hover:bg-purple-100 text-[11px] font-semibold flex items-center gap-1 shadow-2xs"
+                  >
+                    {copiedPitch ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedPitch ? 'Copied!' : 'Copy'}</span>
+                  </button>
+                </div>
+
+                {aiGeneratedPitch.subject && (
+                  <div className="text-xs font-bold text-slate-800 bg-white p-2 rounded-lg border border-purple-100">
+                    <span className="text-slate-400 font-medium">Subject:</span> {aiGeneratedPitch.subject}
+                  </div>
+                )}
+
+                <div className="text-xs text-slate-800 font-sans whitespace-pre-wrap bg-white p-3.5 rounded-xl border border-purple-100 leading-relaxed max-h-56 overflow-y-auto">
+                  {aiGeneratedPitch.pitch}
+                </div>
+
+                {/* Direct Action Links */}
+                <div className="flex items-center gap-2 pt-1">
+                  {lead.phone && (
+                    <a
+                      href={`https://wa.me/${String(lead.phone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(aiGeneratedPitch.pitch)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>Send to Student on WhatsApp Web</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5 opacity-70" />
+                    </a>
+                  )}
+
+                  {lead.email && (
+                    <a
+                      href={`mailto:${lead.email}?subject=${encodeURIComponent(aiGeneratedPitch.subject || 'University Admission Update')}&body=${encodeURIComponent(aiGeneratedPitch.pitch)}`}
+                      className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                    >
+                      <Mail className="w-4 h-4" />
+                      <span>Send via Email Client</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

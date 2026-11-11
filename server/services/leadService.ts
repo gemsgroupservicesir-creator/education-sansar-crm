@@ -1,6 +1,7 @@
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
 import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
 import type { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
+import { autoDispatchWelcomeOutreach } from './aiSalesService.ts';
 
 export function normalizePhoneNumber(phone?: string): string {
   if (!phone) return '';
@@ -300,15 +301,6 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
     VALUES (?, ?, ?, ?, '11:00', 'Call', 'HIGH', 'First outreach call to introduce Gems Group Services counseling services', 'Pending', ?)
   `).run(fupId, id, counselorId || null, fupDateStr, performedBy);
 
-  // Queue automated welcome message in activity
-  logLeadActivity({
-    leadId: id,
-    activityType: 'WhatsApp',
-    title: 'Automated Welcome WhatsApp Message Queued',
-    description: `Welcome message prepared with counselor contact (${counselorName || 'Admissions Desk'})`,
-    performedBy: 'Automation Engine'
-  });
-
   // Audit log
   logAudit({
     userName: performedBy,
@@ -322,6 +314,21 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
   if (isNeonEnabled() && createdLead) {
     persistLeadToNeon(createdLead).catch(err => console.warn('[Neon Sync] Lead persist deferred:', err.message));
   }
+
+  // Trigger AI Auto-Outreach (WhatsApp & Email) on behalf of the assigned counselor
+  setTimeout(() => {
+    if (createdLead) {
+      autoDispatchWelcomeOutreach(createdLead, performedBy)
+        .then((res) => {
+          if (res.success) {
+            console.log(`[AI Auto-Outreach] Successfully dispatched to ${studentName} on behalf of ${res.counselorName} (WA: ${res.whatsappSent}, Email: ${res.emailSent}) [${res.mode}]`);
+          }
+        })
+        .catch((err) => {
+          console.warn('[AI Auto-Outreach] Error during auto-dispatch:', err.message);
+        });
+    }
+  }, 100);
 
   return createdLead;
 }

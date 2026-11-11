@@ -27,6 +27,7 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AISalesCopilotPage } from './pages/AISalesCopilotPage';
 import { HRPage } from './pages/HRPage';
 import { FinancePage } from './pages/FinancePage';
 import { CommunicationsPage } from './pages/CommunicationsPage';
@@ -110,6 +111,7 @@ export const App: React.FC = () => {
                 <Route path="/leads" element={<LeadsPage />} />
                 <Route path="/leads/:id" element={<LeadDetailPage />} />
                 <Route path="/my-leads" element={<MyLeadsPage />} />
+                <Route path="/ai-sales" element={<AISalesCopilotPage />} />
                 <Route path="/pipeline" element={<PipelinePage />} />
                 <Route path="/followups" element={<FollowupsPage />} />
                 <Route path="/applications" element={<ApplicationsPage />} />

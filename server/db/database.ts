@@ -80,6 +80,43 @@ function runSafeMigrations() {
   } catch (e: any) {
     console.warn('[Migration Notice] deleted_records table:', e.message);
   }
+
+  // Ensure lead_ai_insights table exists
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lead_ai_insights (
+        id TEXT PRIMARY KEY,
+        lead_id TEXT NOT NULL UNIQUE,
+        score INTEGER DEFAULT 75,
+        conversion_probability TEXT DEFAULT 'MEDIUM',
+        key_drivers TEXT,
+        recommended_action TEXT,
+        last_outreach_at TEXT,
+        last_outreach_channel TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_lead_ai_insights_lead ON lead_ai_insights(lead_id);
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] lead_ai_insights table:', e.message);
+  }
+
+  // Initialize AI Auto-Outreach & Sales settings
+  try {
+    const insertSettingIfNotExists = (key: string, value: string, description: string) => {
+      const exists = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
+      if (!exists) {
+        db.prepare('INSERT INTO settings (key, value, description) VALUES (?, ?, ?)').run(key, value, description);
+      }
+    };
+    insertSettingIfNotExists('ai_auto_whatsapp_enabled', 'true', 'Enable automatic AI WhatsApp outreach on new lead addition');
+    insertSettingIfNotExists('ai_auto_email_enabled', 'true', 'Enable automatic AI Email outreach on new lead addition');
+    insertSettingIfNotExists('ai_sales_tone', 'Empathetic & Highly Persuasive', 'Tone and style used by AI Sales Agent');
+    insertSettingIfNotExists('ai_model', 'gemini-2.5-flash', 'AI Model for smart generative sales responses');
+    insertSettingIfNotExists('ai_custom_instructions', '', 'Custom counseling rules and guidelines for AI');
+  } catch (e: any) {}
+
   const addColumnIfNotExists = (table: string, column: string, columnDef: string) => {
     try {
       const cols = db.prepare(`PRAGMA table_info(${table})`).all() as any[];

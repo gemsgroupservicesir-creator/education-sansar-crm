@@ -602,5 +602,42 @@ export const api = {
       totalLeadsWithWhatsApp?: number;
       totalTargetLeads?: number;
     }>(`/email/filter-options?channel=${channel}`),
+
+  // AI Sales Copilot & Auto-Outreach
+  getAISettings: () => fetchJson<any>('/ai/settings'),
+  updateAISettings: (data: any) =>
+    fetchJson<any>('/ai/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  testGeminiConnection: (apiKey?: string) =>
+    fetchJson<any>('/ai/test-connection', {
+      method: 'POST',
+      body: JSON.stringify({ apiKey }),
+    }),
+  triggerAIOutreach: (leadId: string) =>
+    fetchJson<any>('/ai/outreach/auto-send', {
+      method: 'POST',
+      body: JSON.stringify({ leadId }),
+    }),
+  generateAIPitch: (data: {
+    leadId: string;
+    channel?: string;
+    objection?: string;
+    tone?: string;
+    customNotes?: string;
+  }) =>
+    fetchJson<any>('/ai/pitch/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getAILeadScore: (leadId: string) =>
+    fetchJson<any>(`/ai/lead-score/${leadId}`),
+  chatAISalesAssistant: (message: string, leadContext?: any) =>
+    fetchJson<any>('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, leadContext }),
+    }),
+  getAIDashboard: () => fetchJson<any>('/ai/dashboard'),
 };
 

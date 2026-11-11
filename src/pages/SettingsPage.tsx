@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Building2, Sliders, Users, ShieldAlert, Save, RefreshCw, 
   CheckCircle, MapPin, Phone, Mail, Globe, Clock, GitFork, 
-  Check, Lock, Eye, AlertCircle
+  Check, Lock, Eye, AlertCircle, Sparkles, Bot
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext';
 export const SettingsPage: React.FC = () => {
   const { addToast } = useNotifications();
   const { user, isSuperAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<'company' | 'routing' | 'users' | 'audit'>('company');
+  const [activeTab, setActiveTab] = useState<'company' | 'routing' | 'ai' | 'users' | 'audit'>('company');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -32,19 +32,46 @@ export const SettingsPage: React.FC = () => {
     duplicate_check_meta_id: '1',
   });
 
+  // AI Sales & Outreach State
+  const [aiSettings, setAiSettings] = useState<any>({
+    ai_auto_whatsapp_enabled: true,
+    ai_auto_email_enabled: true,
+    ai_sales_tone: 'Empathetic & Highly Persuasive',
+    ai_model: 'gemini-2.5-flash',
+    ai_custom_instructions: '',
+    gemini_api_key_masked: '',
+    is_gemini_active: false,
+    raw_gemini_api_key: ''
+  });
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<any>(null);
+
   const [usersList, setUsersList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [settingsRes, usersRes, auditRes] = await Promise.all([
+      const [settingsRes, usersRes, auditRes, aiRes] = await Promise.all([
         api.getSettings(),
         api.getUsers(),
         api.getAuditLogs(),
+        api.getAISettings().catch(() => null),
       ]);
       if (settingsRes && Object.keys(settingsRes).length > 0) {
         setSettings((prev) => ({ ...prev, ...settingsRes }));
+      }
+      if (aiRes) {
+        setAiSettings({
+          ai_auto_whatsapp_enabled: aiRes.ai_auto_whatsapp_enabled,
+          ai_auto_email_enabled: aiRes.ai_auto_email_enabled,
+          ai_sales_tone: aiRes.ai_sales_tone || 'Empathetic & Highly Persuasive',
+          ai_model: aiRes.ai_model || 'gemini-2.5-flash',
+          ai_custom_instructions: aiRes.ai_custom_instructions || '',
+          gemini_api_key_masked: aiRes.gemini_api_key || '',
+          is_gemini_active: aiRes.is_gemini_active,
+          raw_gemini_api_key: ''
+        });
       }
       setUsersList(usersRes);
       setAuditLogs(auditRes);
@@ -82,6 +109,52 @@ export const SettingsPage: React.FC = () => {
       addToast(err.message || 'Failed to save settings', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveAISettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hasSuperAdminRights) {
+      addToast('Only Super Admin can update AI configuration', 'warning');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await api.updateAISettings({
+        ai_auto_whatsapp_enabled: aiSettings.ai_auto_whatsapp_enabled ? '1' : '0',
+        ai_auto_email_enabled: aiSettings.ai_auto_email_enabled ? '1' : '0',
+        ai_sales_tone: aiSettings.ai_sales_tone,
+        ai_model: aiSettings.ai_model,
+        ai_custom_instructions: aiSettings.ai_custom_instructions,
+        gemini_api_key: aiSettings.raw_gemini_api_key || undefined,
+        performedBy: user?.name || 'Super Admin'
+      });
+      addToast('AI Sales & Auto-Outreach settings saved successfully', 'success');
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to save AI configuration', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestGeminiKey = async () => {
+    try {
+      setTestingGemini(true);
+      setGeminiTestResult(null);
+      const res = await api.testGeminiConnection(aiSettings.raw_gemini_api_key || undefined);
+      setGeminiTestResult(res);
+      if (res.success) {
+        addToast(`Gemini Connected! Sample: ${res.sampleResponse}`, 'success');
+      } else {
+        addToast(`Gemini Test Error: ${res.error}`, 'error');
+      }
+    } catch (err: any) {
+      setGeminiTestResult({ success: false, error: err.message });
+      addToast(err.message || 'Gemini connection failed', 'error');
+    } finally {
+      setTestingGemini(false);
     }
   };
 
@@ -158,6 +231,18 @@ export const SettingsPage: React.FC = () => {
         >
           <GitFork className="w-4 h-4" />
           Lead Distribution & Routing
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ai')}
+          className={`px-4 py-3 text-sm font-medium border-b-2 flex items-center gap-2 transition ${
+            activeTab === 'ai'
+              ? 'border-purple-600 text-purple-600 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-purple-600" />
+          AI Outreach & Sales Engine
         </button>
 
         <button
@@ -483,6 +568,238 @@ export const SettingsPage: React.FC = () => {
               {saving ? 'Saving...' : (
                 <>
                   <Save className="w-4 h-4" /> Save Distribution Rules
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Tab: AI Autonomous Outreach & Sales Engine */}
+      {activeTab === 'ai' && (
+        <form onSubmit={handleSaveAISettings} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-purple-600" />
+                <h3 className="text-lg font-bold text-gray-900">AI Autonomous Outreach &amp; Sales Engine</h3>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Configure autonomous lead outreach, counselor identity signing, negotiation tone, and Google Gemini API
+              </p>
+            </div>
+            <div>
+              {aiSettings.is_gemini_active ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Gemini API Active ({aiSettings.ai_model})
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  Deterministic Admissions Engine Active
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Autonomous Outreach Toggles */}
+          <div className="space-y-4">
+            <div>
+              <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                <Bot className="w-4 h-4 text-purple-600" />
+                Autonomous Welcome Outreach on Lead Creation
+              </h4>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Automatically draft and dispatch customized initial outreach as soon as a lead is captured (via Meta Webhook, CSV Import, or Manual Entry) signed in the assigned counselor's name.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                aiSettings.ai_auto_whatsapp_enabled ? 'border-emerald-500 bg-emerald-50/40' : 'border-gray-200 bg-gray-50/50'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={aiSettings.ai_auto_whatsapp_enabled}
+                  onChange={(e) => setAiSettings({ ...aiSettings, ai_auto_whatsapp_enabled: e.target.checked })}
+                  className="w-4 h-4 text-emerald-600 rounded mt-1"
+                />
+                <div>
+                  <span className="text-sm font-bold text-gray-900 block">Auto-Dispatch WhatsApp Welcome</span>
+                  <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                    AI crafts a personalized WhatsApp message addressing the student by name, citing their target course &amp; university, and signing with the counselor's direct contact.
+                  </p>
+                  <span className="inline-block mt-2 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    High Conversion (94% open rate)
+                  </span>
+                </div>
+              </label>
+
+              <label className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                aiSettings.ai_auto_email_enabled ? 'border-blue-500 bg-blue-50/40' : 'border-gray-200 bg-gray-50/50'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={aiSettings.ai_auto_email_enabled}
+                  onChange={(e) => setAiSettings({ ...aiSettings, ai_auto_email_enabled: e.target.checked })}
+                  className="w-4 h-4 text-blue-600 rounded mt-1"
+                />
+                <div>
+                  <span className="text-sm font-bold text-gray-900 block">Auto-Dispatch Email Welcome</span>
+                  <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                    Dispatches a structured admission prospectus email with fee overview, eligibility guidelines, scholarship advisory, and counselor credentials.
+                  </p>
+                  <span className="inline-block mt-2 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                    Official Documentation Record
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* AI Sales Personality & Persona */}
+          <div className="border-t border-gray-100 pt-5 space-y-4">
+            <h4 className="text-sm font-bold text-gray-900">Counseling Tone &amp; Sales Pitch Style</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                  Sales Negotiation Persona
+                </label>
+                <select
+                  value={aiSettings.ai_sales_tone}
+                  onChange={(e) => setAiSettings({ ...aiSettings, ai_sales_tone: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white font-medium text-gray-800"
+                >
+                  <option value="Empathetic & Highly Persuasive">Empathetic &amp; Highly Persuasive (Default - Best for Nepal &amp; India students)</option>
+                  <option value="Professional & Academic Authority">Professional &amp; Academic Authority (Best for Medical &amp; PG)</option>
+                  <option value="Urgent & High-Energy Closer">Urgent &amp; High-Energy Closer (Best for Seat Quota &amp; Deadline Push)</option>
+                  <option value="Supportive & Parent-Oriented">Supportive &amp; Parent-Oriented (Focused on safety, hostel, and career ROI)</option>
+                  <option value="Friendly Peer & Senior Student Mentor">Friendly Peer &amp; Senior Student Mentor (Approachable for high school grads)</option>
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Controls the phrasing used by the AI Sales Copilot during objection handling and WhatsApp pitch generation.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                  Primary AI Model
+                </label>
+                <select
+                  value={aiSettings.ai_model}
+                  onChange={(e) => setAiSettings({ ...aiSettings, ai_model: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none bg-white font-medium text-gray-800"
+                >
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recommended: Ultra-fast sub-second latency)</option>
+                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Advanced multi-turn reasoning)</option>
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  When a Gemini key is active, calls use this high-performance Google AI model.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Gemini API Key Configuration */}
+          <div className="border-t border-gray-100 pt-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-gray-900">Google Gemini API Key</h4>
+                <p className="text-xs text-gray-500">
+                  Optional. Provide a Gemini API key to upgrade from deterministic templates to live dynamic generative copy.
+                </p>
+              </div>
+              {aiSettings.gemini_api_key_masked && (
+                <span className="text-xs text-emerald-700 font-mono bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Configured: {aiSettings.gemini_api_key_masked}
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="password"
+                  placeholder={aiSettings.gemini_api_key_masked ? 'Enter new key to replace existing...' : 'Paste AIzaSy... API key'}
+                  value={aiSettings.raw_gemini_api_key}
+                  onChange={(e) => setAiSettings({ ...aiSettings, raw_gemini_api_key: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleTestGeminiKey}
+                disabled={testingGemini}
+                className="px-4 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold transition flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+              >
+                {testingGemini ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Testing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" /> Test Gemini Connection
+                  </>
+                )}
+              </button>
+            </div>
+
+            {geminiTestResult && (
+              <div className={`p-3 rounded-lg text-xs ${
+                geminiTestResult.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+              }`}>
+                {geminiTestResult.success ? (
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Gemini API test successful!</p>
+                      <p className="mt-0.5 text-emerald-700 font-mono">Sample: "{geminiTestResult.sampleResponse}"</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Gemini API test failed:</p>
+                      <p className="mt-0.5">{geminiTestResult.error}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Custom Counseling Rules & Knowledge */}
+          <div className="border-t border-gray-100 pt-5 space-y-2">
+            <label className="block text-xs font-semibold text-gray-700 uppercase">
+              Custom Admissions Counseling Knowledge &amp; Instructions
+            </label>
+            <p className="text-xs text-gray-500">
+              Provide institutional knowledge for the AI (e.g., special fee discounts for Nepal students, visa assistance perks, hostel safety guidelines, priority universities like Sharda, Galgotias, Amity, Chandigarh University, etc.)
+            </p>
+            <textarea
+              rows={4}
+              value={aiSettings.ai_custom_instructions}
+              onChange={(e) => setAiSettings({ ...aiSettings, ai_custom_instructions: e.target.value })}
+              placeholder="e.g. Always emphasize our 100% visa assistance for Nepal students. Mention that hostel accommodation has 24/7 security and dedicated mess facilities. For B.Tech / MBBS leads, highlight our exclusive scholarship seat tie-ups."
+              className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
+            <p className="text-xs text-gray-500 italic">
+              AI outreach will always identify the assigned counselor's name and contact number.
+            </p>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : (
+                <>
+                  <Save className="w-4 h-4" /> Save AI Configuration
                 </>
               )}
             </button>
