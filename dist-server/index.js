@@ -5501,12 +5501,12 @@ function checkDuplicate(params) {
   if (conditions.length === 0) {
     return { hasDuplicate: false, duplicates: [], matchReasons: [] };
   }
-  let sql3 = `SELECT * FROM leads WHERE is_deleted = 0 AND (${conditions.join(" OR ")})`;
+  let sql2 = `SELECT * FROM leads WHERE is_deleted = 0 AND (${conditions.join(" OR ")})`;
   if (params.excludeId) {
-    sql3 += ` AND id != ?`;
+    sql2 += ` AND id != ?`;
     queryParams.push(params.excludeId);
   }
-  const duplicates = db.prepare(sql3).all(...queryParams);
+  const duplicates = db.prepare(sql2).all(...queryParams);
   if (duplicates.length > 0) {
     const d = duplicates[0];
     const dNormPhone = normalizePhoneNumber(d.phone);
@@ -6070,6 +6070,18 @@ async function getStudyInIndiaSyncStatus() {
     courseCount = db.prepare("SELECT COUNT(*) as c FROM courses").get()?.c || 0;
     ucCount = db.prepare("SELECT COUNT(*) as c FROM university_courses").get()?.c || 0;
   } catch {
+  }
+  if (uniCount === 0 && isNeonEnabled() && sql) {
+    try {
+      const uRes = await sql`SELECT COUNT(*) as c FROM universities`;
+      const cRes = await sql`SELECT COUNT(*) as c FROM courses`;
+      const ucRes = await sql`SELECT COUNT(*) as c FROM university_courses`;
+      uniCount = Number(uRes[0]?.c) || uniCount;
+      courseCount = Number(cRes[0]?.c) || courseCount;
+      ucCount = Number(ucRes[0]?.c) || ucCount;
+    } catch (e) {
+      console.warn("[Study in India] Neon count query note:", e.message);
+    }
   }
   return {
     id: "int-studyinindia",
@@ -7884,7 +7896,7 @@ function deleteEmployee(id, performedBy = "Super Admin") {
   return true;
 }
 function getAttendance(params = {}) {
-  let sql3 = `
+  let sql2 = `
     SELECT a.*, e.employee_code, e.department, e.designation
     FROM hr_attendance a
     JOIN hr_employees e ON a.employee_id = e.id
@@ -7892,19 +7904,19 @@ function getAttendance(params = {}) {
   `;
   const queryParams = [];
   if (params.date) {
-    sql3 += " AND a.date = ?";
+    sql2 += " AND a.date = ?";
     queryParams.push(params.date);
   }
   if (params.employee_id) {
-    sql3 += " AND a.employee_id = ?";
+    sql2 += " AND a.employee_id = ?";
     queryParams.push(params.employee_id);
   }
   if (params.month) {
-    sql3 += " AND a.date LIKE ?";
+    sql2 += " AND a.date LIKE ?";
     queryParams.push(`${params.month}%`);
   }
-  sql3 += " ORDER BY a.date DESC, e.full_name ASC";
-  return db.prepare(sql3).all(...queryParams);
+  sql2 += " ORDER BY a.date DESC, e.full_name ASC";
+  return db.prepare(sql2).all(...queryParams);
 }
 function recordAttendance(data, performedBy = "Super Admin") {
   const emp = getEmployee(data.employee_id);
@@ -7933,7 +7945,7 @@ function recordAttendance(data, performedBy = "Super Admin") {
   return { success: true, employee_id: data.employee_id, date: data.date, status: data.status };
 }
 function getLeaves(params = {}) {
-  let sql3 = `
+  let sql2 = `
     SELECT l.*, e.employee_code, e.department, e.designation
     FROM hr_leaves l
     JOIN hr_employees e ON l.employee_id = e.id
@@ -7941,15 +7953,15 @@ function getLeaves(params = {}) {
   `;
   const queryParams = [];
   if (params.employee_id) {
-    sql3 += " AND l.employee_id = ?";
+    sql2 += " AND l.employee_id = ?";
     queryParams.push(params.employee_id);
   }
   if (params.status) {
-    sql3 += " AND l.status = ?";
+    sql2 += " AND l.status = ?";
     queryParams.push(params.status);
   }
-  sql3 += " ORDER BY l.applied_at DESC";
-  return db.prepare(sql3).all(...queryParams);
+  sql2 += " ORDER BY l.applied_at DESC";
+  return db.prepare(sql2).all(...queryParams);
 }
 function applyLeave(data, performedBy = "Employee") {
   const emp = getEmployee(data.employee_id);
@@ -7985,7 +7997,7 @@ function updateLeaveStatus(id, status, remarks, approvedBy = "Super Admin") {
   return { success: true, id, status };
 }
 function getPayroll(params = {}) {
-  let sql3 = `
+  let sql2 = `
     SELECT p.*, e.employee_code, e.department, e.designation, e.bank_name, e.account_number, e.pan_number
     FROM hr_payroll p
     JOIN hr_employees e ON p.employee_id = e.id
@@ -7993,15 +8005,15 @@ function getPayroll(params = {}) {
   `;
   const queryParams = [];
   if (params.month_year) {
-    sql3 += " AND p.month_year = ?";
+    sql2 += " AND p.month_year = ?";
     queryParams.push(params.month_year);
   }
   if (params.employee_id) {
-    sql3 += " AND p.employee_id = ?";
+    sql2 += " AND p.employee_id = ?";
     queryParams.push(params.employee_id);
   }
-  sql3 += " ORDER BY p.month_year DESC, p.created_at DESC";
-  return db.prepare(sql3).all(...queryParams);
+  sql2 += " ORDER BY p.month_year DESC, p.created_at DESC";
+  return db.prepare(sql2).all(...queryParams);
 }
 function generateMonthlyPayroll(monthYear, performedBy = "Super Admin") {
   const employees = getEmployees().filter((e) => e.status === "Active");
@@ -8104,34 +8116,34 @@ init_database();
 init_neon();
 function getTransactions(filters = {}) {
   try {
-    let sql3 = "SELECT * FROM finance_transactions WHERE 1=1";
+    let sql2 = "SELECT * FROM finance_transactions WHERE 1=1";
     const params = [];
     if (filters.type && filters.type !== "ALL") {
-      sql3 += " AND type = ?";
+      sql2 += " AND type = ?";
       params.push(filters.type);
     }
     if (filters.category && filters.category !== "ALL") {
-      sql3 += " AND category = ?";
+      sql2 += " AND category = ?";
       params.push(filters.category);
     }
     if (filters.paymentMethod && filters.paymentMethod !== "ALL") {
-      sql3 += " AND payment_method = ?";
+      sql2 += " AND payment_method = ?";
       params.push(filters.paymentMethod);
     }
     if (filters.startDate) {
-      sql3 += " AND transaction_date >= ?";
+      sql2 += " AND transaction_date >= ?";
       params.push(filters.startDate);
     }
     if (filters.endDate) {
-      sql3 += " AND transaction_date <= ?";
+      sql2 += " AND transaction_date <= ?";
       params.push(filters.endDate);
     }
-    sql3 += " ORDER BY transaction_date DESC, created_at DESC";
+    sql2 += " ORDER BY transaction_date DESC, created_at DESC";
     if (filters.limit) {
-      sql3 += " LIMIT ?";
+      sql2 += " LIMIT ?";
       params.push(filters.limit);
     }
-    return db.prepare(sql3).all(...params);
+    return db.prepare(sql2).all(...params);
   } catch (err) {
     console.warn("[Finance Transactions] Query failed:", err.message);
     return [];
@@ -8254,26 +8266,26 @@ function deleteTransaction(id, performedBy = "Super Admin") {
 }
 function getInvoices(filters = {}) {
   try {
-    let sql3 = "SELECT * FROM finance_invoices WHERE 1=1";
+    let sql2 = "SELECT * FROM finance_invoices WHERE 1=1";
     const params = [];
     if (filters.invoice_type && filters.invoice_type !== "ALL") {
-      sql3 += " AND invoice_type = ?";
+      sql2 += " AND invoice_type = ?";
       params.push(filters.invoice_type);
     }
     if (filters.status && filters.status !== "ALL") {
-      sql3 += " AND status = ?";
+      sql2 += " AND status = ?";
       params.push(filters.status);
     }
     if (filters.student_id) {
-      sql3 += " AND student_id = ?";
+      sql2 += " AND student_id = ?";
       params.push(filters.student_id);
     }
     if (filters.university_id) {
-      sql3 += " AND university_id = ?";
+      sql2 += " AND university_id = ?";
       params.push(filters.university_id);
     }
-    sql3 += " ORDER BY created_at DESC";
-    const rows = db.prepare(sql3).all(...params);
+    sql2 += " ORDER BY created_at DESC";
+    const rows = db.prepare(sql2).all(...params);
     return rows.map((r) => ({
       ...r,
       items: typeof r.items === "string" ? JSON.parse(r.items || "[]") : r.items || []
@@ -9394,7 +9406,7 @@ apiRouter.post("/counselors/:id/reset-password", (req, res) => {
 });
 apiRouter.get("/followups", (req, res) => {
   const { counselorId, status, view, date } = req.query;
-  let sql3 = `
+  let sql2 = `
     SELECT f.*, 
       l.student_name as lead_name, 
       l.phone as lead_phone,
@@ -9408,27 +9420,27 @@ apiRouter.get("/followups", (req, res) => {
   `;
   const params = [];
   if (counselorId) {
-    sql3 += " AND f.counselor_id = ?";
+    sql2 += " AND f.counselor_id = ?";
     params.push(counselorId);
   }
   if (view === "today") {
-    sql3 += " AND date(f.follow_up_date) = date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) = date('now') AND f.status = 'Pending'";
   } else if (view === "overdue") {
-    sql3 += " AND date(f.follow_up_date) < date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) < date('now') AND f.status = 'Pending'";
   } else if (view === "upcoming") {
-    sql3 += " AND date(f.follow_up_date) > date('now') AND f.status = 'Pending'";
+    sql2 += " AND date(f.follow_up_date) > date('now') AND f.status = 'Pending'";
   } else if (view === "completed") {
-    sql3 += " AND f.status = 'Completed'";
+    sql2 += " AND f.status = 'Completed'";
   } else if (status) {
-    sql3 += " AND f.status = ?";
+    sql2 += " AND f.status = ?";
     params.push(status);
   }
   if (date) {
-    sql3 += " AND date(f.follow_up_date) = date(?)";
+    sql2 += " AND date(f.follow_up_date) = date(?)";
     params.push(date);
   }
-  sql3 += " ORDER BY f.follow_up_date ASC, f.follow_up_time ASC";
-  const followups = db.prepare(sql3).all(...params);
+  sql2 += " ORDER BY f.follow_up_date ASC, f.follow_up_time ASC";
+  const followups = db.prepare(sql2).all(...params);
   res.json(followups);
 });
 apiRouter.post("/followups", (req, res) => {
@@ -9491,7 +9503,7 @@ apiRouter.delete("/followups/:id", (req, res) => {
 });
 apiRouter.get("/applications", (req, res) => {
   const { status, counselorId, universityId, search } = req.query;
-  let sql3 = `
+  let sql2 = `
     SELECT a.*, l.phone as student_phone, l.email as student_email
     FROM applications a
     JOIN leads l ON a.lead_id = l.id
@@ -9499,23 +9511,23 @@ apiRouter.get("/applications", (req, res) => {
   `;
   const params = [];
   if (status) {
-    sql3 += " AND a.application_status = ?";
+    sql2 += " AND a.application_status = ?";
     params.push(status);
   }
   if (counselorId) {
-    sql3 += " AND a.counselor_id = ?";
+    sql2 += " AND a.counselor_id = ?";
     params.push(counselorId);
   }
   if (universityId) {
-    sql3 += " AND a.university_id = ?";
+    sql2 += " AND a.university_id = ?";
     params.push(universityId);
   }
   if (search) {
-    sql3 += " AND (a.student_name LIKE ? OR a.application_id LIKE ? OR a.application_number LIKE ?)";
+    sql2 += " AND (a.student_name LIKE ? OR a.application_id LIKE ? OR a.application_number LIKE ?)";
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
-  sql3 += " ORDER BY a.created_at DESC";
-  const apps = db.prepare(sql3).all(...params);
+  sql2 += " ORDER BY a.created_at DESC";
+  const apps = db.prepare(sql2).all(...params);
   res.json(apps);
 });
 apiRouter.post("/applications", (req, res) => {
@@ -9609,22 +9621,22 @@ apiRouter.delete("/applications/:id", (req, res) => {
 });
 apiRouter.get("/students", (req, res) => {
   const { search, university, course } = req.query;
-  let sql3 = "SELECT * FROM students WHERE 1=1";
+  let sql2 = "SELECT * FROM students WHERE 1=1";
   const params = [];
   if (search) {
-    sql3 += " AND (student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?)";
+    sql2 += " AND (student_name LIKE ? OR student_id LIKE ? OR phone LIKE ? OR email LIKE ?)";
     params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
   if (university) {
-    sql3 += " AND university = ?";
+    sql2 += " AND university = ?";
     params.push(university);
   }
   if (course) {
-    sql3 += " AND course = ?";
+    sql2 += " AND course = ?";
     params.push(course);
   }
-  sql3 += " ORDER BY admission_date DESC";
-  const students = db.prepare(sql3).all(...params);
+  sql2 += " ORDER BY admission_date DESC";
+  const students = db.prepare(sql2).all(...params);
   res.json(students);
 });
 apiRouter.get("/students/:id", (req, res) => {
@@ -10656,18 +10668,18 @@ apiRouter.delete("/university-courses/:id", (req, res) => {
 });
 apiRouter.get("/documents", (req, res) => {
   const { lead_id, status } = req.query;
-  let sql3 = "SELECT * FROM documents WHERE 1=1";
+  let sql2 = "SELECT * FROM documents WHERE 1=1";
   const params = [];
   if (lead_id) {
-    sql3 += " AND lead_id = ?";
+    sql2 += " AND lead_id = ?";
     params.push(lead_id);
   }
   if (status) {
-    sql3 += " AND verification_status = ?";
+    sql2 += " AND verification_status = ?";
     params.push(status);
   }
-  sql3 += " ORDER BY upload_date DESC";
-  const docs = db.prepare(sql3).all(...params);
+  sql2 += " ORDER BY upload_date DESC";
+  const docs = db.prepare(sql2).all(...params);
   res.json(docs);
 });
 apiRouter.post("/documents/upload", (req, res) => {
@@ -10739,14 +10751,14 @@ apiRouter.post("/campaigns", (req, res) => {
 });
 apiRouter.get("/notifications", (req, res) => {
   const { counselorId } = req.query;
-  let sql3 = "SELECT * FROM notifications WHERE 1=1";
+  let sql2 = "SELECT * FROM notifications WHERE 1=1";
   const params = [];
   if (counselorId) {
-    sql3 += " AND (counselor_id = ? OR counselor_id IS NULL)";
+    sql2 += " AND (counselor_id = ? OR counselor_id IS NULL)";
     params.push(counselorId);
   }
-  sql3 += " ORDER BY created_at DESC LIMIT 50";
-  const notifs = db.prepare(sql3).all(...params);
+  sql2 += " ORDER BY created_at DESC LIMIT 50";
+  const notifs = db.prepare(sql2).all(...params);
   res.json(notifs);
 });
 apiRouter.put("/notifications/:id/read", (req, res) => {

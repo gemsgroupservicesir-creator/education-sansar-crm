@@ -144,6 +144,19 @@ export async function getStudyInIndiaSyncStatus(): Promise<SyncStatus> {
     ucCount = (db.prepare('SELECT COUNT(*) as c FROM university_courses').get() as any)?.c || 0;
   } catch {}
 
+  if (uniCount === 0 && isNeonEnabled() && sql) {
+    try {
+      const uRes = await sql`SELECT COUNT(*) as c FROM universities`;
+      const cRes = await sql`SELECT COUNT(*) as c FROM courses`;
+      const ucRes = await sql`SELECT COUNT(*) as c FROM university_courses`;
+      uniCount = Number(uRes[0]?.c) || uniCount;
+      courseCount = Number(cRes[0]?.c) || courseCount;
+      ucCount = Number(ucRes[0]?.c) || ucCount;
+    } catch (e: any) {
+      console.warn('[Study in India] Neon count query note:', e.message);
+    }
+  }
+
   return {
     id: 'int-studyinindia',
     name: 'Study in India Portal',
