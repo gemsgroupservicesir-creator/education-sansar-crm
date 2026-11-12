@@ -188,6 +188,31 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow();
 
+    // Background live cloud update checker (every 60 seconds)
+    let lastKnownBuildId = null;
+    const LIVE_URL = process.env.VITE_APP_URL || 'https://education-sansar-crm.vercel.app';
+    setInterval(async () => {
+      try {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        const res = await fetch(`${LIVE_URL}/api/system/version?t=${Date.now()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!lastKnownBuildId) {
+          lastKnownBuildId = data.buildId;
+          return;
+        }
+        if (data.buildId && data.buildId !== lastKnownBuildId) {
+          console.log('[Electron] Cloud deployment update detected, refreshing window:', data.buildId);
+          lastKnownBuildId = data.buildId;
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.reloadIgnoringCache();
+          }
+        }
+      } catch (e) {
+        // Ignore network blips
+      }
+    }, 60000);
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();

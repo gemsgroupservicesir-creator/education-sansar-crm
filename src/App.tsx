@@ -6,6 +6,7 @@ import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { CreateLeadModal } from './components/common/CreateLeadModal';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { AutoUpdateListener } from './components/common/AutoUpdateListener';
 
 // Pages
 import { LoginPage } from './pages/LoginPage';
@@ -144,6 +145,9 @@ export const App: React.FC = () => {
         onClose={() => setCreateLeadOpen(false)}
         onLeadCreated={handleLeadCreated}
       />
+
+      {/* Cross-Platform Real-Time Auto Updater (Windows, macOS, iPadOS, Web) */}
+      <AutoUpdateListener />
     </div>
   );
 };

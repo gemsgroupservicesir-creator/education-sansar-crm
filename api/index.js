@@ -6694,8 +6694,8 @@ var init_studyInIndiaSyncService = __esm({
 // server/index.ts
 import express from "express";
 import cors from "cors";
-import path2 from "path";
-import fs2 from "fs";
+import path3 from "path";
+import fs3 from "fs";
 import { fileURLToPath } from "url";
 import dotenv2 from "dotenv";
 
@@ -6703,6 +6703,8 @@ import dotenv2 from "dotenv";
 init_database();
 init_leadService();
 import { Router } from "express";
+import path2 from "path";
+import fs2 from "fs";
 
 // server/services/analyticsService.ts
 init_database();
@@ -8645,6 +8647,41 @@ function getUniversityCommissionsSummary() {
 init_emailService();
 init_aiSalesService();
 var apiRouter = Router();
+var cachedBuildInfo = null;
+function getSystemBuildInfo() {
+  if (cachedBuildInfo) return cachedBuildInfo;
+  let buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || "";
+  let buildTime = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    const indexPath2 = path2.resolve(process.cwd(), "dist/index.html");
+    if (fs2.existsSync(indexPath2)) {
+      const stats = fs2.statSync(indexPath2);
+      buildTime = new Date(stats.mtimeMs).toISOString();
+      if (!buildId) {
+        buildId = "build-" + stats.mtimeMs.toString();
+      }
+    }
+  } catch (e) {
+  }
+  if (!buildId) {
+    buildId = "live-" + Date.now().toString();
+  }
+  cachedBuildInfo = {
+    version: "1.0.0",
+    buildId,
+    buildTime
+  };
+  return cachedBuildInfo;
+}
+apiRouter.get("/system/version", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.json({
+    status: "ok",
+    ...getSystemBuildInfo(),
+    serverTime: (/* @__PURE__ */ new Date()).toISOString()
+  });
+});
 apiRouter.post("/auth/login", async (req, res) => {
   try {
     const { email, username, identifier: rawId, password, role } = req.body || {};
@@ -12293,7 +12330,7 @@ if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")
 init_emailService();
 dotenv2.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path2.dirname(__filename);
+var __dirname = path3.dirname(__filename);
 var app = express();
 var PORT = process.env.PORT || 5e3;
 initDatabase();
@@ -12307,10 +12344,10 @@ try {
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
-var uploadsDir = path2.resolve(process.cwd(), "uploads");
-if (!fs2.existsSync(uploadsDir)) {
+var uploadsDir = path3.resolve(process.cwd(), "uploads");
+if (!fs3.existsSync(uploadsDir)) {
   try {
-    fs2.mkdirSync(uploadsDir, { recursive: true });
+    fs3.mkdirSync(uploadsDir, { recursive: true });
   } catch (e) {
   }
 }
@@ -12326,14 +12363,14 @@ var handleHealth = (req, res) => {
 };
 app.get("/health", handleHealth);
 app.get("/api/health", handleHealth);
-var clientDist = path2.resolve(process.cwd(), "dist");
-var indexPath = path2.join(clientDist, "index.html");
+var clientDist = path3.resolve(process.cwd(), "dist");
+var indexPath = path3.join(clientDist, "index.html");
 app.use(express.static(clientDist));
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) {
     return next();
   }
-  if (fs2.existsSync(indexPath)) {
+  if (fs3.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
   res.status(503).send(`

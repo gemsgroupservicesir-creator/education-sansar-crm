@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
 import { checkDuplicate, createLead, updateLead, reassignLead, convertLeadToStudent } from '../services/leadService.ts';
 import { getDashboardKPIs, getCampaignROIReport } from '../services/analyticsService.ts';
@@ -114,6 +116,49 @@ import {
 } from '../services/aiSalesService.ts';
 
 export const apiRouter = Router();
+
+// ==========================================
+// 0. SYSTEM VERSION & CROSS-PLATFORM UPDATES
+// ==========================================
+let cachedBuildInfo: { buildId: string; buildTime: string; version: string } | null = null;
+
+function getSystemBuildInfo() {
+  if (cachedBuildInfo) return cachedBuildInfo;
+  let buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || '';
+  let buildTime = new Date().toISOString();
+
+  try {
+    const indexPath = path.resolve(process.cwd(), 'dist/index.html');
+    if (fs.existsSync(indexPath)) {
+      const stats = fs.statSync(indexPath);
+      buildTime = new Date(stats.mtimeMs).toISOString();
+      if (!buildId) {
+        buildId = 'build-' + stats.mtimeMs.toString();
+      }
+    }
+  } catch (e) {}
+
+  if (!buildId) {
+    buildId = 'live-' + Date.now().toString();
+  }
+
+  cachedBuildInfo = {
+    version: '1.0.0',
+    buildId,
+    buildTime
+  };
+  return cachedBuildInfo;
+}
+
+apiRouter.get('/system/version', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.json({
+    status: 'ok',
+    ...getSystemBuildInfo(),
+    serverTime: new Date().toISOString()
+  });
+});
 
 // ==========================================
 // 1. AUTH & ROLES

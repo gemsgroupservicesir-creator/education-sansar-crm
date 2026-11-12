@@ -6,6 +6,9 @@ import path from 'path';
 export default defineConfig({
   base: './',
   plugins: [react()],
+  define: {
+    __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString())
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
