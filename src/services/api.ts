@@ -46,6 +46,20 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getUsers: () => fetchJson<any[]>('/auth/users'),
+  createUser: (data: { name: string; email: string; password?: string; role?: string; phone?: string; designation?: string; department?: string; permissions?: string[] }) =>
+    fetchJson<{ success: boolean; user: any }>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateUser: (id: string, data: any) =>
+    fetchJson<{ success: boolean; message: string }>(`/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteUser: (id: string) =>
+    fetchJson<{ success: boolean; message: string }>(`/users/${id}`, {
+      method: 'DELETE',
+    }),
 
   // Leads
   getLeads: (params: Record<string, any>) => {

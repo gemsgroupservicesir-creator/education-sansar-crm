@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Building2, Sliders, Users, ShieldAlert, Save, RefreshCw, 
   CheckCircle, MapPin, Phone, Mail, Globe, Clock, GitFork, 
-  Check, Lock, Eye, AlertCircle, Sparkles, Bot
+  Check, Lock, Eye, AlertCircle, Sparkles, Bot,
+  UserPlus, Edit, Trash2, X, Key, Plus
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -48,6 +49,127 @@ export const SettingsPage: React.FC = () => {
 
   const [usersList, setUsersList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+
+  // User Management Modal & Form State
+  const [addUserModalOpen, setAddUserModalOpen] = useState(false);
+  const [editUserModalOpen, setEditUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [userFormName, setUserFormName] = useState('');
+  const [userFormEmail, setUserFormEmail] = useState('');
+  const [userFormPassword, setUserFormPassword] = useState('');
+  const [userFormRole, setUserFormRole] = useState('Counselor');
+  const [userFormPhone, setUserFormPhone] = useState('');
+  const [userFormDepartment, setUserFormDepartment] = useState('Admissions');
+  const [userFormDesignation, setUserFormDesignation] = useState('');
+  const [isSubmittingUser, setIsSubmittingUser] = useState(false);
+
+  const handleOpenAddUserModal = () => {
+    setUserFormName('');
+    setUserFormEmail('');
+    setUserFormPassword('user123');
+    setUserFormRole('Counselor');
+    setUserFormPhone('');
+    setUserFormDepartment('Admissions');
+    setUserFormDesignation('Admission Counselor');
+    setAddUserModalOpen(true);
+  };
+
+  const handleOpenEditUserModal = (u: any) => {
+    setEditingUser(u);
+    setUserFormName(u.name || '');
+    setUserFormEmail(u.email || '');
+    setUserFormPassword('');
+    setUserFormRole(u.role || 'Counselor');
+    setUserFormPhone(u.phone || '');
+    setEditUserModalOpen(true);
+  };
+
+  const handleCreateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userFormName.trim()) {
+      addToast('Please enter full name', 'warning');
+      return;
+    }
+    if (!userFormEmail.trim() || !userFormEmail.includes('@')) {
+      addToast('Please enter a valid email address', 'warning');
+      return;
+    }
+
+    setIsSubmittingUser(true);
+    try {
+      await api.createUser({
+        name: userFormName.trim(),
+        email: userFormEmail.trim().toLowerCase(),
+        password: userFormPassword.trim() || 'user123',
+        role: userFormRole,
+        phone: userFormPhone.trim(),
+        department: userFormDepartment.trim(),
+        designation: userFormDesignation.trim()
+      });
+      addToast(`User ${userFormName} created successfully with role ${userFormRole}!`, 'success');
+      setAddUserModalOpen(false);
+      const updatedUsers = await api.getUsers();
+      setUsersList(updatedUsers);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to create user account', 'error');
+    } finally {
+      setIsSubmittingUser(false);
+    }
+  };
+
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    if (!userFormName.trim()) {
+      addToast('Please enter full name', 'warning');
+      return;
+    }
+
+    setIsSubmittingUser(true);
+    try {
+      await api.updateUser(editingUser.id, {
+        name: userFormName.trim(),
+        email: userFormEmail.trim().toLowerCase(),
+        role: userFormRole,
+        phone: userFormPhone.trim(),
+        ...(userFormPassword.trim() ? { password: userFormPassword.trim() } : {})
+      });
+      addToast(`User ${userFormName} updated successfully!`, 'success');
+      setEditUserModalOpen(false);
+      const updatedUsers = await api.getUsers();
+      setUsersList(updatedUsers);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to update user', 'error');
+    } finally {
+      setIsSubmittingUser(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (u: any) => {
+    try {
+      const newActive = u.is_active ? 0 : 1;
+      await api.updateUser(u.id, { is_active: newActive });
+      addToast(`User account ${u.name} is now ${newActive ? 'Active' : 'Inactive'}`, 'success');
+      const updatedUsers = await api.getUsers();
+      setUsersList(updatedUsers);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to toggle status', 'error');
+    }
+  };
+
+  const handleDeleteUser = async (u: any) => {
+    if (!window.confirm(`Are you sure you want to permanently delete user account "${u.name}" (${u.email})?`)) {
+      return;
+    }
+    try {
+      await api.deleteUser(u.id);
+      addToast(`User account ${u.name} deleted successfully`, 'success');
+      const updatedUsers = await api.getUsers();
+      setUsersList(updatedUsers);
+    } catch (err: any) {
+      addToast(err.message || 'Failed to delete user', 'error');
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -810,16 +932,25 @@ export const SettingsPage: React.FC = () => {
       {/* Tab 3: System Users & RBAC */}
       {activeTab === 'users' && (
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-bold text-gray-900">User Accounts & Role Permissions</h3>
               <p className="text-sm text-gray-500">
                 Role-Based Access Control (RBAC) across 6 organizational tiers
               </p>
             </div>
-            <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 font-bold px-3 py-1 rounded-full">
-              {usersList.length} Active System Users
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 font-bold px-3 py-1 rounded-full">
+                {usersList.length} Active System Users
+              </span>
+              <button
+                onClick={handleOpenAddUserModal}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold shadow-md shadow-blue-900/20 transition-all cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Add New User</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -832,27 +963,42 @@ export const SettingsPage: React.FC = () => {
                   <th className="py-3 px-4">Phone</th>
                   <th className="py-3 px-4 text-center">Status</th>
                   <th className="py-3 px-4">Permissions Overview</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {usersList.map((u) => {
                   const roleColors: Record<string, string> = {
                     SUPER_ADMIN: 'bg-purple-100 text-purple-800 border-purple-200',
+                    'Super Admin': 'bg-purple-100 text-purple-800 border-purple-200',
                     ADMIN: 'bg-blue-100 text-blue-800 border-blue-200',
+                    Admin: 'bg-blue-100 text-blue-800 border-blue-200',
                     COUNSELOR: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                    Counselor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
                     TELECALLER: 'bg-amber-100 text-amber-800 border-amber-200',
+                    Telecaller: 'bg-amber-100 text-amber-800 border-amber-200',
                     MARKETING_MANAGER: 'bg-pink-100 text-pink-800 border-pink-200',
+                    'Marketing Manager': 'bg-pink-100 text-pink-800 border-pink-200',
                     MANAGEMENT: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+                    Management: 'bg-indigo-100 text-indigo-800 border-indigo-200',
                   };
 
                   const rolePermissions: Record<string, string> = {
                     SUPER_ADMIN: 'Full system control, settings, audit logs, user management, exports',
+                    'Super Admin': 'Full system control, settings, audit logs, user management, exports',
                     ADMIN: 'Lead management, counselor assignment, university approvals, reports',
+                    Admin: 'Lead management, counselor assignment, university approvals, reports',
                     COUNSELOR: 'Assigned leads only, calls/WhatsApp, applications, student admission',
+                    Counselor: 'Assigned leads only, calls/WhatsApp, applications, student admission',
                     TELECALLER: 'First contact, qualification, scheduling follow-ups, transfer to counselor',
+                    Telecaller: 'First contact, qualification, scheduling follow-ups, transfer to counselor',
                     MARKETING_MANAGER: 'Campaigns tracking, Meta lead forms, CPL/CPA analysis',
+                    'Marketing Manager': 'Campaigns tracking, Meta lead forms, CPL/CPA analysis',
                     MANAGEMENT: 'Read-only executive analytics, KPIs, admissions conversion reporting',
+                    Management: 'Read-only executive analytics, KPIs, admissions conversion reporting',
                   };
+
+                  const isActive = u.is_active === 1 || u.is_active === true;
 
                   return (
                     <tr key={u.id} className="hover:bg-gray-50 transition">
@@ -865,12 +1011,45 @@ export const SettingsPage: React.FC = () => {
                       </td>
                       <td className="py-3.5 px-4 text-gray-600">{u.phone || '—'}</td>
                       <td className="py-3.5 px-4 text-center">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
-                          Active
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                          isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-xs text-gray-500 max-w-xs">
                         {rolePermissions[u.role] || 'Standard permissions'}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenEditUserModal(u)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Edit user details & password"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleUserStatus(u)}
+                            className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${
+                              isActive
+                                ? 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                                : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                            }`}
+                            title={isActive ? 'Deactivate user' : 'Activate user'}
+                          >
+                            {isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                          {u.email !== 'admin@gemsgroupservices.com' && u.email !== 'admin@educationsansar.com' && (
+                            <button
+                              onClick={() => handleDeleteUser(u)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                              title="Delete user account"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -878,6 +1057,271 @@ export const SettingsPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* ADD USER MODAL */}
+          {addUserModalOpen && (
+            <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+              <form
+                onSubmit={handleCreateUserSubmit}
+                className="w-full max-w-lg bg-white rounded-2xl p-6 space-y-4 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <UserPlus className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Add New System User</h3>
+                      <p className="text-xs text-slate-500">Create login credentials and assign role permissions</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAddUserModalOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Full Name <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      value={userFormName}
+                      onChange={(e) => setUserFormName(e.target.value)}
+                      placeholder="e.g. Rajesh Shrestha"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Email Address (Login ID) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      required
+                      type="email"
+                      value={userFormEmail}
+                      onChange={(e) => setUserFormEmail(e.target.value)}
+                      placeholder="e.g. rajesh@gemsgroupservices.com"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        System Role <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        value={userFormRole}
+                        onChange={(e) => setUserFormRole(e.target.value)}
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="Super Admin">Super Admin</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Counselor">Counselor</option>
+                        <option value="Telecaller">Telecaller</option>
+                        <option value="Marketing Manager">Marketing Manager</option>
+                        <option value="Management">Management</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Password (Min 4 chars)
+                      </label>
+                      <input
+                        type="text"
+                        value={userFormPassword}
+                        onChange={(e) => setUserFormPassword(e.target.value)}
+                        placeholder="Default: user123"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number (Optional)</label>
+                      <input
+                        type="tel"
+                        value={userFormPhone}
+                        onChange={(e) => setUserFormPhone(e.target.value)}
+                        placeholder="+977 98..."
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+                      <input
+                        type="text"
+                        value={userFormDepartment}
+                        onChange={(e) => setUserFormDepartment(e.target.value)}
+                        placeholder="e.g. Admissions, Telecalling"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={isSubmittingUser}
+                    onClick={() => setAddUserModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingUser}
+                    className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-900/20 disabled:opacity-60 transition-all cursor-pointer"
+                  >
+                    {isSubmittingUser ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Creating User...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Create User Account</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* EDIT USER MODAL */}
+          {editUserModalOpen && editingUser && (
+            <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
+              <form
+                onSubmit={handleEditUserSubmit}
+                className="w-full max-w-lg bg-white rounded-2xl p-6 space-y-4 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95"
+              >
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <Edit className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Edit User Account</h3>
+                      <p className="text-xs text-slate-500">Update role, details, or reset password for {editingUser.email}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditUserModalOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name *</label>
+                    <input
+                      required
+                      type="text"
+                      value={userFormName}
+                      onChange={(e) => setUserFormName(e.target.value)}
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      value={userFormEmail}
+                      onChange={(e) => setUserFormEmail(e.target.value)}
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">System Role</label>
+                      <select
+                        value={userFormRole}
+                        onChange={(e) => setUserFormRole(e.target.value)}
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="Super Admin">Super Admin</option>
+                        <option value="Admin">Admin</option>
+                        <option value="Counselor">Counselor</option>
+                        <option value="Telecaller">Telecaller</option>
+                        <option value="Marketing Manager">Marketing Manager</option>
+                        <option value="Management">Management</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number</label>
+                      <input
+                        type="tel"
+                        value={userFormPhone}
+                        onChange={(e) => setUserFormPhone(e.target.value)}
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Reset Password (leave blank to keep current)
+                    </label>
+                    <input
+                      type="text"
+                      value={userFormPassword}
+                      onChange={(e) => setUserFormPassword(e.target.value)}
+                      placeholder="New password (optional)"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={isSubmittingUser}
+                    onClick={() => setEditUserModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingUser}
+                    className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-900/20 disabled:opacity-60 transition-all cursor-pointer"
+                  >
+                    {isSubmittingUser ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving Changes...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Save Changes</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </div>
       )}
 

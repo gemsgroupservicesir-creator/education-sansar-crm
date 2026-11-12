@@ -211,10 +211,6 @@ export const CounselorsPage: React.FC = () => {
       addToast('Please enter a valid email address', 'warning');
       return;
     }
-    if (!formPhone.trim()) {
-      addToast('Please enter phone number', 'warning');
-      return;
-    }
 
     setIsSubmitting(true);
     try {
@@ -590,7 +586,7 @@ export const CounselorsPage: React.FC = () => {
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-900/20 transition-all"
             >
               <UserPlus className="w-4 h-4" />
-              <span>Add Staff Member</span>
+              <span>Add User / Staff</span>
             </button>
           )}
         </div>

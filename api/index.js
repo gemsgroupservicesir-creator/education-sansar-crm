@@ -8846,40 +8846,179 @@ apiRouter.post("/auth/register", async (req, res) => {
   }
 });
 apiRouter.post("/users", async (req, res) => {
-  const { name, email, password, role, phone } = req.body || {};
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: "Name, email, and password are required" });
+  try {
+    const { name, email, password, role, phone, permissions, designation, department } = req.body || {};
+    if (!name || !email) {
+      return res.status(400).json({ error: "Name and email address are required" });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone?.trim() || "";
+    const cleanPassword = password && password.trim().length >= 4 ? password.trim() : "user123";
+    const userRole = role || "Counselor";
+    const permsJson = JSON.stringify(permissions || []);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let existing = db.prepare("SELECT id, name, role FROM users WHERE LOWER(email) = ?").get(cleanEmail);
+    if (!existing && isNeonEnabled()) {
+      try {
+        const neonUser = await findUserInNeon(cleanEmail);
+        if (neonUser) existing = neonUser;
+      } catch (e) {
+        console.warn("[Neon Notice] findUserInNeon:", e.message);
+      }
+    }
+    let userId;
+    if (existing) {
+      userId = existing.id;
+      db.prepare(`
+        UPDATE users
+        SET name = ?, password_hash = ?, role = ?, phone = ?, is_active = 1, permissions = ?, updated_at = ?
+        WHERE id = ?
+      `).run(cleanName, cleanPassword, userRole, cleanPhone, permsJson, now, userId);
+    } else {
+      userId = "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+      db.prepare(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(userId, cleanName, cleanEmail, cleanPassword, userRole, cleanPhone, permsJson, now, now);
+    }
+    if (["Counselor", "Telecaller", "Admin", "Super Admin"].includes(userRole)) {
+      const existingCounselor = db.prepare("SELECT id FROM counselors WHERE LOWER(email) = ?").get(cleanEmail);
+      if (!existingCounselor) {
+        const cId = "c-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+        db.prepare(`
+          INSERT INTO counselors (
+            id, user_id, name, username, email, phone, specialization_country, assigned_cities,
+            max_capacity, is_active, status, joining_date, specialization_courses,
+            specialization_universities, daily_lead_quota, role, designation, department,
+            employee_code, alternate_phone, work_location, notes, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          cId,
+          userId,
+          cleanName,
+          cleanEmail.split("@")[0],
+          cleanEmail,
+          cleanPhone,
+          "Nepal & India",
+          "[]",
+          100,
+          now,
+          "[]",
+          "[]",
+          25,
+          userRole,
+          designation || (userRole === "Counselor" ? "Senior Admission Counselor" : userRole),
+          department || "Admissions",
+          "EMP-" + Math.floor(1e3 + Math.random() * 9e3),
+          null,
+          "Kathmandu HQ",
+          null,
+          now,
+          now
+        );
+      } else {
+        db.prepare(`
+          UPDATE counselors 
+          SET name = ?, phone = ?, role = ?, is_active = 1, status = 'Active', updated_at = ?
+          WHERE id = ?
+        `).run(cleanName, cleanPhone, userRole, now, existingCounselor.id);
+      }
+    }
+    if (isNeonEnabled()) {
+      try {
+        await persistUserToNeon({
+          id: userId,
+          name: cleanName,
+          email: cleanEmail,
+          password_hash: cleanPassword,
+          role: userRole,
+          phone: cleanPhone,
+          is_active: 1
+        });
+      } catch (neonErr) {
+        console.warn("[Neon Sync] persistUserToNeon notice:", neonErr.message);
+      }
+    }
+    const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: userRole, phone: cleanPhone, is_active: 1 };
+    res.status(201).json({ success: true, user: safeUser });
+  } catch (err) {
+    console.error("Error creating user:", err);
+    res.status(500).json({ error: err.message || "Failed to create user account" });
   }
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanName = name.trim();
-  const cleanPhone = phone?.trim() || null;
-  let existing = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(cleanEmail);
-  if (!existing && isNeonEnabled()) {
-    const neonUser = await findUserInNeon(cleanEmail);
-    if (neonUser) existing = neonUser;
+});
+apiRouter.put("/users/:id", async (req, res) => {
+  try {
+    const { name, email, role, phone, password, is_active } = req.body;
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const cleanName = name ? name.trim() : user.name;
+    const cleanEmail = email ? email.trim().toLowerCase() : user.email;
+    const cleanRole = role || user.role;
+    const cleanPhone = phone !== void 0 ? phone : user.phone;
+    const newActive = is_active !== void 0 ? is_active ? 1 : 0 : user.is_active;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (password && password.trim().length >= 4) {
+      db.prepare(`
+        UPDATE users 
+        SET name = ?, email = ?, role = ?, phone = ?, password_hash = ?, is_active = ?, updated_at = ?
+        WHERE id = ?
+      `).run(cleanName, cleanEmail, cleanRole, cleanPhone, password.trim(), newActive, now, req.params.id);
+    } else {
+      db.prepare(`
+        UPDATE users 
+        SET name = ?, email = ?, role = ?, phone = ?, is_active = ?, updated_at = ?
+        WHERE id = ?
+      `).run(cleanName, cleanEmail, cleanRole, cleanPhone, newActive, now, req.params.id);
+    }
+    db.prepare(`
+      UPDATE counselors 
+      SET name = ?, email = ?, phone = ?, role = ?, is_active = ?, updated_at = ?
+      WHERE user_id = ? OR LOWER(email) = ?
+    `).run(cleanName, cleanEmail, cleanPhone, cleanRole, newActive, now, req.params.id, cleanEmail);
+    if (isNeonEnabled()) {
+      try {
+        await persistUserToNeon({
+          id: req.params.id,
+          name: cleanName,
+          email: cleanEmail,
+          password_hash: password || user.password_hash,
+          role: cleanRole,
+          phone: cleanPhone,
+          is_active: newActive
+        });
+      } catch (e) {
+      }
+    }
+    res.json({ success: true, message: "User updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update user" });
   }
-  if (existing) {
-    return res.status(400).json({ error: "User with this email already exists" });
+});
+apiRouter.delete("/users/:id", async (req, res) => {
+  try {
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (user.email === "admin@gemsgroupservices.com" || user.email === "admin@educationsansar.com") {
+      return res.status(400).json({ error: "Cannot delete primary root super admin account" });
+    }
+    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    db.prepare("DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?").run(req.params.id, user.email.toLowerCase());
+    if (isNeonEnabled()) {
+      try {
+        await deleteCounselorAndUserFromNeon(req.params.id);
+      } catch (e) {
+      }
+    }
+    res.json({ success: true, message: "User deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete user" });
   }
-  const userId = "u-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  db.prepare(`
-    INSERT INTO users (id, name, email, password_hash, role, phone, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-  `).run(userId, cleanName, cleanEmail, password, role || "Counselor", cleanPhone, now, now);
-  if (isNeonEnabled()) {
-    await persistUserToNeon({
-      id: userId,
-      name: cleanName,
-      email: cleanEmail,
-      password_hash: password,
-      role: role || "Counselor",
-      phone: cleanPhone,
-      is_active: 1
-    });
-  }
-  const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: role || "Counselor", phone: cleanPhone, is_active: 1 };
-  res.status(201).json({ success: true, user: safeUser });
 });
 apiRouter.get("/auth/users", (req, res) => {
   const users = db.prepare("SELECT id, name, email, role, phone, is_active FROM users ORDER BY name ASC").all();
@@ -9240,12 +9379,12 @@ apiRouter.post("/counselors", async (req, res) => {
       notes,
       routing_rules
     } = req.body;
-    if (!name || !email || !phone) {
-      return res.status(400).json({ error: "Full Name, Email address, and Phone number are required" });
+    if (!name || !email) {
+      return res.status(400).json({ error: "Full Name and Email address are required" });
     }
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
-    const cleanPhone = phone.trim();
+    const cleanPhone = phone?.trim() || "";
     const userRole = role || "Counselor";
     const permsJson = JSON.stringify(permissions || []);
     const specCoursesJson = JSON.stringify(specialization_courses || []);
@@ -9285,10 +9424,10 @@ apiRouter.post("/counselors", async (req, res) => {
       INSERT INTO counselors (
         id, user_id, name, username, email, phone, specialization_country, assigned_cities,
         max_capacity, is_active, status, joining_date, specialization_courses,
-        specialization_universities, daily_lead_quota, designation, department,
+        specialization_universities, daily_lead_quota, role, designation, department,
         employee_code, alternate_phone, work_location, notes, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -9303,6 +9442,7 @@ apiRouter.post("/counselors", async (req, res) => {
       specCoursesJson,
       specUnisJson,
       daily_lead_quota || 25,
+      userRole,
       designation || (userRole === "Counselor" ? "Senior Admission Counselor" : userRole),
       department || "Admissions",
       employee_code || "EMP-" + Math.floor(1e3 + Math.random() * 9e3),
