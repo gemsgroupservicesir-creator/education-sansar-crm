@@ -18,7 +18,7 @@ export function seedDatabase() {
     ];
     for (const r of roles) insertRole.run(r[0], r[1], r[2]);
 
-    // 2. Initial Super Admin Account
+    // 2. Initial Super Admin & Core Team Accounts
     const insertUser = db.prepare(`
       INSERT OR REPLACE INTO users (id, name, email, password_hash, role, phone, is_active)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -31,6 +31,53 @@ export function seedDatabase() {
       'Super Admin',
       '+977 9801234567',
       1
+    );
+    insertUser.run(
+      'u-prakash',
+      'Prakash Yadav',
+      'prakash.yadav@gemsgroupservices.com',
+      'mypassword123',
+      'Admin',
+      '+977 9801234567',
+      1
+    );
+    insertUser.run(
+      'u-reetdas',
+      'Reet Das',
+      'reetdas22636@gmail.com',
+      'Studyinindia@#2025',
+      'Super Admin',
+      '+977 9801234567',
+      1
+    );
+
+    // Initial Counselor profiles
+    const insertCounselor = db.prepare(`
+      INSERT OR REPLACE INTO counselors (
+        id, user_id, name, username, email, phone, specialization_country, assigned_cities,
+        max_capacity, is_active, status, role, designation, department, daily_lead_quota
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 'Nepal & India', '["Kathmandu", "Birgunj", "Pokhara"]', 100, 1, 'Active', ?, ?, 'Admissions', 25)
+    `);
+    insertCounselor.run(
+      'c-prakash',
+      'u-prakash',
+      'Prakash Yadav',
+      'prakash.yadav',
+      'prakash.yadav@gemsgroupservices.com',
+      '+977 9801234567',
+      'Admin',
+      'Director of Admissions'
+    );
+    insertCounselor.run(
+      'c-reetdas',
+      'u-reetdas',
+      'Reet Das',
+      'reetdas22636',
+      'reetdas22636@gmail.com',
+      '+977 9801234567',
+      'Super Admin',
+      'Senior Administrator'
     );
 
     // 3. Message Templates (WhatsApp & Email standard outreach templates)

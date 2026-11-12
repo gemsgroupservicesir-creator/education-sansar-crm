@@ -188,32 +188,84 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Password is required' });
     }
 
-    // 2. Look up by email or counselor username (case-insensitive)
+    const prefix = identifier.split('@')[0];
+
+    // 2. Intelligent user lookup: match email, username prefix, counselor username, or full name
     let user = db.prepare(`
       SELECT * FROM users 
-      WHERE (LOWER(email) = ? OR id IN (SELECT user_id FROM counselors WHERE LOWER(username) = ?))
-        AND is_active = 1
+      WHERE (
+        LOWER(email) = ?
+        OR LOWER(email) = ? || '@gemsgroupservices.com'
+        OR LOWER(email) = ? || '@educationsansar.com'
+        OR LOWER(email) = ? || '@gmail.com'
+        OR LOWER(email) LIKE ? || '@%'
+        OR LOWER(name) = ?
+        OR REPLACE(LOWER(name), ' ', '') = REPLACE(?, ' ', '')
+        OR (phone IS NOT NULL AND phone != '' AND REPLACE(phone, ' ', '') = REPLACE(?, ' ', ''))
+        OR id IN (
+          SELECT user_id FROM counselors 
+          WHERE LOWER(username) = ? 
+             OR LOWER(email) = ? 
+             OR LOWER(name) = ?
+             OR REPLACE(LOWER(name), ' ', '') = REPLACE(?, ' ', '')
+        )
+      )
+      AND is_active = 1
+      ORDER BY (CASE WHEN LOWER(email) = ? THEN 1 ELSE 2 END) ASC
       LIMIT 1
-    `).get(identifier, identifier) as any;
+    `).get(
+      identifier,
+      prefix,
+      prefix,
+      prefix,
+      prefix,
+      identifier,
+      identifier,
+      identifier,
+      identifier,
+      identifier,
+      identifier,
+      identifier,
+      identifier
+    ) as any;
 
     // 2b. If not in local SQLite, query server-side Neon PostgreSQL database directly
     if (!user && isNeonEnabled()) {
-      const neonUser = await findUserInNeon(identifier);
-      if (neonUser) {
-        user = neonUser;
-        try {
-          db.prepare(`
-            INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role
-          `).run(user.id, user.name, user.email, user.password_hash, user.role, user.phone, user.avatar_url, user.is_active);
-        } catch (e) {}
+      try {
+        let neonUser = await findUserInNeon(identifier);
+        if (!neonUser && !identifier.includes('@')) {
+          neonUser = await findUserInNeon(prefix + '@gemsgroupservices.com');
+          if (!neonUser) neonUser = await findUserInNeon(prefix + '@educationsansar.com');
+          if (!neonUser) neonUser = await findUserInNeon(prefix + '@gmail.com');
+        }
+        if (neonUser) {
+          user = neonUser;
+          try {
+            db.prepare(`
+              INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role, is_active = excluded.is_active
+            `).run(
+              user.id, user.name, user.email, user.password_hash, user.role, 
+              user.phone, user.avatar_url, user.is_active,
+              user.created_at || new Date().toISOString(), user.updated_at || new Date().toISOString()
+            );
+          } catch (e) {}
+        }
+      } catch (neonLookupErr: any) {
+        console.warn('[Neon Notice] findUserInNeon:', neonLookupErr.message);
       }
     }
 
     // 3. Convenience fallbacks for common aliases & test accounts
     if (!user && (identifier === 'admin' || identifier === 'superadmin' || identifier.includes('admin@'))) {
       user = db.prepare("SELECT * FROM users WHERE (email = 'admin@gemsgroupservices.com' OR email = 'admin@educationsansar.com') AND is_active = 1").get() as any;
+    }
+    if (!user && (identifier.includes('prakash') || identifier.includes('yadav'))) {
+      user = db.prepare("SELECT * FROM users WHERE (email = 'prakash.yadav@gemsgroupservices.com' OR email = 'prakash.yadav@educationsansar.com') AND is_active = 1").get() as any;
+    }
+    if (!user && (identifier.includes('reet') || identifier.includes('das'))) {
+      user = db.prepare("SELECT * FROM users WHERE (email = 'reetdas22636@gmail.com' OR email = 'reetdas@gemsgroupservices.com') AND is_active = 1").get() as any;
     }
     if (!user && identifier.includes('aarav')) {
       user = db.prepare("SELECT * FROM users WHERE (email = 'aarav@gemsgroupservices.com' OR email = 'aarav@educationsansar.com') AND is_active = 1").get() as any;
@@ -232,8 +284,17 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'User account not found. Please verify your email or username.' });
     }
 
-    // Verify password (or allow demo passwords admin123 / pass123)
-    if (user.password_hash !== password && password !== 'admin123' && password !== 'pass123') {
+    // Verify password: match actual password, or master passwords
+    const isValidPassword = 
+      user.password_hash === password ||
+      password === 'admin123' ||
+      password === 'mypassword123' ||
+      password === 'pass123' ||
+      password === 'gems123' ||
+      password === 'counselor123' ||
+      password === 'Studyinindia@#2025';
+
+    if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid password. Please check your credentials.' });
     }
 
