@@ -750,34 +750,83 @@ async function findUserInNeon(identifier) {
     return null;
   }
 }
+async function getUsersFromNeon() {
+  if (!sql) return [];
+  try {
+    const rows = await sql.query(`
+      SELECT id, name, email, role, phone, is_active, permissions, created_at, updated_at
+      FROM users
+      ORDER BY 
+        CASE 
+          WHEN role IN ('Super Admin', 'superadmin') THEN 1 
+          WHEN role IN ('Admin', 'admin') THEN 2 
+          ELSE 3 
+        END, 
+        name ASC
+    `);
+    return rows || [];
+  } catch (err) {
+    console.error("[Neon Users] Failed to query users:", err.message);
+    return [];
+  }
+}
 async function persistUserToNeon(user) {
   if (!sql) return false;
   try {
+    const cleanEmail = user.email.toLowerCase().trim();
     const permsJson = typeof user.permissions === "string" ? user.permissions : JSON.stringify(user.permissions || []);
-    await sql.query(`
-      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        password_hash = EXCLUDED.password_hash,
-        role = EXCLUDED.role,
-        phone = EXCLUDED.phone,
-        avatar_url = EXCLUDED.avatar_url,
-        is_active = EXCLUDED.is_active,
-        permissions = EXCLUDED.permissions,
-        updated_at = NOW()
-    `, [
-      user.id,
-      user.name,
-      user.email.toLowerCase(),
-      user.password_hash,
-      user.role,
-      user.phone || null,
-      user.avatar_url || null,
-      user.is_active !== void 0 ? user.is_active : 1,
-      permsJson
-    ]);
+    try {
+      await sql.query(
+        `DELETE FROM deleted_records WHERE entity_type = 'user' AND (entity_id = $1 OR LOWER(identifier) = $2)`,
+        [user.id, cleanEmail]
+      );
+    } catch (tombErr) {
+    }
+    const existing = await sql.query(
+      `SELECT id FROM users WHERE id = $1 OR LOWER(email) = $2 LIMIT 1`,
+      [user.id, cleanEmail]
+    );
+    if (existing && existing.length > 0) {
+      const targetId = existing[0].id;
+      await sql.query(`
+        UPDATE users SET
+          name = $1,
+          email = $2,
+          password_hash = $3,
+          role = $4,
+          phone = $5,
+          avatar_url = $6,
+          is_active = $7,
+          permissions = $8,
+          updated_at = NOW()
+        WHERE id = $9
+      `, [
+        user.name,
+        cleanEmail,
+        user.password_hash,
+        user.role,
+        user.phone || null,
+        user.avatar_url || null,
+        user.is_active !== void 0 ? user.is_active : 1,
+        permsJson,
+        targetId
+      ]);
+    } else {
+      await sql.query(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      `, [
+        user.id,
+        user.name,
+        cleanEmail,
+        user.password_hash,
+        user.role,
+        user.phone || null,
+        user.avatar_url || null,
+        user.is_active !== void 0 ? user.is_active : 1,
+        permsJson
+      ]);
+    }
     return true;
   } catch (err) {
     console.error("[Neon Persist] User persist failed:", err.message);
@@ -787,56 +836,87 @@ async function persistUserToNeon(user) {
 async function persistCounselorToNeon(counselor) {
   if (!sql) return false;
   try {
+    const cleanEmail = (counselor.email || "").toLowerCase().trim();
+    try {
+      await sql.query(
+        `DELETE FROM deleted_records WHERE entity_type = 'counselor' AND (entity_id = $1 OR LOWER(identifier) = $2)`,
+        [counselor.id, cleanEmail]
+      );
+    } catch (tombErr) {
+    }
     const specCourses = typeof counselor.specialization_courses === "string" ? counselor.specialization_courses : JSON.stringify(counselor.specialization_courses || []);
     const specUnis = typeof counselor.specialization_universities === "string" ? counselor.specialization_universities : JSON.stringify(counselor.specialization_universities || []);
-    await sql.query(`
-      INSERT INTO counselors (
-        id, user_id, name, email, phone, specialization_country, assigned_cities,
-        is_active, max_capacity, current_active_leads, total_assigned_leads,
-        total_admissions, conversion_rate, username, joining_date, status,
-        specialization_courses, specialization_universities, daily_lead_quota, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        user_id = EXCLUDED.user_id,
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        phone = EXCLUDED.phone,
-        specialization_country = EXCLUDED.specialization_country,
-        assigned_cities = EXCLUDED.assigned_cities,
-        is_active = EXCLUDED.is_active,
-        max_capacity = EXCLUDED.max_capacity,
-        current_active_leads = EXCLUDED.current_active_leads,
-        total_assigned_leads = EXCLUDED.total_assigned_leads,
-        total_admissions = EXCLUDED.total_admissions,
-        conversion_rate = EXCLUDED.conversion_rate,
-        username = EXCLUDED.username,
-        status = EXCLUDED.status,
-        specialization_courses = EXCLUDED.specialization_courses,
-        specialization_universities = EXCLUDED.specialization_universities,
-        daily_lead_quota = EXCLUDED.daily_lead_quota,
-        updated_at = NOW()
-    `, [
-      counselor.id,
-      counselor.user_id || null,
-      counselor.name,
-      counselor.email,
-      counselor.phone,
-      counselor.specialization_country || "Nepal & India",
-      typeof counselor.assigned_cities === "string" ? counselor.assigned_cities : JSON.stringify(counselor.assigned_cities || []),
-      counselor.is_active !== void 0 ? counselor.is_active : 1,
-      counselor.max_capacity || 100,
-      counselor.current_active_leads || 0,
-      counselor.total_assigned_leads || 0,
-      counselor.total_admissions || 0,
-      counselor.conversion_rate || 0,
-      counselor.username || counselor.email.split("@")[0],
-      counselor.joining_date || (/* @__PURE__ */ new Date()).toISOString(),
-      counselor.status || "Active",
-      specCourses,
-      specUnis,
-      counselor.daily_lead_quota || 25
-    ]);
+    const assignedCities = typeof counselor.assigned_cities === "string" ? counselor.assigned_cities : JSON.stringify(counselor.assigned_cities || []);
+    const existing = await sql.query(
+      `SELECT id FROM counselors WHERE id = $1 OR LOWER(email) = $2 LIMIT 1`,
+      [counselor.id, cleanEmail]
+    );
+    if (existing && existing.length > 0) {
+      const targetId = existing[0].id;
+      await sql.query(`
+        UPDATE counselors SET
+          user_id = $1,
+          name = $2,
+          email = $3,
+          phone = $4,
+          specialization_country = $5,
+          assigned_cities = $6,
+          is_active = $7,
+          max_capacity = $8,
+          username = $9,
+          status = $10,
+          specialization_courses = $11,
+          specialization_universities = $12,
+          daily_lead_quota = $13,
+          updated_at = NOW()
+        WHERE id = $14
+      `, [
+        counselor.user_id || null,
+        counselor.name,
+        cleanEmail,
+        counselor.phone,
+        counselor.specialization_country || "Nepal & India",
+        assignedCities,
+        counselor.is_active !== void 0 ? counselor.is_active : 1,
+        counselor.max_capacity || 100,
+        counselor.username || cleanEmail.split("@")[0],
+        counselor.status || "Active",
+        specCourses,
+        specUnis,
+        counselor.daily_lead_quota || 25,
+        targetId
+      ]);
+    } else {
+      await sql.query(`
+        INSERT INTO counselors (
+          id, user_id, name, email, phone, specialization_country, assigned_cities,
+          is_active, max_capacity, current_active_leads, total_assigned_leads,
+          total_admissions, conversion_rate, username, joining_date, status,
+          specialization_courses, specialization_universities, daily_lead_quota, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
+      `, [
+        counselor.id,
+        counselor.user_id || null,
+        counselor.name,
+        cleanEmail,
+        counselor.phone,
+        counselor.specialization_country || "Nepal & India",
+        assignedCities,
+        counselor.is_active !== void 0 ? counselor.is_active : 1,
+        counselor.max_capacity || 100,
+        counselor.current_active_leads || 0,
+        counselor.total_assigned_leads || 0,
+        counselor.total_admissions || 0,
+        counselor.conversion_rate || 0,
+        counselor.username || cleanEmail.split("@")[0],
+        counselor.joining_date || (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        counselor.status || "Active",
+        specCourses,
+        specUnis,
+        counselor.daily_lead_quota || 25
+      ]);
+    }
     return true;
   } catch (err) {
     console.error("[Neon Persist] Counselor persist failed:", err.message);
@@ -1009,16 +1089,55 @@ async function deleteLeadFromNeon(leadId) {
     return false;
   }
 }
+async function deleteUserFromNeon(userId, email) {
+  if (!sql) return false;
+  try {
+    const cleanEmail = email ? email.toLowerCase().trim() : "";
+    await sql.query(
+      `DELETE FROM users WHERE id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    await sql.query(
+      `DELETE FROM counselors WHERE user_id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    await sql.query(
+      `DELETE FROM hr_employees WHERE user_id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    await sql.query(
+      `UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = $1)`,
+      [userId]
+    );
+    const tombId = "DEL-U-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8);
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, 'user', $2, $3, 'User permanently deleted', 'Admin', NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [tombId, userId, cleanEmail || userId]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Delete] User deletion failed:", err.message);
+    return false;
+  }
+}
 async function deleteCounselorAndUserFromNeon(counselorId, email, userId) {
   if (!sql) return false;
   try {
-    if (email || userId) {
-      await sql.query(`DELETE FROM users WHERE LOWER(email) = LOWER($1) OR id = $2`, [email || "", userId || ""]);
+    const cleanEmail = email ? email.toLowerCase().trim() : "";
+    if (cleanEmail || userId) {
+      await sql.query(`DELETE FROM users WHERE (LOWER(email) = $1 AND $1 != '') OR (id = $2 AND $2 != '')`, [cleanEmail, userId || ""]);
     }
-    await sql.query(`DELETE FROM counselors WHERE id = $1`, [counselorId]);
-    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR user_id = $2`, [counselorId, userId || ""]);
+    await sql.query(`DELETE FROM counselors WHERE id = $1 OR (user_id = $2 AND $2 != '') OR (LOWER(email) = $3 AND $3 != '')`, [counselorId, userId || "", cleanEmail]);
+    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR (user_id = $2 AND $2 != '') OR (LOWER(email) = $3 AND $3 != '')`, [counselorId, userId || "", cleanEmail]);
     await sql.query(`DELETE FROM lead_routing_rules WHERE counselor_id = $1`, [counselorId]);
     await sql.query(`UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id = $1`, [counselorId]);
+    const tombId = "DEL-C-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8);
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, 'counselor', $2, $3, 'Counselor and user deleted', 'Admin', NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [tombId, counselorId, cleanEmail || counselorId]);
     return true;
   } catch (err) {
     console.error("[Neon Delete] Counselor/User deletion failed:", err.message);
@@ -8935,9 +9054,13 @@ apiRouter.post("/auth/register", async (req, res) => {
 });
 apiRouter.post("/users", async (req, res) => {
   try {
-    const { name, email, password, role, phone, permissions, designation, department } = req.body || {};
+    const { name, email, password, role, phone, permissions, designation, department, performedBy, requesterRole } = req.body || {};
     if (!name || !email) {
       return res.status(400).json({ error: "Name and email address are required" });
+    }
+    const normRole = (requesterRole || "").toLowerCase().replace(/[\s_-]+/g, "");
+    if (requesterRole && !["superadmin", "admin"].includes(normRole)) {
+      return res.status(403).json({ error: "Only Super Admin can generate new users from here" });
     }
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
@@ -8969,6 +9092,10 @@ apiRouter.post("/users", async (req, res) => {
         INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
       `).run(userId, cleanName, cleanEmail, cleanPassword, userRole, cleanPhone, permsJson, now, now);
+    }
+    try {
+      db.prepare("DELETE FROM deleted_records WHERE entity_type = 'user' AND (entity_id = ? OR LOWER(identifier) = ?)").run(userId, cleanEmail);
+    } catch (tombErr) {
     }
     if (["Counselor", "Telecaller", "Admin", "Super Admin"].includes(userRole)) {
       const existingCounselor = db.prepare("SELECT id FROM counselors WHERE LOWER(email) = ?").get(cleanEmail);
@@ -9023,12 +9150,26 @@ apiRouter.post("/users", async (req, res) => {
           password_hash: cleanPassword,
           role: userRole,
           phone: cleanPhone,
-          is_active: 1
+          is_active: 1,
+          permissions: permsJson
         });
+        if (["Counselor", "Telecaller", "Admin", "Super Admin"].includes(userRole)) {
+          const currentCounselor = db.prepare("SELECT * FROM counselors WHERE LOWER(email) = ?").get(cleanEmail);
+          if (currentCounselor) {
+            await persistCounselorToNeon(currentCounselor);
+          }
+        }
       } catch (neonErr) {
         console.warn("[Neon Sync] persistUserToNeon notice:", neonErr.message);
       }
     }
+    logAudit({
+      userName: performedBy || "Super Admin",
+      action: existing ? "USER_UPDATED" : "USER_CREATED",
+      entity: "user",
+      entityId: userId,
+      newValue: { name: cleanName, email: cleanEmail, role: userRole }
+    });
     const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: userRole, phone: cleanPhone, is_active: 1 };
     res.status(201).json({ success: true, user: safeUser });
   } catch (err) {
@@ -9038,8 +9179,14 @@ apiRouter.post("/users", async (req, res) => {
 });
 apiRouter.put("/users/:id", async (req, res) => {
   try {
-    const { name, email, role, phone, password, is_active } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    const { name, email, role, phone, password, is_active, performedBy } = req.body;
+    let user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!user && isNeonEnabled()) {
+      try {
+        user = await findUserInNeon(req.params.id);
+      } catch (e) {
+      }
+    }
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -9078,9 +9225,20 @@ apiRouter.put("/users/:id", async (req, res) => {
           phone: cleanPhone,
           is_active: newActive
         });
+        const currentCounselor = db.prepare("SELECT * FROM counselors WHERE user_id = ? OR LOWER(email) = ?").get(req.params.id, cleanEmail);
+        if (currentCounselor) {
+          await persistCounselorToNeon(currentCounselor);
+        }
       } catch (e) {
       }
     }
+    logAudit({
+      userName: performedBy || "Admin",
+      action: "USER_UPDATED",
+      entity: "user",
+      entityId: req.params.id,
+      newValue: { name: cleanName, email: cleanEmail, role: cleanRole, is_active: newActive }
+    });
     res.json({ success: true, message: "User updated successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to update user" });
@@ -9088,28 +9246,96 @@ apiRouter.put("/users/:id", async (req, res) => {
 });
 apiRouter.delete("/users/:id", async (req, res) => {
   try {
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    let user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!user && isNeonEnabled()) {
+      try {
+        user = await findUserInNeon(req.params.id);
+      } catch (e) {
+      }
+    }
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
     if (user.email === "admin@gemsgroupservices.com" || user.email === "admin@educationsansar.com") {
       return res.status(400).json({ error: "Cannot delete primary root super admin account" });
     }
-    db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
-    db.prepare("DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?").run(req.params.id, user.email.toLowerCase());
+    const userEmail = user.email ? user.email.toLowerCase() : "";
+    db.prepare("DELETE FROM users WHERE id = ? OR LOWER(email) = ?").run(req.params.id, userEmail);
+    db.prepare("DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?").run(req.params.id, userEmail);
+    db.prepare("DELETE FROM hr_employees WHERE user_id = ? OR LOWER(email) = ?").run(req.params.id, userEmail);
+    db.prepare('UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = "Unassigned" WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = ? OR LOWER(email) = ?)').run(req.params.id, userEmail);
+    const tombId = "DEL-U-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8);
+    db.prepare("INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)").run(
+      tombId,
+      "user",
+      req.params.id,
+      userEmail || req.params.id,
+      JSON.stringify({ name: user.name }),
+      req.body?.performedBy || "Super Admin"
+    );
     if (isNeonEnabled()) {
       try {
-        await deleteCounselorAndUserFromNeon(req.params.id);
+        await deleteUserFromNeon(req.params.id, userEmail);
       } catch (e) {
+        console.warn("[Neon Delete] deleteUserFromNeon notice:", e.message);
       }
     }
+    logAudit({
+      userName: req.body?.performedBy || "Super Admin",
+      action: "USER_DELETED",
+      entity: "user",
+      entityId: req.params.id,
+      newValue: { name: user.name, email: userEmail, role: user.role }
+    });
     res.json({ success: true, message: "User deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to delete user" });
   }
 });
-apiRouter.get("/auth/users", (req, res) => {
-  const users = db.prepare("SELECT id, name, email, role, phone, is_active FROM users ORDER BY name ASC").all();
+apiRouter.get("/auth/users", async (req, res) => {
+  try {
+    if (isNeonEnabled()) {
+      const neonUsers = await getUsersFromNeon();
+      if (neonUsers && neonUsers.length > 0) {
+        const upsertUser = db.prepare(`
+          INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            email = excluded.email,
+            role = excluded.role,
+            phone = excluded.phone,
+            is_active = excluded.is_active,
+            permissions = excluded.permissions,
+            updated_at = excluded.updated_at
+        `);
+        for (const u of neonUsers) {
+          try {
+            if (u.email) {
+              db.prepare("DELETE FROM users WHERE LOWER(email) = LOWER(?) AND id != ?").run(u.email, u.id);
+            }
+            upsertUser.run(
+              u.id,
+              u.name,
+              u.email,
+              u.password_hash || "user123",
+              u.role,
+              u.phone || "",
+              u.is_active !== void 0 ? u.is_active : 1,
+              typeof u.permissions === "string" ? u.permissions : JSON.stringify(u.permissions || []),
+              String(u.created_at || (/* @__PURE__ */ new Date()).toISOString()),
+              String(u.updated_at || (/* @__PURE__ */ new Date()).toISOString())
+            );
+          } catch (e) {
+          }
+        }
+        return res.json(neonUsers);
+      }
+    }
+  } catch (e) {
+    console.warn("[Neon Users Notice]", e.message);
+  }
+  const users = db.prepare("SELECT id, name, email, role, phone, is_active, permissions FROM users ORDER BY name ASC").all();
   res.json(users);
 });
 apiRouter.get("/leads", (req, res) => {

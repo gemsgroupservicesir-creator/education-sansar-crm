@@ -27,11 +27,13 @@ import {
   isNeonEnabled, 
   sql,
   findUserInNeon, 
+  getUsersFromNeon,
   persistUserToNeon, 
   persistCounselorToNeon, 
   persistLeadToNeon, 
   persistDeletedRecordToNeon, 
   deleteLeadFromNeon, 
+  deleteUserFromNeon,
   deleteCounselorAndUserFromNeon,
   deleteEmployeeFromNeon,
   deleteTransactionFromNeon,
@@ -417,14 +419,19 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
   }
 });
 
-// Admin User creation endpoint
-// Admin User creation endpoint
+// Admin User creation endpoint (Only Super Admin can generate users)
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, phone, permissions, designation, department } = req.body || {};
+    const { name, email, password, role, phone, permissions, designation, department, performedBy, requesterRole } = req.body || {};
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email address are required' });
     }
+
+    const normRole = (requesterRole || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (requesterRole && !['superadmin', 'admin'].includes(normRole)) {
+      return res.status(403).json({ error: 'Only Super Admin can generate new users from here' });
+    }
+
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const cleanPhone = phone?.trim() || '';
@@ -459,7 +466,12 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       `).run(userId, cleanName, cleanEmail, cleanPassword, userRole, cleanPhone, permsJson, now, now);
     }
 
-    // If role is Counselor, Telecaller, or Admin, ensure a counselor profile also exists
+    // Clear any previous deletion tombstone so this user isn't purged on next sync
+    try {
+      db.prepare("DELETE FROM deleted_records WHERE entity_type = 'user' AND (entity_id = ? OR LOWER(identifier) = ?)").run(userId, cleanEmail);
+    } catch (tombErr) {}
+
+    // If role is Counselor, Telecaller, Admin, or Super Admin, ensure a counselor profile also exists
     if (['Counselor', 'Telecaller', 'Admin', 'Super Admin'].includes(userRole)) {
       const existingCounselor = db.prepare('SELECT id FROM counselors WHERE LOWER(email) = ?').get(cleanEmail) as any;
       if (!existingCounselor) {
@@ -505,6 +517,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       }
     }
 
+    // Persist to Neon PostgreSQL server-side
     if (isNeonEnabled()) {
       try {
         await persistUserToNeon({
@@ -514,12 +527,28 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           password_hash: cleanPassword,
           role: userRole,
           phone: cleanPhone,
-          is_active: 1
+          is_active: 1,
+          permissions: permsJson
         });
+
+        if (['Counselor', 'Telecaller', 'Admin', 'Super Admin'].includes(userRole)) {
+          const currentCounselor = db.prepare('SELECT * FROM counselors WHERE LOWER(email) = ?').get(cleanEmail) as any;
+          if (currentCounselor) {
+            await persistCounselorToNeon(currentCounselor);
+          }
+        }
       } catch (neonErr: any) {
         console.warn('[Neon Sync] persistUserToNeon notice:', neonErr.message);
       }
     }
+
+    logAudit({
+      userName: performedBy || 'Super Admin',
+      action: existing ? 'USER_UPDATED' : 'USER_CREATED',
+      entity: 'user',
+      entityId: userId,
+      newValue: { name: cleanName, email: cleanEmail, role: userRole }
+    });
 
     const safeUser = { id: userId, name: cleanName, email: cleanEmail, role: userRole, phone: cleanPhone, is_active: 1 };
     res.status(201).json({ success: true, user: safeUser });
@@ -531,8 +560,13 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
 
 apiRouter.put('/users/:id', async (req: Request, res: Response) => {
   try {
-    const { name, email, role, phone, password, is_active } = req.body;
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    const { name, email, role, phone, password, is_active, performedBy } = req.body;
+    let user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    if (!user && isNeonEnabled()) {
+      try {
+        user = await findUserInNeon(req.params.id);
+      } catch (e) {}
+    }
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -576,8 +610,21 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           phone: cleanPhone,
           is_active: newActive
         });
+
+        const currentCounselor = db.prepare('SELECT * FROM counselors WHERE user_id = ? OR LOWER(email) = ?').get(req.params.id, cleanEmail) as any;
+        if (currentCounselor) {
+          await persistCounselorToNeon(currentCounselor);
+        }
       } catch (e: any) {}
     }
+
+    logAudit({
+      userName: performedBy || 'Admin',
+      action: 'USER_UPDATED',
+      entity: 'user',
+      entityId: req.params.id,
+      newValue: { name: cleanName, email: cleanEmail, role: cleanRole, is_active: newActive }
+    });
 
     res.json({ success: true, message: 'User updated successfully' });
   } catch (err: any) {
@@ -587,7 +634,12 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
 
 apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
   try {
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    let user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    if (!user && isNeonEnabled()) {
+      try {
+        user = await findUserInNeon(req.params.id);
+      } catch (e) {}
+    }
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -596,14 +648,36 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cannot delete primary root super admin account' });
     }
 
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
-    db.prepare('DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?').run(req.params.id, user.email.toLowerCase());
+    const userEmail = user.email ? user.email.toLowerCase() : '';
 
+    // Clean referencing records in SQLite
+    db.prepare('DELETE FROM users WHERE id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
+    db.prepare('DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
+    db.prepare('DELETE FROM hr_employees WHERE user_id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
+    db.prepare('UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = "Unassigned" WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = ? OR LOWER(email) = ?)').run(req.params.id, userEmail);
+
+    // Record tombstone in SQLite
+    const tombId = 'DEL-U-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+    db.prepare('INSERT OR IGNORE INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by) VALUES (?, ?, ?, ?, ?, ?)').run(
+      tombId, 'user', req.params.id, userEmail || req.params.id, JSON.stringify({ name: user.name }), req.body?.performedBy || 'Super Admin'
+    );
+
+    // Permanently delete from Neon PostgreSQL server-side and record tombstone
     if (isNeonEnabled()) {
       try {
-        await deleteCounselorAndUserFromNeon(req.params.id);
-      } catch (e: any) {}
+        await deleteUserFromNeon(req.params.id, userEmail);
+      } catch (e: any) {
+        console.warn('[Neon Delete] deleteUserFromNeon notice:', e.message);
+      }
     }
+
+    logAudit({
+      userName: req.body?.performedBy || 'Super Admin',
+      action: 'USER_DELETED',
+      entity: 'user',
+      entityId: req.params.id,
+      newValue: { name: user.name, email: userEmail, role: user.role }
+    });
 
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (err: any) {
@@ -611,8 +685,46 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/auth/users', (req: Request, res: Response) => {
-  const users = db.prepare('SELECT id, name, email, role, phone, is_active FROM users ORDER BY name ASC').all();
+apiRouter.get('/auth/users', async (req: Request, res: Response) => {
+  try {
+    if (isNeonEnabled()) {
+      const neonUsers = await getUsersFromNeon();
+      if (neonUsers && neonUsers.length > 0) {
+        // Cache to SQLite
+        const upsertUser = db.prepare(`
+          INSERT INTO users (id, name, email, password_hash, role, phone, is_active, permissions, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            email = excluded.email,
+            role = excluded.role,
+            phone = excluded.phone,
+            is_active = excluded.is_active,
+            permissions = excluded.permissions,
+            updated_at = excluded.updated_at
+        `);
+        for (const u of neonUsers) {
+          try {
+            if (u.email) {
+              db.prepare('DELETE FROM users WHERE LOWER(email) = LOWER(?) AND id != ?').run(u.email, u.id);
+            }
+            upsertUser.run(
+              u.id, u.name, u.email, u.password_hash || 'user123', u.role, u.phone || '',
+              u.is_active !== undefined ? u.is_active : 1,
+              typeof u.permissions === 'string' ? u.permissions : JSON.stringify(u.permissions || []),
+              String(u.created_at || new Date().toISOString()),
+              String(u.updated_at || new Date().toISOString())
+            );
+          } catch (e) {}
+        }
+        return res.json(neonUsers);
+      }
+    }
+  } catch (e: any) {
+    console.warn('[Neon Users Notice]', e.message);
+  }
+
+  const users = db.prepare('SELECT id, name, email, role, phone, is_active, permissions FROM users ORDER BY name ASC').all();
   res.json(users);
 });
 

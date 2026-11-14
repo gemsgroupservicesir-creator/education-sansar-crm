@@ -63,7 +63,31 @@ export async function findUserInNeon(identifier: string): Promise<any | null> {
 
 
 /**
- * Persist or update a user record in Neon PostgreSQL
+ * Get all users from Neon PostgreSQL for authoritative server-side user listing
+ */
+export async function getUsersFromNeon(): Promise<any[]> {
+  if (!sql) return [];
+  try {
+    const rows = await sql.query(`
+      SELECT id, name, email, role, phone, is_active, permissions, created_at, updated_at
+      FROM users
+      ORDER BY 
+        CASE 
+          WHEN role IN ('Super Admin', 'superadmin') THEN 1 
+          WHEN role IN ('Admin', 'admin') THEN 2 
+          ELSE 3 
+        END, 
+        name ASC
+    `);
+    return rows || [];
+  } catch (err: any) {
+    console.error('[Neon Users] Failed to query users:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Persist or update a user record in Neon PostgreSQL safely
  */
 export async function persistUserToNeon(user: {
   id: string;
@@ -78,33 +102,66 @@ export async function persistUserToNeon(user: {
 }): Promise<boolean> {
   if (!sql) return false;
   try {
+    const cleanEmail = user.email.toLowerCase().trim();
     const permsJson = typeof user.permissions === 'string' 
       ? user.permissions 
       : JSON.stringify(user.permissions || []);
-    await sql.query(`
-      INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        password_hash = EXCLUDED.password_hash,
-        role = EXCLUDED.role,
-        phone = EXCLUDED.phone,
-        avatar_url = EXCLUDED.avatar_url,
-        is_active = EXCLUDED.is_active,
-        permissions = EXCLUDED.permissions,
-        updated_at = NOW()
-    `, [
-      user.id,
-      user.name,
-      user.email.toLowerCase(),
-      user.password_hash,
-      user.role,
-      user.phone || null,
-      user.avatar_url || null,
-      user.is_active !== undefined ? user.is_active : 1,
-      permsJson
-    ]);
+
+    // 1. Clear any previous deletion tombstone for this user or email
+    try {
+      await sql.query(
+        `DELETE FROM deleted_records WHERE entity_type = 'user' AND (entity_id = $1 OR LOWER(identifier) = $2)`,
+        [user.id, cleanEmail]
+      );
+    } catch (tombErr) {}
+
+    // 2. Check if user already exists by ID or email
+    const existing = await sql.query(
+      `SELECT id FROM users WHERE id = $1 OR LOWER(email) = $2 LIMIT 1`,
+      [user.id, cleanEmail]
+    );
+
+    if (existing && existing.length > 0) {
+      const targetId = existing[0].id;
+      await sql.query(`
+        UPDATE users SET
+          name = $1,
+          email = $2,
+          password_hash = $3,
+          role = $4,
+          phone = $5,
+          avatar_url = $6,
+          is_active = $7,
+          permissions = $8,
+          updated_at = NOW()
+        WHERE id = $9
+      `, [
+        user.name,
+        cleanEmail,
+        user.password_hash,
+        user.role,
+        user.phone || null,
+        user.avatar_url || null,
+        user.is_active !== undefined ? user.is_active : 1,
+        permsJson,
+        targetId
+      ]);
+    } else {
+      await sql.query(`
+        INSERT INTO users (id, name, email, password_hash, role, phone, avatar_url, is_active, permissions, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+      `, [
+        user.id,
+        user.name,
+        cleanEmail,
+        user.password_hash,
+        user.role,
+        user.phone || null,
+        user.avatar_url || null,
+        user.is_active !== undefined ? user.is_active : 1,
+        permsJson
+      ]);
+    }
     return true;
   } catch (err: any) {
     console.error('[Neon Persist] User persist failed:', err.message);
@@ -113,66 +170,101 @@ export async function persistUserToNeon(user: {
 }
 
 /**
- * Persist counselor to Neon
+ * Persist counselor to Neon safely
  */
 export async function persistCounselorToNeon(counselor: any): Promise<boolean> {
   if (!sql) return false;
   try {
+    const cleanEmail = (counselor.email || '').toLowerCase().trim();
+    // Clear tombstone
+    try {
+      await sql.query(
+        `DELETE FROM deleted_records WHERE entity_type = 'counselor' AND (entity_id = $1 OR LOWER(identifier) = $2)`,
+        [counselor.id, cleanEmail]
+      );
+    } catch (tombErr) {}
+
     const specCourses = typeof counselor.specialization_courses === 'string'
       ? counselor.specialization_courses
       : JSON.stringify(counselor.specialization_courses || []);
     const specUnis = typeof counselor.specialization_universities === 'string'
       ? counselor.specialization_universities
       : JSON.stringify(counselor.specialization_universities || []);
+    const assignedCities = typeof counselor.assigned_cities === 'string'
+      ? counselor.assigned_cities
+      : JSON.stringify(counselor.assigned_cities || []);
 
-    await sql.query(`
-      INSERT INTO counselors (
-        id, user_id, name, email, phone, specialization_country, assigned_cities,
-        is_active, max_capacity, current_active_leads, total_assigned_leads,
-        total_admissions, conversion_rate, username, joining_date, status,
-        specialization_courses, specialization_universities, daily_lead_quota, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
-      ON CONFLICT (id) DO UPDATE SET
-        user_id = EXCLUDED.user_id,
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        phone = EXCLUDED.phone,
-        specialization_country = EXCLUDED.specialization_country,
-        assigned_cities = EXCLUDED.assigned_cities,
-        is_active = EXCLUDED.is_active,
-        max_capacity = EXCLUDED.max_capacity,
-        current_active_leads = EXCLUDED.current_active_leads,
-        total_assigned_leads = EXCLUDED.total_assigned_leads,
-        total_admissions = EXCLUDED.total_admissions,
-        conversion_rate = EXCLUDED.conversion_rate,
-        username = EXCLUDED.username,
-        status = EXCLUDED.status,
-        specialization_courses = EXCLUDED.specialization_courses,
-        specialization_universities = EXCLUDED.specialization_universities,
-        daily_lead_quota = EXCLUDED.daily_lead_quota,
-        updated_at = NOW()
-    `, [
-      counselor.id,
-      counselor.user_id || null,
-      counselor.name,
-      counselor.email,
-      counselor.phone,
-      counselor.specialization_country || 'Nepal & India',
-      typeof counselor.assigned_cities === 'string' ? counselor.assigned_cities : JSON.stringify(counselor.assigned_cities || []),
-      counselor.is_active !== undefined ? counselor.is_active : 1,
-      counselor.max_capacity || 100,
-      counselor.current_active_leads || 0,
-      counselor.total_assigned_leads || 0,
-      counselor.total_admissions || 0,
-      counselor.conversion_rate || 0.0,
-      counselor.username || counselor.email.split('@')[0],
-      counselor.joining_date || new Date().toISOString(),
-      counselor.status || 'Active',
-      specCourses,
-      specUnis,
-      counselor.daily_lead_quota || 25
-    ]);
+    const existing = await sql.query(
+      `SELECT id FROM counselors WHERE id = $1 OR LOWER(email) = $2 LIMIT 1`,
+      [counselor.id, cleanEmail]
+    );
+
+    if (existing && existing.length > 0) {
+      const targetId = existing[0].id;
+      await sql.query(`
+        UPDATE counselors SET
+          user_id = $1,
+          name = $2,
+          email = $3,
+          phone = $4,
+          specialization_country = $5,
+          assigned_cities = $6,
+          is_active = $7,
+          max_capacity = $8,
+          username = $9,
+          status = $10,
+          specialization_courses = $11,
+          specialization_universities = $12,
+          daily_lead_quota = $13,
+          updated_at = NOW()
+        WHERE id = $14
+      `, [
+        counselor.user_id || null,
+        counselor.name,
+        cleanEmail,
+        counselor.phone,
+        counselor.specialization_country || 'Nepal & India',
+        assignedCities,
+        counselor.is_active !== undefined ? counselor.is_active : 1,
+        counselor.max_capacity || 100,
+        counselor.username || cleanEmail.split('@')[0],
+        counselor.status || 'Active',
+        specCourses,
+        specUnis,
+        counselor.daily_lead_quota || 25,
+        targetId
+      ]);
+    } else {
+      await sql.query(`
+        INSERT INTO counselors (
+          id, user_id, name, email, phone, specialization_country, assigned_cities,
+          is_active, max_capacity, current_active_leads, total_assigned_leads,
+          total_admissions, conversion_rate, username, joining_date, status,
+          specialization_courses, specialization_universities, daily_lead_quota, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
+      `, [
+        counselor.id,
+        counselor.user_id || null,
+        counselor.name,
+        cleanEmail,
+        counselor.phone,
+        counselor.specialization_country || 'Nepal & India',
+        assignedCities,
+        counselor.is_active !== undefined ? counselor.is_active : 1,
+        counselor.max_capacity || 100,
+        counselor.current_active_leads || 0,
+        counselor.total_assigned_leads || 0,
+        counselor.total_admissions || 0,
+        counselor.conversion_rate || 0,
+        counselor.username || cleanEmail.split('@')[0],
+        counselor.joining_date || new Date().toISOString().split('T')[0],
+        counselor.status || 'Active',
+        specCourses,
+        specUnis,
+        counselor.daily_lead_quota || 25
+      ]);
+    }
     return true;
   } catch (err: any) {
     console.error('[Neon Persist] Counselor persist failed:', err.message);
@@ -366,18 +458,71 @@ export async function deleteLeadFromNeon(leadId: string): Promise<boolean> {
 }
 
 /**
- * Delete a counselor and corresponding user account from Neon
+ * Permanently delete a user account from Neon PostgreSQL and write deletion tombstone
+ */
+export async function deleteUserFromNeon(userId: string, email?: string): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    // 1. Delete from users
+    await sql.query(
+      `DELETE FROM users WHERE id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    // 2. Delete from counselors
+    await sql.query(
+      `DELETE FROM counselors WHERE user_id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    // 3. Delete from hr_employees
+    await sql.query(
+      `DELETE FROM hr_employees WHERE user_id = $1 OR (LOWER(email) = $2 AND $2 != '')`,
+      [userId, cleanEmail]
+    );
+    // 4. Unassign leads
+    await sql.query(
+      `UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = $1)`,
+      [userId]
+    );
+
+    // 5. Persist tombstone so background sync never resurrects this user
+    const tombId = 'DEL-U-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, 'user', $2, $3, 'User permanently deleted', 'Admin', NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [tombId, userId, cleanEmail || userId]);
+
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Delete] User deletion failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Delete a counselor and corresponding user account from Neon and write deletion tombstone
  */
 export async function deleteCounselorAndUserFromNeon(counselorId: string, email?: string, userId?: string): Promise<boolean> {
   if (!sql) return false;
   try {
-    if (email || userId) {
-      await sql.query(`DELETE FROM users WHERE LOWER(email) = LOWER($1) OR id = $2`, [email || '', userId || '']);
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    if (cleanEmail || userId) {
+      await sql.query(`DELETE FROM users WHERE (LOWER(email) = $1 AND $1 != '') OR (id = $2 AND $2 != '')`, [cleanEmail, userId || '']);
     }
-    await sql.query(`DELETE FROM counselors WHERE id = $1`, [counselorId]);
-    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR user_id = $2`, [counselorId, userId || '']);
+    await sql.query(`DELETE FROM counselors WHERE id = $1 OR (user_id = $2 AND $2 != '') OR (LOWER(email) = $3 AND $3 != '')`, [counselorId, userId || '', cleanEmail]);
+    await sql.query(`DELETE FROM hr_employees WHERE counselor_id = $1 OR (user_id = $2 AND $2 != '') OR (LOWER(email) = $3 AND $3 != '')`, [counselorId, userId || '', cleanEmail]);
     await sql.query(`DELETE FROM lead_routing_rules WHERE counselor_id = $1`, [counselorId]);
     await sql.query(`UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id = $1`, [counselorId]);
+
+    // Persist tombstone
+    const tombId = 'DEL-C-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
+    await sql.query(`
+      INSERT INTO deleted_records (id, entity_type, entity_id, identifier, details, deleted_by, deleted_at)
+      VALUES ($1, 'counselor', $2, $3, 'Counselor and user deleted', 'Admin', NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [tombId, counselorId, cleanEmail || counselorId]);
+
     return true;
   } catch (err: any) {
     console.error('[Neon Delete] Counselor/User deletion failed:', err.message);

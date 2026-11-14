@@ -46,7 +46,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getUsers: () => fetchJson<any[]>('/auth/users'),
-  createUser: (data: { name: string; email: string; password?: string; role?: string; phone?: string; designation?: string; department?: string; permissions?: string[] }) =>
+  createUser: (data: { name: string; email: string; password?: string; role?: string; phone?: string; designation?: string; department?: string; permissions?: string[]; performedBy?: string; requesterRole?: string }) =>
     fetchJson<{ success: boolean; user: any }>('/users', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -56,9 +56,10 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
-  deleteUser: (id: string) =>
+  deleteUser: (id: string, performedBy?: string, requesterRole?: string) =>
     fetchJson<{ success: boolean; message: string }>(`/users/${id}`, {
       method: 'DELETE',
+      body: JSON.stringify({ performedBy, requesterRole }),
     }),
 
   // Leads
