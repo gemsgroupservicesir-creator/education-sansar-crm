@@ -19,7 +19,9 @@ import {
   ChevronRight,
   UserCheck,
   Sliders,
-  Mail
+  Mail,
+  Sparkles,
+  MessageSquare
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Lead, LeadStatus, LeadTemperature, LeadSource } from '../types';
@@ -123,6 +125,7 @@ export const LeadsPage: React.FC = () => {
   const statusColor = (s: LeadStatus) => {
     switch (s) {
       case 'New Lead': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'Qualified': return 'bg-purple-100 text-purple-900 border-purple-300 font-bold';
       case 'Contacted': return 'bg-sky-100 text-sky-800 border-sky-200';
       case 'Counseling Scheduled': return 'bg-purple-100 text-purple-800 border-purple-200';
       case 'Counseling Done': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
@@ -243,6 +246,7 @@ export const LeadsPage: React.FC = () => {
               className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Statuses</option>
+              <option value="Qualified">🎯 Qualified (AI)</option>
               <option value="New Lead">New Lead</option>
               <option value="Contacted">Contacted</option>
               <option value="Counseling Scheduled">Counseling Scheduled</option>
@@ -407,6 +411,17 @@ export const LeadsPage: React.FC = () => {
                           </span>
                         )}
                       </div>
+                      {lead.qualification_score && lead.qualification_score >= 40 ? (
+                        <div className="mt-1">
+                          <span
+                            className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 inline-flex items-center gap-1"
+                            title={`AI Qualified: ${lead.qualification_score}%\n${lead.qualification_summary || ''}`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-purple-600" />
+                            <span>AI Qualified {lead.qualification_score}%</span>
+                          </span>
+                        </div>
+                      ) : null}
                     </td>
 
                     {/* Phone & WhatsApp */}
@@ -432,6 +447,13 @@ export const LeadsPage: React.FC = () => {
                         >
                           <MessageCircle className="w-3 h-3" />
                         </a>
+                        <button
+                          onClick={() => navigate(`/whatsapp-web?phone=${lead.phone}`)}
+                          title="Open in WhatsApp Web Hub"
+                          className="p-1 rounded hover:bg-purple-50 text-purple-600"
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                        </button>
                       </div>
                     </td>
 
@@ -461,6 +483,7 @@ export const LeadsPage: React.FC = () => {
                         )}`}
                       >
                         <option value="New Lead">New Lead</option>
+                        <option value="Qualified">🎯 Qualified</option>
                         <option value="Contacted">Contacted</option>
                         <option value="Counseling Scheduled">Counseling Scheduled</option>
                         <option value="Counseling Done">Counseling Done</option>

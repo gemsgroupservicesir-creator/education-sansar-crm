@@ -525,6 +525,7 @@ export const FEATURE_PERMISSIONS: FeaturePermission[] = [
   { id: 'reports', name: 'Reports & Export', category: 'Marketing', description: 'Export Excel reports, counselor KPIs, and ROI metrics' },
   { id: 'documents', name: 'Document Vault', category: 'Operations' as any, description: 'Upload, inspect, and verify student marksheets and passports' },
   { id: 'knowledge_base', name: 'Knowledge Base & AI Chatbot', category: 'Admin', description: 'Train admission Q&As, view chatbot logs, and configure AI student nurturing' },
+  { id: 'whatsapp_web', name: 'WhatsApp Web Hub', category: 'Leads', description: 'Scan QR code, link WhatsApp account, and chat with students' },
   { id: 'integrations', name: 'Integrations', category: 'Admin', description: 'Google Sheets live sync, Meta Ads webhook, WhatsApp API' },
   { id: 'settings', name: 'System Settings', category: 'Admin', description: 'Configure global CRM settings and view audit trails' },
 ];
@@ -535,21 +536,21 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'leads_delete', 'lead_distribution',
     'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'staff_info_view',
     'hr_management', 'finance_management', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'documents',
-    'knowledge_base', 'integrations', 'settings'
+    'knowledge_base', 'whatsapp_web', 'integrations', 'settings'
   ],
   'Counselor': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline',
-    'applications', 'students', 'universities', 'staff_info_view', 'documents', 'knowledge_base'
+    'applications', 'students', 'universities', 'staff_info_view', 'documents', 'knowledge_base', 'whatsapp_web'
   ],
   'Telecaller': [
-    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'staff_info_view', 'documents', 'knowledge_base'
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'staff_info_view', 'documents', 'knowledge_base', 'whatsapp_web'
   ],
   'Marketing Manager': [
-    'dashboard', 'leads_view', 'leads_create', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'integrations', 'staff_info_view'
+    'dashboard', 'leads_view', 'leads_create', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'integrations', 'staff_info_view', 'whatsapp_web'
   ],
   'Management': [
     'dashboard', 'leads_view', 'pipeline', 'applications', 'students',
-    'universities', 'reports', 'finance_management', 'hr_management', 'bulk_email', 'staff_info_view'
+    'universities', 'reports', 'finance_management', 'hr_management', 'bulk_email', 'staff_info_view', 'whatsapp_web'
   ],
   'Accountant': [
     'dashboard', 'students', 'finance_management', 'hr_management', 'reports', 'staff_info_view'
@@ -952,6 +953,46 @@ export interface StudentAIChatResponse {
   };
   lead?: Partial<Lead>;
   mode: 'Gemini Generative' | 'Admission Sales Engine';
+}
+
+export interface WhatsAppSession {
+  id: string;
+  counselor_id?: string;
+  counselor_name?: string;
+  session_name: string;
+  phone_number?: string;
+  status: 'DISCONNECTED' | 'QR_READY' | 'CONNECTED';
+  qr_code_data?: string;
+  qr_expires_at?: string;
+  pairing_code?: string;
+  device_name?: string;
+  battery_level?: number;
+  is_active: number;
+  ai_auto_reply: number;
+  last_active_at?: string;
+  connected_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WhatsAppChatSummary {
+  lead_id?: string;
+  lead_name: string;
+  phone: string;
+  whatsapp_number: string;
+  course?: string;
+  university?: string;
+  last_message: string;
+  last_message_at: string;
+  unread_count: number;
+  qualification_score: number;
+  qualification_status: string;
+  is_qualified: boolean;
+  lead_status: string;
+  lead_temperature: string;
+  assigned_counselor_name?: string;
+  assigned_counselor_id?: string;
+  ai_enabled: boolean;
 }
 
 

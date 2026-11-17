@@ -13,7 +13,9 @@ import {
   FileEdit,
   Clock,
   Eye,
-  RefreshCw
+  RefreshCw,
+  Sparkles,
+  MessageSquare
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Lead, Counselor, LeadStatus } from '../types';
@@ -67,6 +69,7 @@ export const MyLeadsPage: React.FC = () => {
 
   // Metrics (Section 10)
   const myNewLeads = leads.filter(l => l.lead_status === 'New Lead').length;
+  const myQualifiedLeads = leads.filter(l => (l.qualification_score && l.qualification_score >= 50) || l.lead_status === 'Qualified').length;
   const myHotLeads = leads.filter(l => l.lead_temperature === 'HOT').length;
   const myFollowupsToday = leads.filter(l => l.next_follow_up_date === new Date().toISOString().split('T')[0]).length;
   const myOverdueFollowups = leads.filter(l => l.next_follow_up_date && l.next_follow_up_date < new Date().toISOString().split('T')[0]).length;
@@ -161,10 +164,24 @@ export const MyLeadsPage: React.FC = () => {
       </div>
 
       {/* Top Counselor Metrics (Section 10) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200">
           <div className="text-[11px] font-bold text-blue-800 uppercase">My New Leads</div>
           <div className="text-xl font-bold text-blue-900 mt-1">{myNewLeads}</div>
+        </div>
+        <div
+          onClick={() => navigate('/whatsapp-web')}
+          className="p-3.5 rounded-xl bg-purple-50/70 border border-purple-200 cursor-pointer hover:bg-purple-100/70 transition-colors"
+          title="Open WhatsApp Web Hub to chat with qualified students"
+        >
+          <div className="text-[11px] font-bold text-purple-800 uppercase flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>AI Qualified</span>
+          </div>
+          <div className="text-xl font-bold text-purple-900 mt-1 flex items-center justify-between">
+            <span>{myQualifiedLeads}</span>
+            <span className="text-[10px] text-purple-600 font-semibold underline">Chat →</span>
+          </div>
         </div>
         <div className="p-3.5 rounded-xl bg-rose-50/70 border border-rose-200">
           <div className="text-[11px] font-bold text-rose-800 uppercase flex items-center gap-1">
@@ -232,6 +249,17 @@ export const MyLeadsPage: React.FC = () => {
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-slate-900">{lead.student_name}</div>
                       <div className="text-[10px] text-slate-400 font-mono">{lead.lead_id} · {lead.city}</div>
+                      {lead.qualification_score && lead.qualification_score >= 40 ? (
+                        <div className="mt-1">
+                          <span
+                            className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 inline-flex items-center gap-1"
+                            title={`AI Qualified: ${lead.qualification_score}%\n${lead.qualification_summary || ''}`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-purple-600" />
+                            <span>AI Qualified {lead.qualification_score}%</span>
+                          </span>
+                        </div>
+                      ) : null}
                     </td>
 
                     <td className="py-3.5 px-4 font-mono">
@@ -251,6 +279,7 @@ export const MyLeadsPage: React.FC = () => {
                         className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 bg-white"
                       >
                         <option value="New Lead">New Lead</option>
+                        <option value="Qualified">🎯 Qualified</option>
                         <option value="Contacted">Contacted</option>
                         <option value="Counseling Scheduled">Counseling Scheduled</option>
                         <option value="Counseling Done">Counseling Done</option>
@@ -292,6 +321,14 @@ export const MyLeadsPage: React.FC = () => {
                     {/* Quick actions (Call, WhatsApp, Note, Follow-up, View Profile) */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => navigate(`/whatsapp-web?phone=${lead.phone}`)}
+                          title="Open in WhatsApp Web Hub"
+                          className="p-1.5 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+
                         <a
                           href={`tel:${lead.phone}`}
                           title="Call Student"

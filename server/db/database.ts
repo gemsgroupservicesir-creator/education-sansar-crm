@@ -355,6 +355,36 @@ function runSafeMigrations() {
   } catch (e: any) {
     console.warn('[Migration Notice] knowledge_base table:', e.message);
   }
+
+  // Counselor WhatsApp Web Sessions Table
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+        id TEXT PRIMARY KEY,
+        counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+        counselor_name TEXT,
+        session_name TEXT NOT NULL DEFAULT 'WhatsApp Web',
+        phone_number TEXT,
+        status TEXT NOT NULL DEFAULT 'DISCONNECTED',
+        qr_code_data TEXT,
+        qr_expires_at TEXT,
+        pairing_code TEXT,
+        device_name TEXT DEFAULT 'Chrome (macOS)',
+        battery_level INTEGER DEFAULT 88,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        ai_auto_reply INTEGER NOT NULL DEFAULT 1,
+        last_active_at TEXT,
+        connected_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wa_session_counselor ON whatsapp_sessions(counselor_id);
+      CREATE INDEX IF NOT EXISTS idx_wa_session_status ON whatsapp_sessions(status);
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] whatsapp_sessions table:', e.message);
+  }
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

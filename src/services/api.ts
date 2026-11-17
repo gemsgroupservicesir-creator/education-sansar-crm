@@ -1,4 +1,4 @@
-import { BroadcastCampaign, BroadcastRecipient, LeadOptOut, AudiencePreviewResult, KnowledgeItem, StudentAIChatResponse } from '../types';
+import { BroadcastCampaign, BroadcastRecipient, LeadOptOut, AudiencePreviewResult, KnowledgeItem, StudentAIChatResponse, WhatsAppSession, WhatsAppChatSummary } from '../types';
 
 const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
 const API_BASE = isFileProtocol 
@@ -830,5 +830,49 @@ export const api = {
     }),
   getLeadQualification: (leadId: string) =>
     fetchJson<any>(`/chatbot/lead-qualification/${leadId}`),
+
+  // WhatsApp Web Hub
+  getWhatsAppSession: (counselorId?: string) =>
+    fetchJson<WhatsAppSession>(`/whatsapp-web/session${counselorId ? `?counselorId=${counselorId}` : ''}`),
+  startWhatsAppSession: (data: { counselorId?: string; counselorName?: string }) =>
+    fetchJson<WhatsAppSession>('/whatsapp-web/session/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  simulateScanWhatsAppDevice: (data: { counselorId?: string; phoneNumber?: string; counselorName?: string; deviceName?: string }) =>
+    fetchJson<{ success: boolean; session: WhatsAppSession }>('/whatsapp-web/session/simulate-scan', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  disconnectWhatsAppSession: (counselorId?: string) =>
+    fetchJson<{ success: boolean; session: WhatsAppSession }>('/whatsapp-web/session/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ counselorId }),
+    }),
+  toggleWhatsAppAIAutoReply: (sessionId: string, enabled: boolean) =>
+    fetchJson<{ success: boolean }>('/whatsapp-web/session/toggle-ai', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, enabled }),
+    }),
+  getWhatsAppChats: (params: { counselorId?: string; search?: string; filter?: 'all' | 'qualified' | 'unread' | 'high_intent' } = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    const qStr = query.toString();
+    return fetchJson<WhatsAppChatSummary[]>(`/whatsapp-web/chats${qStr ? `?${qStr}` : ''}`);
+  },
+  getWhatsAppChatMessages: (phone: string) =>
+    fetchJson<{ lead: any; messages: any[]; qualification: any }>(`/whatsapp-web/chats/${encodeURIComponent(phone)}/messages`),
+  sendWhatsAppChatMessage: (phone: string, data: { message: string; senderName?: string; counselorId?: string; triggerAiResponse?: boolean }) =>
+    fetchJson<{ success: boolean; sentMessage: any; aiReply?: any }>(`/whatsapp-web/chats/${encodeURIComponent(phone)}/send`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  promoteLeadFromWhatsApp: (phone: string, data?: { course?: string; university?: string; marks?: string; budget?: string; counselorId?: string; promotedBy?: string }) =>
+    fetchJson<{ success: boolean; lead: any }>(`/whatsapp-web/chats/${encodeURIComponent(phone)}/promote-lead`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
 };
 

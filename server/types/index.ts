@@ -528,3 +528,42 @@ export interface StudentAIChatResponse {
   mode: 'Gemini Generative' | 'Admission Sales Engine';
 }
 
+export interface WhatsAppSession {
+  id: string;
+  counselor_id?: string;
+  counselor_name?: string;
+  session_name: string;
+  phone_number?: string;
+  status: 'DISCONNECTED' | 'QR_READY' | 'CONNECTED';
+  qr_code_data?: string;
+  qr_expires_at?: string;
+  pairing_code?: string;
+  device_name?: string;
+  battery_level?: number;
+  is_active: number;
+  ai_auto_reply: number;
+  last_active_at?: string;
+  connected_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WhatsAppChatSummary {
+  lead_id?: string;
+  lead_name: string;
+  phone: string;
+  whatsapp_number: string;
+  course?: string;
+  university?: string;
+  last_message: string;
+  last_message_at: string;
+  unread_count: number;
+  qualification_score: number;
+  qualification_status: string;
+  is_qualified: boolean;
+  lead_status: string;
+  lead_temperature: string;
+  assigned_counselor_name?: string;
+  assigned_counselor_id?: string;
+  ai_enabled: boolean;
+}

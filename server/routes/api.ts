@@ -154,6 +154,17 @@ import {
 } from '../services/knowledgeBaseService.ts';
 
 import { chatWithStudent } from '../services/studentAIChatbotService.ts';
+import {
+  getWhatsAppSession,
+  startWhatsAppSession,
+  simulateScanDevice,
+  disconnectWhatsAppSession,
+  toggleSessionAIAutoReply,
+  getWhatsAppChats,
+  getWhatsAppChatMessages,
+  sendWhatsAppChatMessage,
+  promoteLeadToActive
+} from '../services/whatsappWebService.ts';
 
 export const apiRouter = Router();
 
@@ -4939,5 +4950,129 @@ apiRouter.get('/chatbot/lead-qualification/:leadId', (req: Request, res: Respons
     res.status(500).json({ error: err.message || 'Failed to fetch lead qualification' });
   }
 });
+
+// ==========================================
+// 35. COUNSELOR WHATSAPP WEB HUB ENDPOINTS
+// ==========================================
+
+// Get counselor active WhatsApp session
+apiRouter.get('/whatsapp-web/session', (req: Request, res: Response) => {
+  try {
+    const counselorId = req.query.counselorId as string | undefined;
+    const session = getWhatsAppSession(counselorId);
+    res.json(session);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch WhatsApp Web session' });
+  }
+});
+
+// Start/Refresh QR session
+apiRouter.post('/whatsapp-web/session/start', (req: Request, res: Response) => {
+  try {
+    const { counselorId, counselorName } = req.body;
+    const session = startWhatsAppSession(counselorId, counselorName);
+    res.json(session);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to initialize QR session' });
+  }
+});
+
+// Simulate scan / link device
+apiRouter.post('/whatsapp-web/session/simulate-scan', (req: Request, res: Response) => {
+  try {
+    const { counselorId, phoneNumber, counselorName, deviceName } = req.body;
+    const session = simulateScanDevice({ counselorId, phoneNumber, counselorName, deviceName });
+    res.json({ success: true, session });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to link WhatsApp account' });
+  }
+});
+
+// Disconnect session
+apiRouter.post('/whatsapp-web/session/disconnect', (req: Request, res: Response) => {
+  try {
+    const { counselorId } = req.body;
+    const session = disconnectWhatsAppSession(counselorId);
+    res.json({ success: true, session });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to disconnect session' });
+  }
+});
+
+// Toggle session AI Auto Reply
+apiRouter.post('/whatsapp-web/session/toggle-ai', (req: Request, res: Response) => {
+  try {
+    const { sessionId, enabled } = req.body;
+    const ok = toggleSessionAIAutoReply(sessionId, !!enabled);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to toggle AI auto reply' });
+  }
+});
+
+// Get student chats list
+apiRouter.get('/whatsapp-web/chats', (req: Request, res: Response) => {
+  try {
+    const { counselorId, search, filter } = req.query;
+    const chats = getWhatsAppChats({
+      counselorId: counselorId as string,
+      search: search as string,
+      filter: filter as any
+    });
+    res.json(chats);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load WhatsApp chats' });
+  }
+});
+
+// Get message thread for a phone
+apiRouter.get('/whatsapp-web/chats/:phone/messages', (req: Request, res: Response) => {
+  try {
+    const data = getWhatsAppChatMessages(req.params.phone);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to load chat thread' });
+  }
+});
+
+// Send WhatsApp message from counselor/AI
+apiRouter.post('/whatsapp-web/chats/:phone/send', async (req: Request, res: Response) => {
+  try {
+    const { message, senderName, counselorId, triggerAiResponse } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
+    const result = await sendWhatsAppChatMessage({
+      phone: req.params.phone,
+      message,
+      senderName,
+      counselorId,
+      triggerAiResponse
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to send message' });
+  }
+});
+
+// Move / Promote Qualified Lead to Leads Tab
+apiRouter.post('/whatsapp-web/chats/:phone/promote-lead', (req: Request, res: Response) => {
+  try {
+    const { course, university, marks, budget, counselorId, promotedBy } = req.body;
+    const lead = promoteLeadToActive({
+      phone: req.params.phone,
+      course,
+      university,
+      marks,
+      budget,
+      counselorId,
+      promotedBy
+    });
+    res.json({ success: true, lead });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to promote lead' });
+  }
+});
+
 
 

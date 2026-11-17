@@ -759,6 +759,30 @@ CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
 CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
 CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
 
+-- 34. Counselor WhatsApp Web Sessions (Multi-device QR Code Linking)
+CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+  id TEXT PRIMARY KEY,
+  counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+  counselor_name TEXT,
+  session_name TEXT NOT NULL DEFAULT 'WhatsApp Web',
+  phone_number TEXT,
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED', -- 'DISCONNECTED', 'QR_READY', 'CONNECTED'
+  qr_code_data TEXT,
+  qr_expires_at TEXT,
+  pairing_code TEXT,
+  device_name TEXT DEFAULT 'Chrome (macOS)',
+  battery_level INTEGER DEFAULT 88,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  ai_auto_reply INTEGER NOT NULL DEFAULT 1,
+  last_active_at TEXT,
+  connected_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_wa_session_counselor ON whatsapp_sessions(counselor_id);
+CREATE INDEX IF NOT EXISTS idx_wa_session_status ON whatsapp_sessions(status);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);

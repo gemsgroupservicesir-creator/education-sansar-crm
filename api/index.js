@@ -790,6 +790,30 @@ CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
 CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
 CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
 
+-- 34. Counselor WhatsApp Web Sessions (Multi-device QR Code Linking)
+CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+  id TEXT PRIMARY KEY,
+  counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+  counselor_name TEXT,
+  session_name TEXT NOT NULL DEFAULT 'WhatsApp Web',
+  phone_number TEXT,
+  status TEXT NOT NULL DEFAULT 'DISCONNECTED', -- 'DISCONNECTED', 'QR_READY', 'CONNECTED'
+  qr_code_data TEXT,
+  qr_expires_at TEXT,
+  pairing_code TEXT,
+  device_name TEXT DEFAULT 'Chrome (macOS)',
+  battery_level INTEGER DEFAULT 88,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  ai_auto_reply INTEGER NOT NULL DEFAULT 1,
+  last_active_at TEXT,
+  connected_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_wa_session_counselor ON whatsapp_sessions(counselor_id);
+CREATE INDEX IF NOT EXISTS idx_wa_session_status ON whatsapp_sessions(status);
+
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
 CREATE INDEX IF NOT EXISTS idx_leads_whatsapp ON leads(whatsapp_number);
@@ -2887,6 +2911,34 @@ function runSafeMigrations() {
     `);
   } catch (e) {
     console.warn("[Migration Notice] knowledge_base table:", e.message);
+  }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+        id TEXT PRIMARY KEY,
+        counselor_id TEXT REFERENCES counselors(id) ON DELETE SET NULL,
+        counselor_name TEXT,
+        session_name TEXT NOT NULL DEFAULT 'WhatsApp Web',
+        phone_number TEXT,
+        status TEXT NOT NULL DEFAULT 'DISCONNECTED',
+        qr_code_data TEXT,
+        qr_expires_at TEXT,
+        pairing_code TEXT,
+        device_name TEXT DEFAULT 'Chrome (macOS)',
+        battery_level INTEGER DEFAULT 88,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        ai_auto_reply INTEGER NOT NULL DEFAULT 1,
+        last_active_at TEXT,
+        connected_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wa_session_counselor ON whatsapp_sessions(counselor_id);
+      CREATE INDEX IF NOT EXISTS idx_wa_session_status ON whatsapp_sessions(status);
+    `);
+  } catch (e) {
+    console.warn("[Migration Notice] whatsapp_sessions table:", e.message);
   }
 }
 function initDatabase() {
@@ -5030,13 +5082,13 @@ async function chatWithStudent(params) {
   if (!lead && cleanPhone) {
     const newLeadId = "lead-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
     const assignedC = distributeLead({
-      preferred_course: extracted.target_course || "Undecided",
-      preferred_university: extracted.target_university || "Not Specified",
+      preferred_course: extracted.data?.course || "Undecided",
+      preferred_university: extracted.data?.university || extracted.data?.country || "Not Specified",
       city: "Kathmandu",
       source
     });
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    const sName = studentName?.trim() || "WhatsApp Student";
+    const sName = extracted.studentName || studentName?.trim() || "WhatsApp Student";
     const names = sName.split(" ");
     const fName = names[0] || "Student";
     const lName = names.slice(1).join(" ") || "Inquiry";
@@ -5058,8 +5110,8 @@ async function chatWithStudent(params) {
       cleanPhone,
       cleanPhone,
       `student.${Date.now()}@inquiry.education-sansar.com`,
-      extracted.target_course || "Undecided",
-      extracted.target_university || "Not Specified",
+      extracted.data?.course || "Undecided",
+      extracted.data?.university || extracted.data?.country || "Not Specified",
       source,
       assignedC?.counselorId || null,
       assignedC?.counselorName || null,
@@ -5196,59 +5248,105 @@ You can also connect directly with your dedicated admission counselor ${counselo
     try {
       const isNowHot = qualificationScore >= 75 || lead.lead_temperature === "HOT";
       const newTemperature = isNowHot ? "HOT" : qualificationScore >= 50 ? "WARM" : lead.lead_temperature || "WARM";
+      let updatedStatus = lead.lead_status;
+      if (qualificationScore >= 50 || qualificationStatus === "Qualified" || qualificationStatus === "High Intent") {
+        if (lead.lead_status === "New Lead" || lead.lead_status === "Inquiry" || !lead.lead_status) {
+          updatedStatus = "Qualified";
+        }
+      }
+      let resolvedName = lead.student_name;
+      if (!resolvedName || resolvedName === "WhatsApp Student" || resolvedName === "Student") {
+        if (extracted.studentName) {
+          resolvedName = extracted.studentName;
+        } else if (studentName && studentName !== "WhatsApp Student") {
+          resolvedName = studentName;
+        }
+      }
+      const nameParts = resolvedName.split(" ");
+      const firstName = nameParts[0] || "Student";
+      const lastName = nameParts.slice(1).join(" ") || "Inquiry";
+      let parsedPercentage = null;
+      if (mergedDetails.marks) {
+        const mMatch = mergedDetails.marks.match(/(\d{2}(?:\.\d+)?)\s*%/);
+        if (mMatch) parsedPercentage = parseFloat(mMatch[1]);
+      }
       db.prepare(`
         UPDATE leads SET
+          student_name = ?,
+          first_name = ?,
+          last_name = ?,
+          lead_status = ?,
+          lead_temperature = ?,
           qualification_score = ?,
           qualification_status = ?,
           qualification_summary = ?,
           qualification_details = ?,
           ai_chat_summary = ?,
           ai_chat_count = COALESCE(ai_chat_count, 0) + 1,
-          lead_temperature = ?,
-          preferred_course = CASE WHEN preferred_course = 'Undecided' AND ? IS NOT NULL THEN ? ELSE preferred_course END,
-          preferred_university = CASE WHEN preferred_university = 'Not Specified' AND ? IS NOT NULL THEN ? ELSE preferred_university END,
+          preferred_course = CASE WHEN preferred_course = 'Undecided' AND ? IS NOT NULL THEN ? ELSE COALESCE(?, preferred_course) END,
+          preferred_university = CASE WHEN preferred_university = 'Not Specified' AND ? IS NOT NULL THEN ? ELSE COALESCE(?, preferred_university) END,
+          budget = COALESCE(?, budget),
+          percentage_12th = COALESCE(?, percentage_12th),
+          academic_qualification = COALESCE(?, academic_qualification),
+          entrance_exam = COALESCE(?, entrance_exam),
           last_contact_date = datetime('now'),
           updated_at = datetime('now')
         WHERE id = ?
       `).run(
+        resolvedName,
+        firstName,
+        lastName,
+        updatedStatus,
+        newTemperature,
         qualificationScore,
         qualificationStatus,
         qualificationSummary,
         JSON.stringify(mergedDetails),
-        `Student: "${cleanMessage.slice(0, 100)}..." -> AI answered & qualified (${qualificationStatus})`,
-        newTemperature,
+        `Student: "${cleanMessage.slice(0, 100)}..." -> AI qualified (${qualificationStatus})`,
         mergedDetails.course || null,
         mergedDetails.course || null,
-        mergedDetails.university || null,
-        mergedDetails.university || null,
+        mergedDetails.course || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.budget || null,
+        parsedPercentage,
+        mergedDetails.marks || null,
+        mergedDetails.entranceExam || null,
         lead.id
       );
       logLeadActivity({
         leadId: lead.id,
-        activityType: "AI Chatbot",
-        title: `AI Chat Counseling Turn (${qualificationStatus} - ${qualificationScore}%)`,
-        description: `Student asked: "${cleanMessage}"
-AI Counselor replied with ${matchedKnowledge.length} knowledge citations.
-Qualification status updated to ${qualificationStatus} (${qualificationScore}%).`,
+        activityType: "Lead Qualified",
+        title: `\u{1F3AF} Student Lead Qualified by AI (${qualificationScore}%)`,
+        description: `Student chatted with AI Counselor and qualified with score ${qualificationScore}% (${qualificationStatus}). Captured Details:
+\u2022 Course: ${mergedDetails.course || "Undecided"}
+\u2022 Country/University: ${mergedDetails.university || mergedDetails.country || "N/A"}
+\u2022 Marks/GPA: ${mergedDetails.marks || "N/A"}
+\u2022 Budget: ${mergedDetails.budget || "N/A"}
+\u2022 Intake: ${mergedDetails.intake || "N/A"}
+Status updated to ${updatedStatus} in Leads tab.`,
         performedBy: "GGS AI Counselor"
       });
       const msgId = "AI-MSG-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
       db.prepare(`
-        INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
-        VALUES (?, ?, 'WhatsApp', ?, 'GGS AI Counselor', ?, 'Sent')
+        INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, sent_at)
+        VALUES (?, ?, 'WhatsApp', ?, 'GGS AI Counselor', ?, 'Sent', datetime('now'))
       `).run(
         msgId,
         lead.id,
         lead.student_name || cleanPhone || "Student",
         botReply
       );
-      if (qualificationScore >= 70 && lead.assigned_counselor_id) {
+      if (qualificationScore >= 50 && lead.assigned_counselor_id) {
         createNotification({
           userId: counselor?.user_id,
           counselorId: lead.assigned_counselor_id,
-          title: `\u{1F525} High-Intent Lead Qualified: ${lead.student_name}`,
-          message: `${lead.student_name} reached ${qualificationScore}% qualification via AI Chat (${qualificationSummary}). Ready for direct counselor closing!`,
-          type: "LEAD_QUALIFIED"
+          title: `\u{1F3AF} Qualified Lead Added to Leads Tab: ${resolvedName}`,
+          message: `${resolvedName} (${cleanPhone}) has reached ${qualificationScore}% qualification score via AI Chatbot (${qualificationSummary}) and moved to your Leads tab for closing.`,
+          type: "LEAD_QUALIFIED",
+          entityType: "lead",
+          entityId: lead.id
         });
       }
     } catch (e) {
@@ -5295,6 +5393,14 @@ Qualification status updated to ${qualificationStatus} (${qualificationScore}%).
 function extractQualificationData(message, history = []) {
   const fullText = (history.map((h) => h.message).join(" ") + " " + message).toLowerCase();
   const data = {};
+  let studentName;
+  const nameMatch = message.match(/(?:i\s*am|my\s*name\s*is|this\s*is|myself)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if (nameMatch && nameMatch[1]) {
+    const rawName = nameMatch[1].trim();
+    if (!/interested|looking|student|inquiring|calling|from|want|seeking/i.test(rawName)) {
+      studentName = rawName;
+    }
+  }
   if (/b\.?\s?tech|engineering|cse|computer science|ai\s?\&?\s?ml|mechanical|civil/i.test(fullText)) {
     data.course = "B.Tech Computer Science / Engineering";
   } else if (/mbbs|doctor|medical\s?college|bds/i.test(fullText)) {
@@ -5361,7 +5467,7 @@ function extractQualificationData(message, history = []) {
   } else if (/\bjee\b/i.test(fullText)) {
     data.entranceExam = "JEE Main";
   }
-  return { data };
+  return { data, studentName };
 }
 function calculateQualificationScore(details, latestMessage) {
   let score = 15;
@@ -11690,6 +11796,331 @@ init_broadcastService();
 init_aiSalesService();
 init_knowledgeBaseService();
 init_studentAIChatbotService();
+
+// server/services/whatsappWebService.ts
+init_database();
+init_studentAIChatbotService();
+function getWhatsAppSession(counselorId) {
+  try {
+    let session = null;
+    if (counselorId) {
+      session = db.prepare("SELECT * FROM whatsapp_sessions WHERE counselor_id = ?").get(counselorId);
+    }
+    if (!session) {
+      session = db.prepare("SELECT * FROM whatsapp_sessions ORDER BY updated_at DESC LIMIT 1").get();
+    }
+    if (!session) {
+      const id = "wa-sess-" + Date.now();
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      db.prepare(`
+        INSERT INTO whatsapp_sessions (
+          id, counselor_id, counselor_name, session_name, status,
+          device_name, battery_level, is_active, ai_auto_reply, created_at, updated_at
+        )
+        VALUES (?, 'c-prakash', 'Prakash Yadav', 'Counselor WhatsApp Web', 'DISCONNECTED', 'Chrome 124.0 (macOS)', 88, 1, 1, ?, ?)
+      `).run(id, now, now);
+      session = db.prepare("SELECT * FROM whatsapp_sessions WHERE id = ?").get(id);
+    }
+    if (session.status === "QR_READY" && session.qr_expires_at) {
+      if (new Date(session.qr_expires_at).getTime() < Date.now()) {
+        session.status = "DISCONNECTED";
+        db.prepare("UPDATE whatsapp_sessions SET status = 'DISCONNECTED' WHERE id = ?").run(session.id);
+      }
+    }
+    return session;
+  } catch (err) {
+    console.error("[WhatsAppWeb] getWhatsAppSession error:", err);
+    throw err;
+  }
+}
+function startWhatsAppSession(counselorId, counselorName) {
+  const current = getWhatsAppSession(counselorId);
+  const now = /* @__PURE__ */ new Date();
+  const expiresAt = new Date(now.getTime() + 6e4).toISOString();
+  const pairingCode = "GGS-" + Math.floor(1e3 + Math.random() * 9e3);
+  const qrToken = `2@GGS_WA_${Date.now()}_${Math.random().toString(36).substring(2, 9)},${counselorId || "counselor"},${pairingCode}`;
+  db.prepare(`
+    UPDATE whatsapp_sessions SET
+      status = 'QR_READY',
+      qr_code_data = ?,
+      qr_expires_at = ?,
+      pairing_code = ?,
+      counselor_name = COALESCE(?, counselor_name),
+      updated_at = ?
+    WHERE id = ?
+  `).run(qrToken, expiresAt, pairingCode, counselorName || null, now.toISOString(), current.id);
+  return getWhatsAppSession(counselorId);
+}
+function simulateScanDevice(params) {
+  const current = getWhatsAppSession(params.counselorId);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const phone = params.phoneNumber?.trim() || "+977 9801234567";
+  const cName = params.counselorName?.trim() || current.counselor_name || "Prakash Yadav";
+  const dName = params.deviceName || "Chrome 124.0 (macOS Sonoma)";
+  db.prepare(`
+    UPDATE whatsapp_sessions SET
+      status = 'CONNECTED',
+      phone_number = ?,
+      counselor_name = ?,
+      device_name = ?,
+      battery_level = 88,
+      qr_code_data = NULL,
+      qr_expires_at = NULL,
+      pairing_code = NULL,
+      connected_at = ?,
+      last_active_at = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(phone, cName, dName, now, now, now, current.id);
+  return getWhatsAppSession(params.counselorId);
+}
+function disconnectWhatsAppSession(counselorId) {
+  const current = getWhatsAppSession(counselorId);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(`
+    UPDATE whatsapp_sessions SET
+      status = 'DISCONNECTED',
+      qr_code_data = NULL,
+      qr_expires_at = NULL,
+      pairing_code = NULL,
+      updated_at = ?
+    WHERE id = ?
+  `).run(now, current.id);
+  return getWhatsAppSession(counselorId);
+}
+function toggleSessionAIAutoReply(sessionId, enabled) {
+  const result = db.prepare("UPDATE whatsapp_sessions SET ai_auto_reply = ? WHERE id = ?").run(enabled ? 1 : 0, sessionId);
+  return result.changes > 0;
+}
+function getWhatsAppChats(params) {
+  try {
+    const leads = db.prepare(`
+      SELECT 
+        id, lead_id, student_name, phone, whatsapp_number, preferred_course,
+        preferred_university, lead_status, lead_temperature, qualification_score,
+        qualification_status, assigned_counselor_id, assigned_counselor_name,
+        last_contact_date, created_at, updated_at
+      FROM leads
+      WHERE is_deleted = 0
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `).all();
+    const latestMessages = db.prepare(`
+      SELECT m.*
+      FROM messages m
+      INNER JOIN (
+        SELECT recipient, MAX(sent_at) as max_sent
+        FROM messages
+        WHERE channel = 'WhatsApp'
+        GROUP BY recipient
+      ) r ON m.recipient = r.recipient AND m.sent_at = r.max_sent
+      WHERE m.channel = 'WhatsApp'
+    `).all();
+    const messageMap = /* @__PURE__ */ new Map();
+    for (const msg of latestMessages) {
+      const cleanPhone = (msg.recipient || "").replace(/[^0-9]/g, "");
+      if (cleanPhone) messageMap.set(cleanPhone, msg);
+    }
+    const chats = [];
+    for (const lead of leads) {
+      const cleanPhone = (lead.whatsapp_number || lead.phone || "").replace(/[^0-9]/g, "");
+      const cleanSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+      let msg = messageMap.get(cleanPhone);
+      if (!msg) {
+        for (const [p, m] of messageMap.entries()) {
+          if (p.endsWith(cleanSuffix) || cleanPhone.endsWith(p.slice(-8))) {
+            msg = m;
+            break;
+          }
+        }
+      }
+      const qScore = lead.qualification_score || 0;
+      const qStatus = lead.qualification_status || "Unqualified";
+      const isQualified = qScore >= 50 || qStatus === "Qualified" || qStatus === "High Intent";
+      if (params?.filter === "qualified" && !isQualified) continue;
+      if (params?.filter === "high_intent" && qScore < 70) continue;
+      if (params?.search && params.search.trim()) {
+        const s = params.search.toLowerCase().trim();
+        const matches = (lead.student_name || "").toLowerCase().includes(s) || (lead.phone || "").includes(s) || (lead.preferred_course || "").toLowerCase().includes(s) || (msg?.content || "").toLowerCase().includes(s);
+        if (!matches) continue;
+      }
+      chats.push({
+        lead_id: lead.id,
+        lead_name: lead.student_name || "Student Lead",
+        phone: lead.phone,
+        whatsapp_number: lead.whatsapp_number || lead.phone,
+        course: lead.preferred_course !== "Undecided" ? lead.preferred_course : void 0,
+        university: lead.preferred_university !== "Not Specified" ? lead.preferred_university : void 0,
+        last_message: msg?.content || `Inquiry regarding ${lead.preferred_course || "courses"}`,
+        last_message_at: msg?.sent_at || lead.updated_at || lead.created_at,
+        unread_count: isQualified ? 1 : 0,
+        qualification_score: qScore,
+        qualification_status: qStatus,
+        is_qualified: isQualified,
+        lead_status: lead.lead_status,
+        lead_temperature: lead.lead_temperature,
+        assigned_counselor_name: lead.assigned_counselor_name,
+        assigned_counselor_id: lead.assigned_counselor_id,
+        ai_enabled: true
+      });
+    }
+    chats.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+    return chats;
+  } catch (err) {
+    console.error("[WhatsAppWeb] getWhatsAppChats error:", err);
+    return [];
+  }
+}
+function getWhatsAppChatMessages(phone) {
+  const cleanPhone = phone.replace(/[^0-9]/g, "");
+  const searchSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+       OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    ORDER BY created_at DESC LIMIT 1
+  `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  let messages = [];
+  if (lead) {
+    messages = db.prepare(`
+      SELECT * FROM messages
+      WHERE lead_id = ? OR recipient LIKE ?
+      ORDER BY sent_at ASC
+    `).all(lead.id, `%${searchSuffix}%`);
+  } else {
+    messages = db.prepare(`
+      SELECT * FROM messages
+      WHERE recipient LIKE ?
+      ORDER BY sent_at ASC
+    `).all(`%${searchSuffix}%`);
+  }
+  let qDetails = {};
+  if (lead?.qualification_details) {
+    try {
+      qDetails = JSON.parse(lead.qualification_details);
+    } catch {
+    }
+  }
+  return {
+    lead,
+    messages,
+    qualification: {
+      score: lead?.qualification_score || 0,
+      status: lead?.qualification_status || "Unqualified",
+      summary: lead?.qualification_summary || "No qualification summary available",
+      details: qDetails,
+      isQualified: (lead?.qualification_score || 0) >= 50
+    }
+  };
+}
+async function sendWhatsAppChatMessage(params) {
+  const { phone, message, senderName = "Counselor", counselorId, triggerAiResponse = false } = params;
+  const cleanPhone = phone.trim();
+  const cleanDigits = cleanPhone.replace(/[^0-9]/g, "");
+  const searchSuffix = cleanDigits.length >= 8 ? cleanDigits.slice(-8) : cleanDigits;
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+       OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    ORDER BY created_at DESC LIMIT 1
+  `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  const msgId = "WA-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, sent_at)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Sent', ?)
+  `).run(msgId, lead?.id || null, cleanPhone, senderName, message.trim(), now);
+  const sentMessage = db.prepare("SELECT * FROM messages WHERE id = ?").get(msgId);
+  if (lead) {
+    db.prepare("UPDATE leads SET last_contact_date = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id);
+  }
+  let aiReplyResult = null;
+  if (triggerAiResponse) {
+    aiReplyResult = await chatWithStudent({
+      phone: cleanPhone,
+      studentName: lead?.student_name || "Student",
+      message: message.trim(),
+      source: "WhatsApp Web"
+    });
+  }
+  return { sentMessage, aiReply: aiReplyResult };
+}
+function promoteLeadToActive(params) {
+  let lead = null;
+  if (params.leadId) {
+    lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(params.leadId);
+  } else if (params.phone) {
+    const rawDigits = params.phone.replace(/[^0-9]/g, "");
+    const searchSuffix = rawDigits.length >= 8 ? rawDigits.slice(-8) : rawDigits;
+    lead = db.prepare(`
+      SELECT * FROM leads 
+      WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  }
+  if (!lead) {
+    throw new Error("Lead not found to promote");
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let existingDetails = {};
+  try {
+    existingDetails = JSON.parse(lead.qualification_details || "{}");
+  } catch {
+  }
+  const merged = {
+    ...existingDetails,
+    ...params.course ? { course: params.course } : {},
+    ...params.university ? { university: params.university } : {},
+    ...params.marks ? { marks: params.marks } : {},
+    ...params.budget ? { budget: params.budget } : {}
+  };
+  const newScore = Math.max(lead.qualification_score || 0, 75);
+  const newSummary = `Qualified: ${merged.course || lead.preferred_course} | Budget: ${merged.budget || lead.budget || "Verified"} | Marks: ${merged.marks || "Verified"}`;
+  db.prepare(`
+    UPDATE leads SET
+      lead_status = 'Qualified',
+      lead_temperature = 'HOT',
+      qualification_score = ?,
+      qualification_status = 'Qualified',
+      qualification_summary = ?,
+      qualification_details = ?,
+      preferred_course = COALESCE(?, preferred_course),
+      preferred_university = COALESCE(?, preferred_university),
+      budget = COALESCE(?, budget),
+      assigned_counselor_id = COALESCE(?, assigned_counselor_id),
+      updated_at = ?
+    WHERE id = ?
+  `).run(
+    newScore,
+    newSummary,
+    JSON.stringify(merged),
+    params.course || null,
+    params.university || null,
+    params.budget || null,
+    params.counselorId || null,
+    now,
+    lead.id
+  );
+  logLeadActivity({
+    leadId: lead.id,
+    activityType: "Lead Qualified",
+    title: "\u{1F3AF} Lead Moved to Active Leads Tab",
+    description: `Lead moved to active Leads tab by ${params.promotedBy || "Counselor via WhatsApp Web"} with full academic & budget verification.`,
+    performedBy: params.promotedBy || "Counselor"
+  });
+  createNotification({
+    counselorId: lead.assigned_counselor_id || params.counselorId,
+    title: `\u{1F3AF} Lead Qualified: ${lead.student_name}`,
+    message: `${lead.student_name} (${lead.phone}) is now an Active Qualified Lead in your Leads Tab!`,
+    type: "LEAD_QUALIFIED",
+    entityType: "lead",
+    entityId: lead.id
+  });
+  return db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+}
+
+// server/routes/api.ts
 var apiRouter = Router();
 var cachedBuildInfo = null;
 function getSystemBuildInfo() {
@@ -15956,6 +16387,107 @@ apiRouter.get("/chatbot/lead-qualification/:leadId", (req, res) => {
     res.json(lead);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch lead qualification" });
+  }
+});
+apiRouter.get("/whatsapp-web/session", (req, res) => {
+  try {
+    const counselorId = req.query.counselorId;
+    const session = getWhatsAppSession(counselorId);
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch WhatsApp Web session" });
+  }
+});
+apiRouter.post("/whatsapp-web/session/start", (req, res) => {
+  try {
+    const { counselorId, counselorName } = req.body;
+    const session = startWhatsAppSession(counselorId, counselorName);
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to initialize QR session" });
+  }
+});
+apiRouter.post("/whatsapp-web/session/simulate-scan", (req, res) => {
+  try {
+    const { counselorId, phoneNumber, counselorName, deviceName } = req.body;
+    const session = simulateScanDevice({ counselorId, phoneNumber, counselorName, deviceName });
+    res.json({ success: true, session });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to link WhatsApp account" });
+  }
+});
+apiRouter.post("/whatsapp-web/session/disconnect", (req, res) => {
+  try {
+    const { counselorId } = req.body;
+    const session = disconnectWhatsAppSession(counselorId);
+    res.json({ success: true, session });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to disconnect session" });
+  }
+});
+apiRouter.post("/whatsapp-web/session/toggle-ai", (req, res) => {
+  try {
+    const { sessionId, enabled } = req.body;
+    const ok = toggleSessionAIAutoReply(sessionId, !!enabled);
+    res.json({ success: ok });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to toggle AI auto reply" });
+  }
+});
+apiRouter.get("/whatsapp-web/chats", (req, res) => {
+  try {
+    const { counselorId, search, filter } = req.query;
+    const chats = getWhatsAppChats({
+      counselorId,
+      search,
+      filter
+    });
+    res.json(chats);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to load WhatsApp chats" });
+  }
+});
+apiRouter.get("/whatsapp-web/chats/:phone/messages", (req, res) => {
+  try {
+    const data = getWhatsAppChatMessages(req.params.phone);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to load chat thread" });
+  }
+});
+apiRouter.post("/whatsapp-web/chats/:phone/send", async (req, res) => {
+  try {
+    const { message, senderName, counselorId, triggerAiResponse } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: "Message cannot be empty" });
+    }
+    const result = await sendWhatsAppChatMessage({
+      phone: req.params.phone,
+      message,
+      senderName,
+      counselorId,
+      triggerAiResponse
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to send message" });
+  }
+});
+apiRouter.post("/whatsapp-web/chats/:phone/promote-lead", (req, res) => {
+  try {
+    const { course, university, marks, budget, counselorId, promotedBy } = req.body;
+    const lead = promoteLeadToActive({
+      phone: req.params.phone,
+      course,
+      university,
+      marks,
+      budget,
+      counselorId,
+      promotedBy
+    });
+    res.json({ success: true, lead });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to promote lead" });
   }
 });
 

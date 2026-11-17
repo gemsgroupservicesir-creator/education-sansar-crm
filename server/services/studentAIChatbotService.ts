@@ -48,13 +48,13 @@ export async function chatWithStudent(params: StudentChatParams): Promise<Studen
   if (!lead && cleanPhone) {
     const newLeadId = 'lead-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
     const assignedC = distributeLead({
-      preferred_course: extracted.target_course || 'Undecided',
-      preferred_university: extracted.target_university || 'Not Specified',
+      preferred_course: extracted.data?.course || 'Undecided',
+      preferred_university: extracted.data?.university || extracted.data?.country || 'Not Specified',
       city: 'Kathmandu',
       source
     });
     const now = new Date().toISOString();
-    const sName = studentName?.trim() || 'WhatsApp Student';
+    const sName = extracted.studentName || studentName?.trim() || 'WhatsApp Student';
     const names = sName.split(' ');
     const fName = names[0] || 'Student';
     const lName = names.slice(1).join(' ') || 'Inquiry';
@@ -77,8 +77,8 @@ export async function chatWithStudent(params: StudentChatParams): Promise<Studen
       cleanPhone,
       cleanPhone,
       `student.${Date.now()}@inquiry.education-sansar.com`,
-      extracted.target_course || 'Undecided',
-      extracted.target_university || 'Not Specified',
+      extracted.data?.course || 'Undecided',
+      extracted.data?.university || extracted.data?.country || 'Not Specified',
       source,
       assignedC?.counselorId || null,
       assignedC?.counselorName || null,
@@ -237,54 +237,102 @@ Generate your helpful, knowledgeable counseling response now. Remember to ground
   }
 
   // 6. Update Lead in CRM if lead exists
+  // 6. Update Lead Record & Audit Trail in Database
   if (lead) {
     try {
       const isNowHot = qualificationScore >= 75 || lead.lead_temperature === 'HOT';
       const newTemperature = isNowHot ? 'HOT' : qualificationScore >= 50 ? 'WARM' : (lead.lead_temperature || 'WARM');
 
-      // Update lead qualification fields
+      // Promote to 'Qualified' status in the Leads Tab when qualification criteria is met
+      let updatedStatus = lead.lead_status;
+      if (qualificationScore >= 50 || qualificationStatus === 'Qualified' || qualificationStatus === 'High Intent') {
+        if (lead.lead_status === 'New Lead' || lead.lead_status === 'Inquiry' || !lead.lead_status) {
+          updatedStatus = 'Qualified';
+        }
+      }
+
+      // Resolved student name from extracted context or input
+      let resolvedName = lead.student_name;
+      if (!resolvedName || resolvedName === 'WhatsApp Student' || resolvedName === 'Student') {
+        if (extracted.studentName) {
+          resolvedName = extracted.studentName;
+        } else if (studentName && studentName !== 'WhatsApp Student') {
+          resolvedName = studentName;
+        }
+      }
+
+      const nameParts = resolvedName.split(' ');
+      const firstName = nameParts[0] || 'Student';
+      const lastName = nameParts.slice(1).join(' ') || 'Inquiry';
+
+      // Parse 12th percentage number if available
+      let parsedPercentage: number | null = null;
+      if (mergedDetails.marks) {
+        const mMatch = mergedDetails.marks.match(/(\d{2}(?:\.\d+)?)\s*%/);
+        if (mMatch) parsedPercentage = parseFloat(mMatch[1]);
+      }
+
+      // Update lead with complete captured qualification profile
       db.prepare(`
         UPDATE leads SET
+          student_name = ?,
+          first_name = ?,
+          last_name = ?,
+          lead_status = ?,
+          lead_temperature = ?,
           qualification_score = ?,
           qualification_status = ?,
           qualification_summary = ?,
           qualification_details = ?,
           ai_chat_summary = ?,
           ai_chat_count = COALESCE(ai_chat_count, 0) + 1,
-          lead_temperature = ?,
-          preferred_course = CASE WHEN preferred_course = 'Undecided' AND ? IS NOT NULL THEN ? ELSE preferred_course END,
-          preferred_university = CASE WHEN preferred_university = 'Not Specified' AND ? IS NOT NULL THEN ? ELSE preferred_university END,
+          preferred_course = CASE WHEN preferred_course = 'Undecided' AND ? IS NOT NULL THEN ? ELSE COALESCE(?, preferred_course) END,
+          preferred_university = CASE WHEN preferred_university = 'Not Specified' AND ? IS NOT NULL THEN ? ELSE COALESCE(?, preferred_university) END,
+          budget = COALESCE(?, budget),
+          percentage_12th = COALESCE(?, percentage_12th),
+          academic_qualification = COALESCE(?, academic_qualification),
+          entrance_exam = COALESCE(?, entrance_exam),
           last_contact_date = datetime('now'),
           updated_at = datetime('now')
         WHERE id = ?
       `).run(
+        resolvedName,
+        firstName,
+        lastName,
+        updatedStatus,
+        newTemperature,
         qualificationScore,
         qualificationStatus,
         qualificationSummary,
         JSON.stringify(mergedDetails),
-        `Student: "${cleanMessage.slice(0, 100)}..." -> AI answered & qualified (${qualificationStatus})`,
-        newTemperature,
+        `Student: "${cleanMessage.slice(0, 100)}..." -> AI qualified (${qualificationStatus})`,
         mergedDetails.course || null,
         mergedDetails.course || null,
-        mergedDetails.university || null,
-        mergedDetails.university || null,
+        mergedDetails.course || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.university || mergedDetails.country || null,
+        mergedDetails.budget || null,
+        parsedPercentage,
+        mergedDetails.marks || null,
+        mergedDetails.entranceExam || null,
         lead.id
       );
 
       // Log Lead Activity
       logLeadActivity({
         leadId: lead.id,
-        activityType: 'AI Chatbot',
-        title: `AI Chat Counseling Turn (${qualificationStatus} - ${qualificationScore}%)`,
-        description: `Student asked: "${cleanMessage}"\nAI Counselor replied with ${matchedKnowledge.length} knowledge citations.\nQualification status updated to ${qualificationStatus} (${qualificationScore}%).`,
+        activityType: 'Lead Qualified',
+        title: `🎯 Student Lead Qualified by AI (${qualificationScore}%)`,
+        description: `Student chatted with AI Counselor and qualified with score ${qualificationScore}% (${qualificationStatus}). Captured Details:\n• Course: ${mergedDetails.course || 'Undecided'}\n• Country/University: ${mergedDetails.university || mergedDetails.country || 'N/A'}\n• Marks/GPA: ${mergedDetails.marks || 'N/A'}\n• Budget: ${mergedDetails.budget || 'N/A'}\n• Intake: ${mergedDetails.intake || 'N/A'}\nStatus updated to ${updatedStatus} in Leads tab.`,
         performedBy: 'GGS AI Counselor'
       });
 
       // Record in messages log
       const msgId = 'AI-MSG-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
       db.prepare(`
-        INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
-        VALUES (?, ?, 'WhatsApp', ?, 'GGS AI Counselor', ?, 'Sent')
+        INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, sent_at)
+        VALUES (?, ?, 'WhatsApp', ?, 'GGS AI Counselor', ?, 'Sent', datetime('now'))
       `).run(
         msgId,
         lead.id,
@@ -292,14 +340,16 @@ Generate your helpful, knowledgeable counseling response now. Remember to ground
         botReply
       );
 
-      // 7. If Lead Reached High Intent / Qualified, Trigger Counselor Alert
-      if (qualificationScore >= 70 && lead.assigned_counselor_id) {
+      // 7. If Lead Reached Qualified / High Intent, Trigger Counselor Alert
+      if (qualificationScore >= 50 && lead.assigned_counselor_id) {
         createNotification({
           userId: counselor?.user_id,
           counselorId: lead.assigned_counselor_id,
-          title: `🔥 High-Intent Lead Qualified: ${lead.student_name}`,
-          message: `${lead.student_name} reached ${qualificationScore}% qualification via AI Chat (${qualificationSummary}). Ready for direct counselor closing!`,
-          type: 'LEAD_QUALIFIED'
+          title: `🎯 Qualified Lead Added to Leads Tab: ${resolvedName}`,
+          message: `${resolvedName} (${cleanPhone}) has reached ${qualificationScore}% qualification score via AI Chatbot (${qualificationSummary}) and moved to your Leads tab for closing.`,
+          type: 'LEAD_QUALIFIED',
+          entityType: 'lead',
+          entityId: lead.id
         });
       }
     } catch (e: any) {
@@ -348,9 +398,19 @@ Generate your helpful, knowledgeable counseling response now. Remember to ground
 /**
  * Heuristic Extractor: Extract course, marks, budget, intake, and entrance exam mentions
  */
-function extractQualificationData(message: string, history: Array<{ sender: string; message: string }> = []): { data: any } {
+function extractQualificationData(message: string, history: Array<{ sender: string; message: string }> = []): { data: any; studentName?: string } {
   const fullText = (history.map(h => h.message).join(' ') + ' ' + message).toLowerCase();
   const data: any = {};
+  let studentName: string | undefined;
+
+  // 0. Student Name Extraction (e.g. "I am Rohan Karki", "My name is Priya Sharma")
+  const nameMatch = message.match(/(?:i\s*am|my\s*name\s*is|this\s*is|myself)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if (nameMatch && nameMatch[1]) {
+    const rawName = nameMatch[1].trim();
+    if (!/interested|looking|student|inquiring|calling|from|want|seeking/i.test(rawName)) {
+      studentName = rawName;
+    }
+  }
 
   // 1. Course Extraction
   if (/b\.?\s?tech|engineering|cse|computer science|ai\s?\&?\s?ml|mechanical|civil/i.test(fullText)) {
@@ -431,7 +491,7 @@ function extractQualificationData(message: string, history: Array<{ sender: stri
     data.entranceExam = 'JEE Main';
   }
 
-  return { data };
+  return { data, studentName };
 }
 
 /**
