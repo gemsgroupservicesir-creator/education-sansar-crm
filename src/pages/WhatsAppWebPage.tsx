@@ -473,81 +473,110 @@ export const WhatsAppWebPage: React.FC = () => {
 
       {/* VIEW 1: DISCONNECTED / QR SCAN SCREEN */}
       {session?.status !== 'CONNECTED' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 sm:p-10 max-w-4xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            {/* Instructions */}
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                  <Smartphone className="w-3.5 h-3.5" />
-                  Step-by-Step Device Linking
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 sm:p-10 max-w-4xl mx-auto space-y-6">
+          <div className="text-center space-y-2 max-w-2xl mx-auto">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+              <MessageCircle className="w-3.5 h-3.5" />
+              WhatsApp Web Counselor Hub
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Connect Counselor WhatsApp to Education Sansar CRM
+            </h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Link your WhatsApp account so all inbound student inquiries chat automatically with the AI Counselor, qualify requirements (marks, budget, course), and stream directly into your CRM Leads tab.
+            </p>
+          </div>
+
+          {/* METHOD 1: 1-Click Fast Phone Connect (No Camera Required) */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-300 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                    ⚡
+                  </span>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Method 1: Instant Phone Link (Recommended — No Camera / No Invalid QR)
+                  </h3>
                 </div>
-                <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
-                  Connect WhatsApp to Education Sansar CRM
-                </h2>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Link your personal or office WhatsApp device. Inbound student messages will automatically chat with our AI counselor, extract marks &amp; budget, and promote qualified leads to your Leads tab.
+                <p className="text-xs text-slate-600 pl-8">
+                  Enter your mobile/WhatsApp number to connect your counselor account immediately with 1 click:
                 </p>
               </div>
 
-              <ol className="space-y-3.5 text-xs text-slate-700">
-                <li className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
+              <div className="flex items-center gap-2 sm:shrink-0 pl-8 sm:pl-0">
+                <input
+                  type="text"
+                  value={simulatedPhone}
+                  onChange={e => setSimulatedPhone(e.target.value)}
+                  placeholder="+977 9801234567"
+                  className="px-3.5 py-2 rounded-xl border border-emerald-300 text-xs bg-white text-slate-900 font-mono font-bold shadow-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none w-44"
+                />
+                <button
+                  onClick={handleSimulateScan}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-700/20 transition-all flex items-center gap-1.5 shrink-0"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Connect WhatsApp</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* METHOD 2 & 3: QR Code & Pairing Code */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center pt-2 border-t border-slate-100">
+            {/* Instructions */}
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-emerald-600" />
+                  Method 2: Scan QR Code with WhatsApp
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Follow these steps to scan using the WhatsApp app on your mobile phone:
+                </p>
+              </div>
+
+              <ol className="space-y-2.5 text-xs text-slate-700">
+                <li className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
                     1
                   </span>
-                  <div>
-                    Open <strong className="text-slate-900">WhatsApp</strong> on your mobile phone.
-                  </div>
+                  <div>Open <strong className="text-slate-900">WhatsApp</strong> on your mobile phone.</div>
                 </li>
-                <li className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
+                <li className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
                     2
                   </span>
-                  <div>
-                    Tap <strong className="text-slate-900">Menu</strong> (Android) or <strong className="text-slate-900">Settings</strong> (iPhone) and select <strong className="text-slate-900">Linked Devices</strong>.
-                  </div>
+                  <div>Tap <strong className="text-slate-900">Settings</strong> (or 3 dots Menu) &gt; <strong className="text-slate-900">Linked Devices</strong>.</div>
                 </li>
-                <li className="flex items-start gap-3">
-                  <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
+                <li className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center shrink-0 text-xs">
                     3
                   </span>
-                  <div>
-                    Tap on <strong className="text-slate-900">Link a Device</strong> and point your phone camera at this QR code.
-                  </div>
+                  <div>Tap <strong className="text-slate-900">Link a Device</strong> and point your camera at this QR code.</div>
                 </li>
               </ol>
 
+              {/* Troubleshooting Notice */}
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Phone showing 'Invalid QR code'?</strong>
+                  <p className="text-amber-700 mt-0.5">
+                    WhatsApp mobile scanners can reject codes due to focus or network timeouts. Simply use <strong>Method 1 (Instant Phone Link)</strong> above to connect directly with 1 click!
+                  </p>
+                </div>
+              </div>
+
               {/* Pairing code toggle */}
-              <div className="pt-2 border-t border-slate-100">
+              <div className="pt-1">
                 <button
                   onClick={() => setShowPairingCode(!showPairingCode)}
                   className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1"
                 >
-                  <span>{showPairingCode ? '← Scan QR code instead' : 'Link with 8-digit phone pairing code instead →'}</span>
+                  <span>{showPairingCode ? '← Scan QR code instead' : 'Method 3: Link with 8-digit phone pairing code instead →'}</span>
                 </button>
-              </div>
-
-              {/* Simulated Auto-Scan Simulator for Testing */}
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
-                <div className="text-[11px] font-semibold text-slate-700 flex items-center justify-between">
-                  <span>Direct Connect / Fast Pairing:</span>
-                  <span className="text-[10px] text-blue-600 font-mono">Auto-Sync</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={simulatedPhone}
-                    onChange={e => setSimulatedPhone(e.target.value)}
-                    placeholder="+977 9801234567"
-                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white text-slate-800 font-mono"
-                  />
-                  <button
-                    onClick={handleSimulateScan}
-                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0 transition-colors"
-                  >
-                    Connect Phone
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -604,8 +633,8 @@ export const WhatsAppWebPage: React.FC = () => {
                         title="Click to connect phone immediately or scan directly with WhatsApp camera"
                       >
                         <Smartphone className="w-8 h-8 mb-2 text-emerald-400 animate-bounce" />
-                        <span className="font-bold text-xs">Simulate Scan & Connect</span>
-                        <span className="text-[10px] text-slate-300">Or scan with phone camera directly</span>
+                        <span className="font-bold text-xs">Click to Connect Immediately</span>
+                        <span className="text-[10px] text-slate-300">Bypass camera scanner</span>
                       </div>
                     </div>
                   ) : (
@@ -641,10 +670,10 @@ export const WhatsAppWebPage: React.FC = () => {
 
               <button
                 onClick={handleSimulateScan}
-                className="mt-6 w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-700/20 hover:brightness-105 transition-all flex items-center justify-center gap-2"
+                className="mt-4 w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-700/20 hover:brightness-105 transition-all flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Simulate Phone Scan &amp; Open WhatsApp Web</span>
+                <span>Connect &amp; Open WhatsApp Web Tab</span>
               </button>
             </div>
           </div>

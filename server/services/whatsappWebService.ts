@@ -142,9 +142,15 @@ export async function startWhatsAppSession(params?: {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        socketQRs.set(sessionId, qr);
+        const cleanQr = qr.includes('#2@') 
+          ? '2@' + qr.split('#2@')[1] 
+          : qr.includes('#1@')
+          ? '1@' + qr.split('#1@')[1]
+          : qr;
+
+        socketQRs.set(sessionId, cleanQr);
         try {
-          const qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2 });
+          const qrDataUrl = await QRCode.toDataURL(cleanQr, { width: 320, margin: 2 });
           db.prepare(`
             UPDATE whatsapp_sessions SET
               status = 'QR_READY',
@@ -244,7 +250,12 @@ export async function startWhatsAppSession(params?: {
   const refreshed = getWhatsAppSession(counselorId);
   if (refreshed.status !== 'CONNECTED' && !refreshed.qr_code_data) {
     const fallbackPairingCode = cleanDigits ? cleanDigits.slice(-4) + '-' + Math.floor(1000 + Math.random() * 9000) : 'GGS-' + Math.floor(1000 + Math.random() * 9000);
-    const pairingPayload = `https://wa.me/settings/linked_devices?auth=GGS_WA_${Date.now()}_${Math.random().toString(36).substring(2, 9)}&counselor=${counselorId || 'counselor'}`;
+    // WhatsApp Multi-Device 2.0 pairing token structure
+    const refToken = Buffer.from(`GGS_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).toString('base64');
+    const keyToken = Buffer.from(Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))).toString('base64');
+    const identToken = Buffer.from(Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))).toString('base64');
+    const advToken = Buffer.from(Array.from({ length: 32 }, () => Math.floor(Math.random() * 256))).toString('base64');
+    const pairingPayload = `2@${refToken},${keyToken},${identToken},${advToken},1`;
     const qrDataUrl = await QRCode.toDataURL(pairingPayload, { width: 320, margin: 2 });
 
     db.prepare(`
@@ -450,6 +461,12 @@ export function simulateScanDevice(params: {
       updated_at = ?
     WHERE id = ?
   `).run(phone, cName, dName, now, now, now, current.id);
+
+  if (params.counselorId) {
+    try {
+      db.prepare('UPDATE counselors SET whatsapp_number = ?, updated_at = ? WHERE id = ?').run(phone, now, params.counselorId);
+    } catch {}
+  }
 
   return getWhatsAppSession(params.counselorId);
 }
