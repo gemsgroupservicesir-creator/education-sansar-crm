@@ -5349,6 +5349,14 @@ Status updated to ${updatedStatus} in Leads tab.`,
           entityId: lead.id
         });
       }
+      if (isNeonEnabled()) {
+        try {
+          const freshLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+          if (freshLead) persistLeadToNeon(freshLead).catch(() => {
+          });
+        } catch {
+        }
+      }
     } catch (e) {
       console.warn("[StudentAI] CRM update warning:", e.message);
     }
@@ -5486,6 +5494,7 @@ var init_studentAIChatbotService = __esm({
   "server/services/studentAIChatbotService.ts"() {
     "use strict";
     init_database();
+    init_neon();
     init_knowledgeBaseService();
     init_aiSalesService();
     init_leadDistributionEngine();
@@ -11799,6 +11808,7 @@ init_studentAIChatbotService();
 
 // server/services/whatsappWebService.ts
 init_database();
+init_neon();
 init_studentAIChatbotService();
 import fs2 from "fs";
 import path2 from "path";
@@ -12061,6 +12071,10 @@ async function handleIncomingWhatsAppMessage(params) {
       now
     );
     lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(newLeadId);
+    if (isNeonEnabled() && lead) {
+      persistLeadToNeon(lead).catch(() => {
+      });
+    }
   }
   const inMsgId = "MSG-IN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
   db.prepare(`
@@ -12099,6 +12113,10 @@ async function handleIncomingWhatsAppMessage(params) {
     }
   }
   const refreshedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+  if (isNeonEnabled() && refreshedLead) {
+    persistLeadToNeon(refreshedLead).catch(() => {
+    });
+  }
   return {
     incomingMessage,
     aiReply: aiReplyResult,

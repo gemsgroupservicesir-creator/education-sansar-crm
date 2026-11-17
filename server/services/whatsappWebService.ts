@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import QRCode from 'qrcode';
 import { db, logLeadActivity, createNotification } from '../db/database.ts';
+import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
 import type { WhatsAppSession, WhatsAppChatSummary } from '../types/index.ts';
 import { chatWithStudent } from './studentAIChatbotService.ts';
 
@@ -366,6 +367,9 @@ export async function handleIncomingWhatsAppMessage(params: {
     );
 
     lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(newLeadId);
+    if (isNeonEnabled() && lead) {
+      persistLeadToNeon(lead).catch(() => {});
+    }
   }
 
   // 2. Store incoming student message in DB
@@ -418,6 +422,9 @@ export async function handleIncomingWhatsAppMessage(params: {
 
   // Refresh lead state after AI qualification
   const refreshedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+  if (isNeonEnabled() && refreshedLead) {
+    persistLeadToNeon(refreshedLead).catch(() => {});
+  }
 
   return {
     incomingMessage,

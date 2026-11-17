@@ -1,4 +1,5 @@
 import { db, logLeadActivity, createNotification } from '../db/database.ts';
+import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
 import { searchKnowledgeBase } from './knowledgeBaseService.ts';
 import { callGeminiApi } from './aiSalesService.ts';
 import { distributeLead } from './leadDistributionEngine.ts';
@@ -351,6 +352,14 @@ Generate your helpful, knowledgeable counseling response now. Remember to ground
           entityType: 'lead',
           entityId: lead.id
         });
+      }
+
+      // Persist qualified lead to Neon PostgreSQL for serverless replication
+      if (isNeonEnabled()) {
+        try {
+          const freshLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id);
+          if (freshLead) persistLeadToNeon(freshLead).catch(() => {});
+        } catch {}
       }
     } catch (e: any) {
       console.warn('[StudentAI] CRM update warning:', e.message);
