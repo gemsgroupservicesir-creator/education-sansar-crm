@@ -12068,7 +12068,7 @@ async function handleIncomingWhatsAppMessage(params) {
     VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Delivered', ?)
   `).run(inMsgId, lead.id, cleanPhone, studentName, message.trim(), now);
   const incomingMessage = db.prepare("SELECT * FROM messages WHERE id = ?").get(inMsgId);
-  db.prepare("UPDATE leads SET last_contact_date = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id);
+  db.prepare("UPDATE leads SET last_contact_date = ?, updated_at = ? WHERE id = ?").run(now, now, lead.id);
   let aiReplyResult = null;
   const currentSession = sessionId ? db.prepare("SELECT * FROM whatsapp_sessions WHERE id = ?").get(sessionId) : getWhatsAppSession(counselorId);
   if (currentSession?.ai_auto_reply !== 0) {
@@ -12174,7 +12174,7 @@ function getWhatsAppChats(params) {
         last_contact_date, created_at, updated_at
       FROM leads
       WHERE is_deleted = 0
-      ORDER BY updated_at DESC
+      ORDER BY COALESCE(last_contact_date, updated_at, created_at) DESC
       LIMIT 100
     `).all();
     const latestMessages = db.prepare(`
@@ -12279,15 +12279,18 @@ function getWhatsAppChatMessages(phone) {
   if (lead) {
     messages = db.prepare(`
       SELECT * FROM messages
-      WHERE lead_id = ? OR recipient LIKE ?
+      WHERE lead_id = ? 
+         OR replace(replace(replace(recipient, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(sender, ' ', ''), '-', ''), '+', '') LIKE ?
       ORDER BY sent_at ASC
-    `).all(lead.id, `%${searchSuffix}%`);
+    `).all(lead.id, `%${searchSuffix}%`, `%${searchSuffix}%`);
   } else {
     messages = db.prepare(`
       SELECT * FROM messages
-      WHERE recipient LIKE ?
+      WHERE replace(replace(replace(recipient, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(sender, ' ', ''), '-', ''), '+', '') LIKE ?
       ORDER BY sent_at ASC
-    `).all(`%${searchSuffix}%`);
+    `).all(`%${searchSuffix}%`, `%${searchSuffix}%`);
   }
   let qDetails = {};
   if (lead?.qualification_details) {

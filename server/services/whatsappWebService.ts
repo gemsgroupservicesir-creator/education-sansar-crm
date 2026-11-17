@@ -378,7 +378,7 @@ export async function handleIncomingWhatsAppMessage(params: {
   const incomingMessage = db.prepare('SELECT * FROM messages WHERE id = ?').get(inMsgId);
 
   // Update lead last contact date
-  db.prepare("UPDATE leads SET last_contact_date = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id);
+  db.prepare("UPDATE leads SET last_contact_date = ?, updated_at = ? WHERE id = ?").run(now, now, lead.id);
 
   // 3. AI Counselor Auto-Response & Qualification
   let aiReplyResult: any = null;
@@ -524,7 +524,7 @@ export function getWhatsAppChats(params?: {
         last_contact_date, created_at, updated_at
       FROM leads
       WHERE is_deleted = 0
-      ORDER BY updated_at DESC
+      ORDER BY COALESCE(last_contact_date, updated_at, created_at) DESC
       LIMIT 100
     `).all() as any[];
 
@@ -660,15 +660,18 @@ export function getWhatsAppChatMessages(phone: string): {
   if (lead) {
     messages = db.prepare(`
       SELECT * FROM messages
-      WHERE lead_id = ? OR recipient LIKE ?
+      WHERE lead_id = ? 
+         OR replace(replace(replace(recipient, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(sender, ' ', ''), '-', ''), '+', '') LIKE ?
       ORDER BY sent_at ASC
-    `).all(lead.id, `%${searchSuffix}%`) as any[];
+    `).all(lead.id, `%${searchSuffix}%`, `%${searchSuffix}%`) as any[];
   } else {
     messages = db.prepare(`
       SELECT * FROM messages
-      WHERE recipient LIKE ?
+      WHERE replace(replace(replace(recipient, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(sender, ' ', ''), '-', ''), '+', '') LIKE ?
       ORDER BY sent_at ASC
-    `).all(`%${searchSuffix}%`) as any[];
+    `).all(`%${searchSuffix}%`, `%${searchSuffix}%`) as any[];
   }
 
   // Parse qualification details
