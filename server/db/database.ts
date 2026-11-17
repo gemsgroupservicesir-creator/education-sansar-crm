@@ -315,6 +315,46 @@ function runSafeMigrations() {
   } catch (e: any) {
     console.warn('[Migration Notice] broadcast tables:', e.message);
   }
+
+  // Lead AI Qualification & Nurturing Columns
+  addColumnIfNotExists('leads', 'qualification_score', 'INTEGER DEFAULT 0');
+  addColumnIfNotExists('leads', 'qualification_status', "TEXT DEFAULT 'Unqualified'");
+  addColumnIfNotExists('leads', 'qualification_summary', 'TEXT');
+  addColumnIfNotExists('leads', 'qualification_details', "TEXT DEFAULT '{}'");
+  addColumnIfNotExists('leads', 'ai_chat_summary', 'TEXT');
+  addColumnIfNotExists('leads', 'ai_chat_count', 'INTEGER DEFAULT 0');
+
+  // Knowledge Base for AI Student Chatbot & Lead Nurturing
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_base (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General FAQ',
+        question TEXT NOT NULL,
+        alternate_questions TEXT NOT NULL DEFAULT '[]',
+        answer TEXT NOT NULL,
+        keywords TEXT NOT NULL DEFAULT '[]',
+        target_courses TEXT NOT NULL DEFAULT '[]',
+        target_universities TEXT NOT NULL DEFAULT '[]',
+        qualifying_question TEXT,
+        nurturing_cta TEXT,
+        importance INTEGER NOT NULL DEFAULT 5,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        times_used INTEGER NOT NULL DEFAULT 0,
+        source_type TEXT NOT NULL DEFAULT 'Manual',
+        created_by TEXT NOT NULL DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
+      CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
+      CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] knowledge_base table:', e.message);
+  }
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

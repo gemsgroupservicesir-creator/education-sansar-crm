@@ -120,7 +120,7 @@ export function updateAISettings(updates: Partial<AISettings> & { raw_gemini_api
 /**
  * Call Gemini REST API directly with timeout
  */
-async function callGeminiApi(prompt: string, systemInstruction?: string): Promise<string | null> {
+export async function callGeminiApi(prompt: string, systemInstruction?: string): Promise<string | null> {
   const rawKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'gemini_api_key'").get() as { value: string } | undefined;
   const apiKey = (rawKeyRow?.value || process.env.GEMINI_API_KEY || '').trim();
 

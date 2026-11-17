@@ -181,6 +181,12 @@ export interface Lead {
   whatsapp_opt_out_date?: string | null;
   last_campaign_id?: string | null;
   last_campaign_name?: string | null;
+  qualification_score?: number;
+  qualification_status?: 'Unqualified' | 'In Progress' | 'Qualified' | 'High Intent';
+  qualification_summary?: string;
+  qualification_details?: string;
+  ai_chat_summary?: string;
+  ai_chat_count?: number;
   is_deleted: number;
   is_demo: number;
   created_at: string;
@@ -518,6 +524,7 @@ export const FEATURE_PERMISSIONS: FeaturePermission[] = [
   { id: 'campaigns', name: 'Marketing Campaigns', category: 'Marketing', description: 'Track Meta ads, Google ads, and lead acquisition costs' },
   { id: 'reports', name: 'Reports & Export', category: 'Marketing', description: 'Export Excel reports, counselor KPIs, and ROI metrics' },
   { id: 'documents', name: 'Document Vault', category: 'Operations' as any, description: 'Upload, inspect, and verify student marksheets and passports' },
+  { id: 'knowledge_base', name: 'Knowledge Base & AI Chatbot', category: 'Admin', description: 'Train admission Q&As, view chatbot logs, and configure AI student nurturing' },
   { id: 'integrations', name: 'Integrations', category: 'Admin', description: 'Google Sheets live sync, Meta Ads webhook, WhatsApp API' },
   { id: 'settings', name: 'System Settings', category: 'Admin', description: 'Configure global CRM settings and view audit trails' },
 ];
@@ -528,14 +535,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'leads_delete', 'lead_distribution',
     'pipeline', 'applications', 'students', 'universities', 'counselors_manage', 'staff_info_view',
     'hr_management', 'finance_management', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'documents',
-    'integrations', 'settings'
+    'knowledge_base', 'integrations', 'settings'
   ],
   'Counselor': [
     'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'pipeline',
-    'applications', 'students', 'universities', 'staff_info_view', 'documents'
+    'applications', 'students', 'universities', 'staff_info_view', 'documents', 'knowledge_base'
   ],
   'Telecaller': [
-    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'staff_info_view', 'documents'
+    'dashboard', 'leads_view', 'leads_create', 'leads_edit', 'staff_info_view', 'documents', 'knowledge_base'
   ],
   'Marketing Manager': [
     'dashboard', 'leads_view', 'leads_create', 'bulk_email', 'email_templates', 'campaigns', 'reports', 'integrations', 'staff_info_view'
@@ -879,4 +886,72 @@ export interface AudiencePreviewResult {
   total_opted_out: number;
   sample_leads: any[];
 }
+
+export type KnowledgeCategory = 
+  | 'Course Admissions'
+  | 'Fee & Scholarships'
+  | 'Partner Universities'
+  | 'Visa & Documentation'
+  | 'Eligibility & Deadlines'
+  | 'Entrance Exams'
+  | 'General FAQ';
+
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  category: KnowledgeCategory;
+  question: string;
+  alternate_questions?: string[] | string;
+  answer: string;
+  keywords?: string[] | string;
+  target_courses?: string[] | string;
+  target_universities?: string[] | string;
+  qualifying_question?: string;
+  nurturing_cta?: string;
+  importance: number; // 1 to 10
+  is_active: number; // 1 or 0
+  times_used: number;
+  source_type: 'Manual' | 'Trained Document' | 'Pre-seeded';
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudentAIChatResponse {
+  success: boolean;
+  reply: string;
+  matchedKnowledge?: Array<{
+    id: string;
+    title: string;
+    category: string;
+    snippet: string;
+    relevanceScore: number;
+  }>;
+  qualification?: {
+    score: number; // 0 - 100
+    status: 'Unqualified' | 'In Progress' | 'Qualified' | 'High Intent';
+    summary: string;
+    extractedData: {
+      course?: string;
+      university?: string;
+      marks?: string;
+      budget?: string;
+      intake?: string;
+      entranceExam?: string;
+      location?: string;
+    };
+    suggestedFollowupQuestion?: string;
+    isQualified: boolean;
+  };
+  counselor?: {
+    id?: string;
+    name: string;
+    phone: string;
+    email?: string;
+    waChatUrl: string;
+  };
+  lead?: Partial<Lead>;
+  mode: 'Gemini Generative' | 'Admission Sales Engine';
+}
+
 

@@ -10,6 +10,7 @@ import {
   getAllGoogleSheetsFromNeon 
 } from '../db/neon.ts';
 import { handleLeadOptOut } from './broadcastService.ts';
+import { chatWithStudent } from './studentAIChatbotService.ts';
 
 // Meta Lead Ads Webhook & Payload Processing
 export function getMetaConfig(): {
@@ -724,12 +725,33 @@ ${crmLeadUrl}`;
       console.warn('[Counselor Notification Failed]', e.message);
     }
 
-    // C. Direct WhatsApp Auto-Introduction to Student
+    // C. Direct WhatsApp Knowledge-Base AI Auto-Response & Lead Nurturing to Student
     if (cfg.studentAutoReplyEnabled !== false && counselor.auto_reply_student !== 0 && cleanText !== 'STOP' && cleanText !== 'UNSUBSCRIBE') {
       const cleanCounselorDigits = counselorPhone.replace(/[^0-9]/g, '');
       const counselorDirectWaLink = cleanCounselorDigits ? `https://wa.me/${cleanCounselorDigits}` : '';
 
-      const studentAutoIntroMsg = 
+      let studentReplyMsg = '';
+
+      // 1. Invoke Student AI Agent with Knowledge Base context & lead qualification
+      try {
+        const aiChatRes = await chatWithStudent({
+          message: textBody,
+          leadId: lead.id,
+          phone: fromNumber,
+          studentName: lead.student_name,
+          source: 'WhatsApp Inbound'
+        });
+
+        if (aiChatRes && aiChatRes.reply) {
+          studentReplyMsg = aiChatRes.reply;
+        }
+      } catch (aiErr: any) {
+        console.warn('[AI Student Bot Inbound Notice]', aiErr.message);
+      }
+
+      // 2. Fallback to structured greeting if AI is unavailable
+      if (!studentReplyMsg) {
+        studentReplyMsg = 
 `Namaste ${lead.student_name || 'Student'}! 👋
 
 Thank you for contacting Gems Group Services Admissions.
@@ -745,13 +767,14 @@ ${counselor.name} has been notified and will personally assist you with universi
 
 👉 *Click here to connect directly with ${counselor.name} on WhatsApp:*
 ${counselorDirectWaLink || 'https://education-sansar-crm.vercel.app'}`;
+      }
 
       try {
         const sRes = await sendWhatsAppMessage({
           leadId: lead.id,
           recipientPhone: fromNumber,
-          customMessage: studentAutoIntroMsg,
-          performedBy: `${counselor.name} (Admissions Counselor)`
+          customMessage: studentReplyMsg,
+          performedBy: `${counselor.name} (Admissions AI Counselor)`
         });
         studentAutoReplied = sRes.success;
       } catch (err: any) {

@@ -227,6 +227,12 @@ CREATE TABLE IF NOT EXISTS leads (
   whatsapp_opt_out_date TEXT,
   last_campaign_id TEXT,
   last_campaign_name TEXT,
+  qualification_score INTEGER DEFAULT 0,
+  qualification_status TEXT DEFAULT 'Unqualified',
+  qualification_summary TEXT,
+  qualification_details TEXT DEFAULT '{}',
+  ai_chat_summary TEXT,
+  ai_chat_count INTEGER DEFAULT 0,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   is_demo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -757,6 +763,32 @@ CREATE TABLE IF NOT EXISTS finance_invoices (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 33. Knowledge Base for Student AI Counseling & Lead Nurturing
+CREATE TABLE IF NOT EXISTS knowledge_base (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'General FAQ', -- 'Course Admissions', 'Fee & Scholarships', 'Partner Universities', 'Visa & Documentation', 'Eligibility & Deadlines', 'Entrance Exams', 'General FAQ'
+  question TEXT NOT NULL,
+  alternate_questions TEXT NOT NULL DEFAULT '[]', -- JSON array of question variants
+  answer TEXT NOT NULL,
+  keywords TEXT NOT NULL DEFAULT '[]', -- JSON array of search keywords/tags
+  target_courses TEXT NOT NULL DEFAULT '[]', -- JSON array of related courses (e.g. ['MBBS', 'B.Tech'])
+  target_universities TEXT NOT NULL DEFAULT '[]', -- JSON array of partner universities
+  qualifying_question TEXT, -- Proactive follow-up question asked by AI to qualify the student
+  nurturing_cta TEXT, -- Call to action nudging student to connect with assigned counselor
+  importance INTEGER NOT NULL DEFAULT 5, -- 1 to 10 priority
+  is_active INTEGER NOT NULL DEFAULT 1, -- 1 = active/trained, 0 = draft
+  times_used INTEGER NOT NULL DEFAULT 0,
+  source_type TEXT NOT NULL DEFAULT 'Manual', -- 'Manual', 'Trained Document', 'Pre-seeded'
+  created_by TEXT NOT NULL DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
+CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
+CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
 
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
@@ -2820,6 +2852,42 @@ function runSafeMigrations() {
   } catch (e) {
     console.warn("[Migration Notice] broadcast tables:", e.message);
   }
+  addColumnIfNotExists("leads", "qualification_score", "INTEGER DEFAULT 0");
+  addColumnIfNotExists("leads", "qualification_status", "TEXT DEFAULT 'Unqualified'");
+  addColumnIfNotExists("leads", "qualification_summary", "TEXT");
+  addColumnIfNotExists("leads", "qualification_details", "TEXT DEFAULT '{}'");
+  addColumnIfNotExists("leads", "ai_chat_summary", "TEXT");
+  addColumnIfNotExists("leads", "ai_chat_count", "INTEGER DEFAULT 0");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_base (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'General FAQ',
+        question TEXT NOT NULL,
+        alternate_questions TEXT NOT NULL DEFAULT '[]',
+        answer TEXT NOT NULL,
+        keywords TEXT NOT NULL DEFAULT '[]',
+        target_courses TEXT NOT NULL DEFAULT '[]',
+        target_universities TEXT NOT NULL DEFAULT '[]',
+        qualifying_question TEXT,
+        nurturing_cta TEXT,
+        importance INTEGER NOT NULL DEFAULT 5,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        times_used INTEGER NOT NULL DEFAULT 0,
+        source_type TEXT NOT NULL DEFAULT 'Manual',
+        created_by TEXT NOT NULL DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
+      CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
+      CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
+    `);
+  } catch (e) {
+    console.warn("[Migration Notice] knowledge_base table:", e.message);
+  }
 }
 function initDatabase() {
   try {
@@ -3143,7 +3211,7 @@ function matchesKeywords(text, keywords) {
   const lower = text.toLowerCase();
   return keywords.some((k) => lower.includes(k.toLowerCase().trim()));
 }
-function distributeLead(lead) {
+function distributeLead(lead = {}) {
   const activeCounselors = db.prepare(`
     SELECT * FROM counselors
     WHERE is_active = 1 AND current_active_leads < max_capacity
@@ -4353,6 +4421,971 @@ var init_broadcastService = __esm({
   }
 });
 
+// server/services/knowledgeBaseService.ts
+function getKnowledgeBase(filters) {
+  try {
+    const countCheck = db.prepare("SELECT count(*) as count FROM knowledge_base").get();
+    if (!countCheck || countCheck.count === 0) {
+      seedDefaultKnowledgeBase();
+    }
+    const whereClauses = [];
+    const params = [];
+    if (filters?.category && filters.category !== "All") {
+      whereClauses.push("category = ?");
+      params.push(filters.category);
+    }
+    if (filters?.isActive !== void 0 && filters.isActive !== -1) {
+      whereClauses.push("is_active = ?");
+      params.push(filters.isActive);
+    }
+    if (filters?.search && filters.search.trim()) {
+      const s = `%${filters.search.trim()}%`;
+      whereClauses.push("(title LIKE ? OR question LIKE ? OR answer LIKE ? OR keywords LIKE ?)");
+      params.push(s, s, s, s);
+    }
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const total = db.prepare(`SELECT count(*) as count FROM knowledge_base ${whereSql}`).get(...params).count;
+    const limit = filters?.limit ? Math.max(1, filters.limit) : 50;
+    const offset = filters?.offset ? Math.max(0, filters.offset) : 0;
+    const items = db.prepare(`
+      SELECT * FROM knowledge_base
+      ${whereSql}
+      ORDER BY importance DESC, updated_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+    const parsed = items.map((item) => ({
+      ...item,
+      alternate_questions: typeof item.alternate_questions === "string" ? safeJsonParse(item.alternate_questions, []) : item.alternate_questions,
+      keywords: typeof item.keywords === "string" ? safeJsonParse(item.keywords, []) : item.keywords,
+      target_courses: typeof item.target_courses === "string" ? safeJsonParse(item.target_courses, []) : item.target_courses,
+      target_universities: typeof item.target_universities === "string" ? safeJsonParse(item.target_universities, []) : item.target_universities
+    }));
+    return { items: parsed, total };
+  } catch (err) {
+    console.error("[KnowledgeBase] getKnowledgeBase error:", err);
+    return { items: [], total: 0 };
+  }
+}
+function getKnowledgeItem(id) {
+  try {
+    const item = db.prepare("SELECT * FROM knowledge_base WHERE id = ?").get(id);
+    if (!item) return null;
+    return {
+      ...item,
+      alternate_questions: typeof item.alternate_questions === "string" ? safeJsonParse(item.alternate_questions, []) : item.alternate_questions,
+      keywords: typeof item.keywords === "string" ? safeJsonParse(item.keywords, []) : item.keywords,
+      target_courses: typeof item.target_courses === "string" ? safeJsonParse(item.target_courses, []) : item.target_courses,
+      target_universities: typeof item.target_universities === "string" ? safeJsonParse(item.target_universities, []) : item.target_universities
+    };
+  } catch {
+    return null;
+  }
+}
+function createKnowledgeItem(data) {
+  const id = "KB-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const altQuestionsJson = Array.isArray(data.alternate_questions) ? JSON.stringify(data.alternate_questions) : typeof data.alternate_questions === "string" && data.alternate_questions.trim() ? JSON.stringify(data.alternate_questions.split("\n").map((s) => s.trim()).filter(Boolean)) : "[]";
+  const keywordsJson = Array.isArray(data.keywords) ? JSON.stringify(data.keywords) : typeof data.keywords === "string" && data.keywords.trim() ? JSON.stringify(data.keywords.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) : "[]";
+  const coursesJson = Array.isArray(data.target_courses) ? JSON.stringify(data.target_courses) : typeof data.target_courses === "string" && data.target_courses.trim() ? JSON.stringify(data.target_courses.split(",").map((s) => s.trim()).filter(Boolean)) : "[]";
+  const unisJson = Array.isArray(data.target_universities) ? JSON.stringify(data.target_universities) : typeof data.target_universities === "string" && data.target_universities.trim() ? JSON.stringify(data.target_universities.split(",").map((s) => s.trim()).filter(Boolean)) : "[]";
+  db.prepare(`
+    INSERT INTO knowledge_base (
+      id, title, category, question, alternate_questions, answer,
+      keywords, target_courses, target_universities, qualifying_question,
+      nurturing_cta, importance, is_active, times_used, source_type,
+      created_by, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.title.trim(),
+    data.category || "General FAQ",
+    data.question.trim(),
+    altQuestionsJson,
+    data.answer.trim(),
+    keywordsJson,
+    coursesJson,
+    unisJson,
+    data.qualifying_question?.trim() || null,
+    data.nurturing_cta?.trim() || null,
+    data.importance !== void 0 ? data.importance : 5,
+    data.is_active !== void 0 ? data.is_active : 1,
+    data.source_type || "Manual",
+    data.created_by || "Super Admin",
+    now,
+    now
+  );
+  return getKnowledgeItem(id);
+}
+function updateKnowledgeItem(id, updates) {
+  const existing = getKnowledgeItem(id);
+  if (!existing) throw new Error(`Knowledge item ${id} not found`);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let altQuestionsJson = typeof existing.alternate_questions === "string" ? existing.alternate_questions : JSON.stringify(existing.alternate_questions || []);
+  if (updates.alternate_questions !== void 0) {
+    altQuestionsJson = Array.isArray(updates.alternate_questions) ? JSON.stringify(updates.alternate_questions) : typeof updates.alternate_questions === "string" ? JSON.stringify(updates.alternate_questions.split("\n").map((s) => s.trim()).filter(Boolean)) : "[]";
+  }
+  let keywordsJson = typeof existing.keywords === "string" ? existing.keywords : JSON.stringify(existing.keywords || []);
+  if (updates.keywords !== void 0) {
+    keywordsJson = Array.isArray(updates.keywords) ? JSON.stringify(updates.keywords) : typeof updates.keywords === "string" ? JSON.stringify(updates.keywords.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) : "[]";
+  }
+  let coursesJson = typeof existing.target_courses === "string" ? existing.target_courses : JSON.stringify(existing.target_courses || []);
+  if (updates.target_courses !== void 0) {
+    coursesJson = Array.isArray(updates.target_courses) ? JSON.stringify(updates.target_courses) : typeof updates.target_courses === "string" ? JSON.stringify(updates.target_courses.split(",").map((s) => s.trim()).filter(Boolean)) : "[]";
+  }
+  let unisJson = typeof existing.target_universities === "string" ? existing.target_universities : JSON.stringify(existing.target_universities || []);
+  if (updates.target_universities !== void 0) {
+    unisJson = Array.isArray(updates.target_universities) ? JSON.stringify(updates.target_universities) : typeof updates.target_universities === "string" ? JSON.stringify(updates.target_universities.split(",").map((s) => s.trim()).filter(Boolean)) : "[]";
+  }
+  db.prepare(`
+    UPDATE knowledge_base SET
+      title = ?,
+      category = ?,
+      question = ?,
+      alternate_questions = ?,
+      answer = ?,
+      keywords = ?,
+      target_courses = ?,
+      target_universities = ?,
+      qualifying_question = ?,
+      nurturing_cta = ?,
+      importance = ?,
+      is_active = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(
+    updates.title !== void 0 ? updates.title.trim() : existing.title,
+    updates.category !== void 0 ? updates.category : existing.category,
+    updates.question !== void 0 ? updates.question.trim() : existing.question,
+    altQuestionsJson,
+    updates.answer !== void 0 ? updates.answer.trim() : existing.answer,
+    keywordsJson,
+    coursesJson,
+    unisJson,
+    updates.qualifying_question !== void 0 ? updates.qualifying_question?.trim() || null : existing.qualifying_question,
+    updates.nurturing_cta !== void 0 ? updates.nurturing_cta?.trim() || null : existing.nurturing_cta,
+    updates.importance !== void 0 ? updates.importance : existing.importance,
+    updates.is_active !== void 0 ? updates.is_active : existing.is_active,
+    now,
+    id
+  );
+  return getKnowledgeItem(id);
+}
+function deleteKnowledgeItem(id) {
+  const result = db.prepare("DELETE FROM knowledge_base WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+function searchKnowledgeBase(params) {
+  const { query, course, university, limit = 5 } = params;
+  if (!query || !query.trim()) return [];
+  const rawQuery = query.toLowerCase().trim();
+  const cleanTokens = rawQuery.replace(/[^\w\s]/g, " ").split(/\s+/).filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
+  const items = db.prepare(`
+    SELECT * FROM knowledge_base
+    WHERE is_active = 1
+    ORDER BY importance DESC
+  `).all();
+  if (items.length === 0) {
+    seedDefaultKnowledgeBase();
+    return searchKnowledgeBase(params);
+  }
+  const scoredResults = [];
+  for (const item of items) {
+    let score = 0;
+    const itemQuestion = (item.question || "").toLowerCase();
+    const itemTitle = (item.title || "").toLowerCase();
+    const itemAnswer = (item.answer || "").toLowerCase();
+    const itemCategory = (item.category || "").toLowerCase();
+    const altQuestions = safeJsonParse(item.alternate_questions, []).map((q) => q.toLowerCase());
+    const keywords = safeJsonParse(item.keywords, []).map((k) => k.toLowerCase());
+    const targetCourses = safeJsonParse(item.target_courses, []).map((c) => c.toLowerCase());
+    const targetUnis = safeJsonParse(item.target_universities, []).map((u) => u.toLowerCase());
+    if (itemQuestion.includes(rawQuery) || rawQuery.includes(itemQuestion)) {
+      score += 120;
+    }
+    for (const altQ of altQuestions) {
+      if (altQ.includes(rawQuery) || rawQuery.includes(altQ)) {
+        score += 100;
+        break;
+      }
+    }
+    if (itemTitle.includes(rawQuery) || rawQuery.includes(itemTitle)) {
+      score += 60;
+    }
+    for (const token of cleanTokens) {
+      if (itemQuestion.includes(token)) score += 25;
+      if (itemTitle.includes(token)) score += 20;
+      if (keywords.some((k) => k.includes(token) || token.includes(k))) score += 30;
+      if (targetCourses.some((c) => c.includes(token) || token.includes(c))) score += 35;
+      if (targetUnis.some((u) => u.includes(token) || token.includes(u))) score += 35;
+      if (itemAnswer.includes(token)) score += 10;
+      if (itemCategory.includes(token)) score += 15;
+    }
+    if (course) {
+      const cLower = course.toLowerCase();
+      if (targetCourses.some((c) => c.includes(cLower) || cLower.includes(c)) || itemAnswer.includes(cLower)) {
+        score += 40;
+      }
+    }
+    if (university) {
+      const uLower = university.toLowerCase();
+      if (targetUnis.some((u) => u.includes(uLower) || uLower.includes(u)) || itemAnswer.includes(uLower)) {
+        score += 40;
+      }
+    }
+    score += (item.importance || 5) * 2;
+    if (score >= 25) {
+      scoredResults.push({
+        id: item.id,
+        title: item.title,
+        category: item.category,
+        question: item.question,
+        answer: item.answer,
+        qualifying_question: item.qualifying_question,
+        nurturing_cta: item.nurturing_cta,
+        importance: item.importance,
+        relevanceScore: score,
+        snippet: item.answer.length > 200 ? item.answer.substring(0, 200) + "..." : item.answer
+      });
+    }
+  }
+  scoredResults.sort((a, b) => b.relevanceScore - a.relevanceScore);
+  const topResults = scoredResults.slice(0, limit);
+  try {
+    for (const res of topResults) {
+      db.prepare("UPDATE knowledge_base SET times_used = times_used + 1 WHERE id = ?").run(res.id);
+    }
+  } catch {
+  }
+  return topResults;
+}
+async function trainFromRawText(params) {
+  const { title, category, rawText, createdBy } = params;
+  if (!rawText || rawText.trim().length < 20) {
+    throw new Error("Please provide at least 20 characters of text to extract knowledge");
+  }
+  const generatedItems = [];
+  const blocks = rawText.split(/\n{2,}|\r\n{2,}|\n(?=[0-9]+\.|\*|-|•|Q:)/).map((b) => b.trim()).filter((b) => b.length >= 25);
+  if (blocks.length === 0) {
+    blocks.push(rawText.trim());
+  }
+  for (let i = 0; i < Math.min(blocks.length, 8); i++) {
+    const block = blocks[i];
+    let q = "";
+    let a = block;
+    const questionMatch = block.match(/^(?:Q\d*[:.-]?\s*|Question[:.-]?\s*)?([^\n?]+[?])\s*(.*)$/is);
+    if (questionMatch && questionMatch[1]) {
+      q = questionMatch[1].trim();
+      a = questionMatch[2]?.trim() || block;
+    } else {
+      const lines = block.split("\n").filter(Boolean);
+      if (lines.length > 1) {
+        q = lines[0].replace(/^[0-9*•-]+\.?\s*/, "").trim();
+        a = lines.slice(1).join("\n").trim();
+      } else {
+        q = `What are the details regarding ${title} (Part ${i + 1})?`;
+        a = block;
+      }
+    }
+    if (q.length < 5) q = `Information on ${title}`;
+    const keywords = [
+      ...title.toLowerCase().split(/\s+/),
+      ...q.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !STOP_WORDS.has(w))
+    ].slice(0, 10);
+    const item = createKnowledgeItem({
+      title: `${title} - Section ${i + 1}`,
+      category,
+      question: q,
+      answer: a,
+      keywords: Array.from(new Set(keywords)),
+      qualifying_question: "Would you like more details on fee structure, admission criteria, or direct counseling?",
+      nurturing_cta: "Chat directly with your assigned Gems Group Services admission counselor for customized seat booking.",
+      importance: 7,
+      source_type: "Trained Document",
+      created_by: createdBy || "Super Admin"
+    });
+    generatedItems.push(item);
+  }
+  return generatedItems;
+}
+function seedDefaultKnowledgeBase() {
+  const existingCount = db.prepare("SELECT count(*) as count FROM knowledge_base").get()?.count || 0;
+  if (existingCount > 0) return;
+  const defaultKnowledge = [
+    {
+      title: "MBBS in Bangladesh Eligibility & Fee Structure 2026",
+      category: "Course Admissions",
+      question: "Can Nepali students study MBBS in Bangladesh and what are the fees and eligibility?",
+      alternate_questions: [
+        "What is the fee for MBBS in Bangladesh for Nepali students?",
+        "Bangladesh MBBS eligibility criteria for Nepal",
+        "Top medical colleges in Bangladesh for MBBS",
+        "Kumudini Medical College fees and admission"
+      ],
+      answer: "Yes! Bangladesh is one of the premier destinations for Nepali MBBS students due to high BMDC/NMC/MEC pass rates and clinical exposure. Key details:\n\u2022 Total Package: 35,000 USD to 45,000 USD for the entire 5-year MBBS including hostel.\n\u2022 Eligibility: Minimum GPA 7.0 combined in SSC/10th and HSC/12th, with minimum GPA 3.5 in Biology (minimum 60% in Bio).\n\u2022 Recognition: Degree recognized by Nepal Medical Council (NMC), Medical Education Commission (MEC), WHO, and ECFMG.\n\u2022 Top Colleges: Kumudini Women's Medical College, Dhaka National Medical College, Anwer Khan Modern, Bangladesh Medical College.",
+      keywords: ["mbbs", "bangladesh", "medical", "dhaka", "kumudini", "nmc", "gpa", "biology", "doctor", "mec"],
+      target_courses: ["MBBS", "BDS"],
+      target_universities: ["Kumudini Women Medical College", "Dhaka National Medical College", "Anwer Khan Modern Medical College"],
+      qualifying_question: "What is your GPA or percentage in +2 Science (Physics, Chemistry, and Biology)?",
+      nurturing_cta: "Connect directly with our Bangladesh MBBS specialist counselor for free DGHS equivalence calculation & seat reservation.",
+      importance: 10,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "B.Tech Computer Science & AI Admissions in India (SRM & Chandigarh University)",
+      category: "Course Admissions",
+      question: "How can Nepali students get admission in B.Tech Computer Science in SRM, VIT, or Chandigarh University?",
+      alternate_questions: [
+        "B.Tech CSE admission in India without entrance",
+        "SRM University B.Tech fees for Nepali students",
+        "Chandigarh University scholarship for Nepal",
+        "Best engineering college in India for Nepali students"
+      ],
+      answer: "Nepali students can apply for direct merit admissions and international quota seats at premier Indian institutions like SRM University, Chandigarh University, and VIT:\n\u2022 Courses Offered: B.Tech in CSE, AI & Machine Learning, Data Science, Cyber Security, and Cloud Computing.\n\u2022 Fee Range: 1.5 Lakh to 3.5 Lakh INR per year depending on university & specialization.\n\u2022 Scholarships: Up to 50% tuition scholarship based on +2 marks (Grade 12 aggregate).\n\u2022 Eligibility: 60%+ aggregate in Physics, Chemistry, and Mathematics (PCM).\n\u2022 Campus Facilities: World-class laboratories, high-speed WiFi, dedicated international student hostels, and multi-cuisine mess serving Nepali meals.",
+      keywords: ["b.tech", "cse", "computer science", "engineering", "srm", "chandigarh university", "vit", "india", "ai", "scholarship"],
+      target_courses: ["B.Tech", "B.Tech CSE", "B.Tech AI & ML", "Computer Engineering"],
+      target_universities: ["SRM Institute of Science and Technology", "Chandigarh University", "Sharda University"],
+      qualifying_question: "What was your PCM (Physics, Chemistry, Math) percentage or expected grade in +2?",
+      nurturing_cta: "Our engineering admission desk can verify your +2 marks right now to lock in up to 50% tuition scholarship.",
+      importance: 9,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "Scholarship Opportunities for Nepali & International Students",
+      category: "Fee & Scholarships",
+      question: "What scholarships are available for Nepali students studying in India?",
+      alternate_questions: [
+        "How to get 100% or 50% scholarship in Indian universities?",
+        "Study in India scholarship criteria",
+        "Gems Group Services admission scholarship discount"
+      ],
+      answer: "Gems Group Services partners directly with top Indian universities to offer significant merit-based and early-bird scholarship concessions for Nepali applicants:\n\u2022 Merit Scholarships: 25% to 50% waiver on tuition fees based on 10th and 12th marks.\n\u2022 Girl Child / Women in STEM Scholarships: Additional 10% to 15% concession.\n\u2022 Early Admission Concession: Application fee waivers and locked tuition fee bands when applying before deadlines.\n\u2022 Study in India (SII) Portal Scholarships: Assistance with SII registration for partner university quota grants.",
+      keywords: ["scholarship", "discount", "concession", "waiver", "free", "merit", "study in india", "sii", "fee"],
+      target_courses: ["B.Tech", "BBA", "BCA", "MBA", "B.Sc Nursing", "B.Pharm"],
+      target_universities: ["Chandigarh University", "Sharda University", "SRM University", "Lovely Professional University"],
+      qualifying_question: "What is your target budget per year including hostel and tuition?",
+      nurturing_cta: "Send your marksheet to our counselor on WhatsApp for instant scholarship pre-approval within 2 hours.",
+      importance: 9,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "MBBS in Nepal vs Bangladesh Comparison & CEE Requirements",
+      category: "Eligibility & Deadlines",
+      question: "Do I need CEE/MEC exam for MBBS in Bangladesh or India?",
+      alternate_questions: [
+        "Is CEE compulsory for studying MBBS abroad?",
+        "CEE entrance requirements for Nepal Medical Council eligibility",
+        "Can I go to Bangladesh without CEE score?"
+      ],
+      answer: "Important Regulatory Update from Medical Education Commission (MEC) & Nepal Medical Council (NMC):\n\u2022 CEE Examination: To obtain an Eligibility Certificate (NOC) from Nepal Government to study MBBS abroad, candidates must appear in and pass the MEC CEE entrance exam.\n\u2022 If you qualified CEE in Nepal: You are directly eligible to secure seats in Bangladesh and India with full NOC sanction.\n\u2022 NEET Score: Indian medical colleges also require a valid NEET qualification.\n\u2022 If you haven't given CEE: You can register for the upcoming CEE intake or explore alternative healthcare courses like B.Pharm, B.Sc Biotech, or Healthcare Management.",
+      keywords: ["cee", "mec", "nmc", "mbbs", "nepal", "bangladesh", "entrance", "exam", "neet", "noc"],
+      target_courses: ["MBBS", "BDS", "B.Pharm", "B.Sc Nursing"],
+      target_universities: ["Kathmandu University", "Tribhuvan University", "Kumudini Medical College"],
+      qualifying_question: "Did you appear in the latest MEC CEE exam or are you preparing for the next session?",
+      nurturing_cta: "Talk with our medical counseling director to assess your score and match available government-approved medical seats.",
+      importance: 8,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "Document Checklist for University Admissions in India & Bangladesh",
+      category: "Visa & Documentation",
+      question: "What documents are required to apply for Indian and Bangladesh universities?",
+      alternate_questions: [
+        "Document list for college admission in India from Nepal",
+        "Is passport compulsory for Nepali student in India?",
+        "Bangladesh student visa documents"
+      ],
+      answer: "Standard document checklist for Nepali students:\n1. Academic Credentials: Grade 10 (SEE) Marksheet & Character Certificate, Grade 12 (+2) Transcript, Provisional, and Migration Certificate.\n2. Identification: Citizenship Certificate (Nagrikta) OR valid Passport (Passport required for Bangladesh, Citizenship or Passport valid for India).\n3. Photographs: 8 to 10 passport-sized color photos with white background.\n4. Entrance Scorecard: CEE / NEET / IOE / JEE scorecard (if applicable).\n5. Medical Fitness Certificate (for Bangladesh and health science courses).\n6. Ministry of Education (MOE) NOC: Our office assists you in getting your official NOC from Sanothimi, Bhaktapur seamlessly.",
+      keywords: ["documents", "passport", "citizenship", "nagrikta", "see", "marksheet", "transcript", "noc", "visa"],
+      target_courses: ["All Courses"],
+      target_universities: ["All Partner Universities"],
+      qualifying_question: "Do you have your +2 transcript and citizenship/passport handy in digital format?",
+      nurturing_cta: "You can upload your documents safely in your CRM portal or send directly to your counselor for quick verification.",
+      importance: 8,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "MBA & Post-Graduate Management in Top Indian Cities",
+      category: "Course Admissions",
+      question: "Which colleges are best for Nepali students pursuing MBA in Bangalore or Delhi?",
+      alternate_questions: [
+        "MBA admission in India fees and placements",
+        "Bangalore MBA colleges for Nepali students",
+        "Direct MBA admission without CAT or MAT"
+      ],
+      answer: "Bangalore, Pune, and Delhi-NCR are the premier hubs for Nepali MBA aspirants with direct access to corporate internships and placements:\n\u2022 Top Specializations: Business Analytics, Financial Tech, Digital Marketing, Supply Chain, and HR.\n\u2022 Average Fee: 3.5 Lakh to 7.5 Lakh INR for the full 2-year program including industrial trips.\n\u2022 Eligibility: Bachelor's degree in any discipline (BBA, BBS, B.Com, B.Tech) with minimum 50% aggregate.\n\u2022 Placements: High placement record with international and Indian MNCs (TCS, Deloitte, Amazon, Infosys).",
+      keywords: ["mba", "management", "bangalore", "bba", "pgdm", "placements", "delhi", "pune", "business"],
+      target_courses: ["MBA", "PGDM", "BBA"],
+      target_universities: ["Chandigarh University", "Sharda University", "Acharya Institute of Management"],
+      qualifying_question: "What was your undergraduate degree (BBA/BBS/B.Tech) and your graduation percentage?",
+      nurturing_cta: "Schedule a free profile review call with our senior MBA career counselor to shortlist top corporate-linked campuses.",
+      importance: 7,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "Hostel Facilities, Food & Student Safety for Nepali Students",
+      category: "General FAQ",
+      question: "Are there good hostel facilities and Nepali food available in partner colleges?",
+      alternate_questions: [
+        "Is Nepali food available in hostel mess in India?",
+        "Safety for female students in campus hostels",
+        "Hostel room options AC and Non-AC"
+      ],
+      answer: "Yes! Student safety, hygiene, and dietary comfort are top priorities at all partner university campuses:\n\u2022 Dedicated Hostels: Separate, fully secured hostels for male and female students with biometric entry, 24/7 CCTV surveillance, and resident wardens.\n\u2022 Food & Mess: Four meals daily (breakfast, lunch, evening snacks, dinner). Most partner campuses in Punjab, Delhi, and Bangalore feature Nepali cooks and dishes (Dal-Bhat-Tarkari, chicken/veg curry).\n\u2022 Room Amenities: Options include 2-seater, 3-seater, AC, and Non-AC rooms with attached bathrooms, study tables, and geysers.\n\u2022 Medical Assistance: On-campus hospitals and clinics providing round-the-clock emergency medical care.",
+      keywords: ["hostel", "food", "mess", "nepali food", "safety", "girls hostel", "ac", "security", "accommodation"],
+      target_courses: ["All Courses"],
+      target_universities: ["All Partner Universities"],
+      qualifying_question: "Do you prefer AC or Non-AC hostel accommodation, or 2-seater vs 3-seater sharing?",
+      nurturing_cta: "Our counselor can share campus hostel walkthrough videos and meal menu photos with you right away.",
+      importance: 7,
+      source_type: "Pre-seeded"
+    },
+    {
+      title: "Application Deadlines & Fall 2026 Intake Timeline",
+      category: "Eligibility & Deadlines",
+      question: "When is the last date to apply for 2026 admission intake in India and Bangladesh?",
+      alternate_questions: [
+        "Admission deadlines for 2026 intake",
+        "When do classes start in India colleges for Nepali students?",
+        "Early seat booking process"
+      ],
+      answer: "Key Timeline for 2026 Academic Admissions:\n\u2022 Early Bird Seat Booking & Scholarships: Open now through May 2026 (highest scholarship brackets available).\n\u2022 Regular Application Window: June to July 2026.\n\u2022 Bangladesh DGHS Equivalence & MBBS Deadlines: Usually closes by August/September 2026.\n\u2022 Session Commencement: Most Indian universities commence classes in August-September 2026.\n\u2022 Advice: Popular specializations like B.Tech CSE, AI, and top MBBS colleges fill seats fast. Early provisional seat booking with 10th/12th admit card is strongly recommended to guarantee your seat.",
+      keywords: ["deadline", "intake", "2026", "last date", "application deadline", "seat booking", "commencement"],
+      target_courses: ["All Courses"],
+      target_universities: ["All Partner Universities"],
+      qualifying_question: "Are you planning to enroll immediately in the upcoming 2026 intake?",
+      nurturing_cta: "Lock your seat before early-bird scholarship quota closes \u2014 click to chat with your counselor on WhatsApp.",
+      importance: 8,
+      source_type: "Pre-seeded"
+    }
+  ];
+  for (const item of defaultKnowledge) {
+    createKnowledgeItem(item);
+  }
+}
+function safeJsonParse(val, fallback) {
+  if (Array.isArray(val)) return val;
+  if (!val || typeof val !== "string") return fallback;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+}
+var STOP_WORDS;
+var init_knowledgeBaseService = __esm({
+  "server/services/knowledgeBaseService.ts"() {
+    "use strict";
+    init_database();
+    STOP_WORDS = /* @__PURE__ */ new Set([
+      "a",
+      "about",
+      "above",
+      "after",
+      "again",
+      "against",
+      "all",
+      "am",
+      "an",
+      "and",
+      "any",
+      "are",
+      "as",
+      "at",
+      "be",
+      "because",
+      "been",
+      "before",
+      "being",
+      "below",
+      "between",
+      "both",
+      "but",
+      "by",
+      "can",
+      "did",
+      "do",
+      "does",
+      "doing",
+      "down",
+      "during",
+      "each",
+      "few",
+      "for",
+      "from",
+      "further",
+      "had",
+      "has",
+      "have",
+      "having",
+      "he",
+      "her",
+      "here",
+      "hers",
+      "herself",
+      "him",
+      "himself",
+      "his",
+      "how",
+      "i",
+      "if",
+      "in",
+      "into",
+      "is",
+      "it",
+      "its",
+      "itself",
+      "just",
+      "me",
+      "more",
+      "most",
+      "my",
+      "myself",
+      "no",
+      "nor",
+      "not",
+      "now",
+      "of",
+      "off",
+      "on",
+      "once",
+      "only",
+      "or",
+      "other",
+      "our",
+      "ours",
+      "ourselves",
+      "out",
+      "over",
+      "own",
+      "same",
+      "she",
+      "should",
+      "so",
+      "some",
+      "such",
+      "than",
+      "that",
+      "the",
+      "their",
+      "theirs",
+      "them",
+      "themselves",
+      "then",
+      "there",
+      "these",
+      "they",
+      "this",
+      "those",
+      "through",
+      "to",
+      "too",
+      "under",
+      "until",
+      "up",
+      "very",
+      "was",
+      "we",
+      "were",
+      "what",
+      "when",
+      "where",
+      "which",
+      "while",
+      "who",
+      "whom",
+      "why",
+      "with",
+      "would",
+      "you",
+      "your",
+      "yours",
+      "yourself"
+    ]);
+  }
+});
+
+// server/services/studentAIChatbotService.ts
+async function chatWithStudent(params) {
+  const { message, leadId, phone, studentName, chatHistory = [], source = "Website Chat" } = params;
+  if (!message || !message.trim()) {
+    throw new Error("Student message is required");
+  }
+  const cleanMessage = message.trim();
+  const cleanPhone = phone?.trim() || "";
+  const extracted = extractQualificationData(cleanMessage, chatHistory);
+  let lead = null;
+  if (leadId) {
+    lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(leadId);
+  } else if (cleanPhone) {
+    const rawDigits = cleanPhone.replace(/[^0-9]/g, "");
+    const searchSuffix = rawDigits.length >= 8 ? rawDigits.slice(-8) : rawDigits;
+    lead = db.prepare(`
+      SELECT * FROM leads 
+      WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+         OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  }
+  if (!lead && cleanPhone) {
+    const newLeadId = "lead-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    const assignedC = distributeLead({
+      preferred_course: extracted.target_course || "Undecided",
+      preferred_university: extracted.target_university || "Not Specified",
+      city: "Kathmandu",
+      source
+    });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const sName = studentName?.trim() || "WhatsApp Student";
+    const names = sName.split(" ");
+    const fName = names[0] || "Student";
+    const lName = names.slice(1).join(" ") || "Inquiry";
+    db.prepare(`
+      INSERT INTO leads (
+        id, lead_id, student_name, first_name, last_name, phone, whatsapp_number,
+        email, country, city, preferred_course, preferred_university, lead_source,
+        assigned_counselor_id, assigned_counselor_name, lead_status, lead_temperature,
+        qualification_score, qualification_status, qualification_summary, qualification_details,
+        ai_chat_summary, ai_chat_count, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Nepal', 'Kathmandu', ?, ?, ?, ?, ?, 'New Lead', 'WARM', 20, 'In Progress', 'Inquired via AI Chatbot', '{}', ?, 1, ?, ?)
+    `).run(
+      newLeadId,
+      "ES-" + (/* @__PURE__ */ new Date()).getFullYear() + "-" + Math.floor(1e3 + Math.random() * 9e3),
+      sName,
+      fName,
+      lName,
+      cleanPhone,
+      cleanPhone,
+      `student.${Date.now()}@inquiry.education-sansar.com`,
+      extracted.target_course || "Undecided",
+      extracted.target_university || "Not Specified",
+      source,
+      assignedC?.counselorId || null,
+      assignedC?.counselorName || null,
+      cleanMessage.slice(0, 150),
+      now,
+      now
+    );
+    lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(newLeadId);
+  }
+  let counselor = null;
+  if (lead?.assigned_counselor_id) {
+    counselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(lead.assigned_counselor_id);
+  }
+  if (!counselor) {
+    counselor = db.prepare("SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1").get();
+  }
+  const counselorPhone = counselor?.whatsapp_number || counselor?.phone || "+977 9801234567";
+  const cleanCounselorDigits = counselorPhone.replace(/[^0-9]/g, "");
+  const counselorWaUrl = `https://wa.me/${cleanCounselorDigits}`;
+  let existingDetails = {};
+  try {
+    existingDetails = typeof lead?.qualification_details === "string" ? JSON.parse(lead.qualification_details || "{}") : lead?.qualification_details || {};
+  } catch {
+  }
+  const mergedDetails = { ...existingDetails, ...extracted.data };
+  const qualificationScore = calculateQualificationScore(mergedDetails, cleanMessage);
+  let qualificationStatus = "Unqualified";
+  if (qualificationScore >= 75) {
+    qualificationStatus = "High Intent";
+  } else if (qualificationScore >= 50) {
+    qualificationStatus = "Qualified";
+  } else if (qualificationScore >= 25) {
+    qualificationStatus = "In Progress";
+  }
+  const summaryParts = [];
+  if (mergedDetails.course) summaryParts.push(`Course: ${mergedDetails.course}`);
+  if (mergedDetails.marks) summaryParts.push(`Marks: ${mergedDetails.marks}`);
+  if (mergedDetails.university || mergedDetails.country) summaryParts.push(`Target: ${mergedDetails.university || mergedDetails.country}`);
+  if (mergedDetails.budget) summaryParts.push(`Budget: ${mergedDetails.budget}`);
+  if (mergedDetails.intake) summaryParts.push(`Intake: ${mergedDetails.intake}`);
+  if (mergedDetails.entranceExam) summaryParts.push(`Exam: ${mergedDetails.entranceExam}`);
+  const qualificationSummary = summaryParts.length > 0 ? summaryParts.join(" | ") : "Exploring study opportunities";
+  const matchedKnowledge = searchKnowledgeBase({
+    query: cleanMessage,
+    course: mergedDetails.course || lead?.preferred_course,
+    university: mergedDetails.university || lead?.preferred_university,
+    limit: 4
+  });
+  const topMatch = matchedKnowledge.length > 0 ? matchedKnowledge[0] : null;
+  let botReply = "";
+  let mode = "Admission Sales Engine";
+  const kbContextText = matchedKnowledge.map((k, idx) => `
+[Knowledge Item ${idx + 1}]
+Title: ${k.title}
+Category: ${k.category}
+Question: ${k.question}
+Verified Counseling Answer:
+${k.answer}
+Suggested Follow-up Qualifying Prompt: ${k.qualifying_question || "None"}
+Nurturing CTA: ${k.nurturing_cta || "Connect with counselor"}
+`).join("\n---\n");
+  const counselorIntroText = counselor ? `Assigned Counselor: ${counselor.name} (${counselor.designation || "Senior Admission Counselor"}, WhatsApp: ${counselorPhone}, Direct link: ${counselorWaUrl})` : "Gems Group Services Admissions Desk (WhatsApp: +977 9801234567)";
+  const systemInstruction = `You are the empathetic, expert Senior AI Admissions Counselor at Gems Group Services (GGS), Nepal & India's leading admission consultancy.
+Your mission is twofold:
+1. Answer the student's question accurately, clearly, and enthusiastically using ONLY the provided verified Knowledge Base context.
+2. Qualify and nurture the student so they take the next step towards booking a seat or connecting with their assigned counselor.
+
+Grounding Rules:
+- Strictly adhere to verified fees, colleges, and eligibility in the Knowledge Base. Never invent medical/engineering fees or criteria.
+- Keep responses friendly, encouraging, well-formatted with bullet points, and concise (under 180 words).
+- Address common student concerns (fees, safety, scholarships, mess/food for Nepali students) warmly.
+
+Lead Qualification & Nurturing Rule:
+- After answering the student's inquiry, naturally ask 1 smart follow-up qualifying question (e.g. asking for their +2/12th marks or GPA, their preferred annual budget, or whether they want Fall 2026 intake).
+- If the student shows high interest, asks about seat reservation, or gives their marks, proactively introduce their assigned counselor: ${counselor?.name || "our senior counselor"} and provide their direct WhatsApp link: ${counselorWaUrl}.`;
+  const conversationHistoryText = chatHistory.slice(-4).map((h) => `${h.sender === "student" ? "Student" : "AI Counselor"}: ${h.message}`).join("\n");
+  const prompt = `
+STUDENT PROFILE:
+Name: ${lead?.student_name || studentName || "Prospective Student"}
+Phone: ${cleanPhone || "WhatsApp"}
+Current Qualification Level: ${qualificationStatus} (Score: ${qualificationScore}/100)
+Extracted Profile Info: ${qualificationSummary}
+${counselorIntroText}
+
+RECENT CONVERSATION HISTORY:
+${conversationHistoryText || "No previous messages"}
+
+VERIFIED KNOWLEDGE BASE CONTEXT:
+${kbContextText || "General Gems Group Services university and medical admissions counseling guidelines."}
+
+CURRENT STUDENT INQUIRY:
+"${cleanMessage}"
+
+Generate your helpful, knowledgeable counseling response now. Remember to ground your answer in the knowledge base, naturally include 1 qualifying follow-up question, and include the counselor's contact when ready.`;
+  try {
+    const geminiResult = await callGeminiApi(prompt, systemInstruction);
+    if (geminiResult && geminiResult.trim().length >= 30) {
+      botReply = geminiResult.trim();
+      mode = "Gemini Generative";
+    }
+  } catch (err) {
+    console.warn("[StudentAI] Gemini call failed, using intelligent rule-based fallback:", err.message);
+  }
+  if (!botReply) {
+    if (topMatch) {
+      let replyParts = [];
+      replyParts.push(topMatch.answer);
+      if (topMatch.qualifying_question) {
+        replyParts.push(`
+
+\u{1F4CC} Quick Question to Guide You: ${topMatch.qualifying_question}`);
+      } else {
+        replyParts.push("\n\n\u{1F4CC} May I know your +2/12th GPA or percentage so I can check your exact scholarship eligibility?");
+      }
+      if (qualificationScore >= 50 && counselor) {
+        replyParts.push(`
+
+\u{1F4AC} Direct Counselor Support: Our ${counselor.designation || "Senior Admission Counselor"} ${counselor.name} is available right now to assist you with free seat booking & document verification. You can chat directly on WhatsApp: ${counselorWaUrl}`);
+      } else if (topMatch.nurturing_cta) {
+        replyParts.push(`
+
+\u2728 Next Step: ${topMatch.nurturing_cta}`);
+      }
+      botReply = replyParts.join("");
+    } else {
+      botReply = `Hello! Thank you for reaching out to Gems Group Services Admissions. We specialize in top-ranked MBBS, Engineering, Management, and IT admissions across premier institutions in India and Bangladesh with scholarships up to 50%!
+
+Could you please share which course you are interested in (e.g. B.Tech, MBBS, MBA, BCA) and your approximate GPA or marks in +2/12th?
+
+You can also connect directly with your dedicated admission counselor ${counselor?.name || "at Gems Group"} on WhatsApp at ${counselorWaUrl} for personalized guidance!`;
+    }
+  }
+  if (lead) {
+    try {
+      const isNowHot = qualificationScore >= 75 || lead.lead_temperature === "HOT";
+      const newTemperature = isNowHot ? "HOT" : qualificationScore >= 50 ? "WARM" : lead.lead_temperature || "WARM";
+      db.prepare(`
+        UPDATE leads SET
+          qualification_score = ?,
+          qualification_status = ?,
+          qualification_summary = ?,
+          qualification_details = ?,
+          ai_chat_summary = ?,
+          ai_chat_count = COALESCE(ai_chat_count, 0) + 1,
+          lead_temperature = ?,
+          preferred_course = CASE WHEN preferred_course = 'Undecided' AND ? IS NOT NULL THEN ? ELSE preferred_course END,
+          preferred_university = CASE WHEN preferred_university = 'Not Specified' AND ? IS NOT NULL THEN ? ELSE preferred_university END,
+          last_contact_date = datetime('now'),
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        qualificationScore,
+        qualificationStatus,
+        qualificationSummary,
+        JSON.stringify(mergedDetails),
+        `Student: "${cleanMessage.slice(0, 100)}..." -> AI answered & qualified (${qualificationStatus})`,
+        newTemperature,
+        mergedDetails.course || null,
+        mergedDetails.course || null,
+        mergedDetails.university || null,
+        mergedDetails.university || null,
+        lead.id
+      );
+      logLeadActivity({
+        leadId: lead.id,
+        activityType: "AI Chatbot",
+        title: `AI Chat Counseling Turn (${qualificationStatus} - ${qualificationScore}%)`,
+        description: `Student asked: "${cleanMessage}"
+AI Counselor replied with ${matchedKnowledge.length} knowledge citations.
+Qualification status updated to ${qualificationStatus} (${qualificationScore}%).`,
+        performedBy: "GGS AI Counselor"
+      });
+      const msgId = "AI-MSG-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+      db.prepare(`
+        INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
+        VALUES (?, ?, 'WhatsApp', ?, 'GGS AI Counselor', ?, 'Sent')
+      `).run(
+        msgId,
+        lead.id,
+        lead.student_name || cleanPhone || "Student",
+        botReply
+      );
+      if (qualificationScore >= 70 && lead.assigned_counselor_id) {
+        createNotification({
+          userId: counselor?.user_id,
+          counselorId: lead.assigned_counselor_id,
+          title: `\u{1F525} High-Intent Lead Qualified: ${lead.student_name}`,
+          message: `${lead.student_name} reached ${qualificationScore}% qualification via AI Chat (${qualificationSummary}). Ready for direct counselor closing!`,
+          type: "LEAD_QUALIFIED"
+        });
+      }
+    } catch (e) {
+      console.warn("[StudentAI] CRM update warning:", e.message);
+    }
+  }
+  return {
+    success: true,
+    reply: botReply,
+    matchedKnowledge: matchedKnowledge.map((k) => ({
+      id: k.id,
+      title: k.title,
+      category: k.category,
+      snippet: k.snippet,
+      relevanceScore: k.relevanceScore
+    })),
+    qualification: {
+      score: qualificationScore,
+      status: qualificationStatus,
+      summary: qualificationSummary,
+      extractedData: mergedDetails,
+      suggestedFollowupQuestion: topMatch?.qualifying_question || "What is your +2 percentage or GPA?",
+      isQualified: qualificationScore >= 50
+    },
+    counselor: counselor ? {
+      id: counselor.id,
+      name: counselor.name,
+      phone: counselorPhone,
+      email: counselor.email,
+      waChatUrl: counselorWaUrl
+    } : void 0,
+    lead: lead ? {
+      id: lead.id,
+      lead_id: lead.lead_id,
+      student_name: lead.student_name,
+      phone: lead.phone,
+      preferred_course: mergedDetails.course || lead.preferred_course,
+      preferred_university: mergedDetails.university || lead.preferred_university,
+      lead_temperature: qualificationScore >= 75 ? "HOT" : lead.lead_temperature
+    } : void 0,
+    mode
+  };
+}
+function extractQualificationData(message, history = []) {
+  const fullText = (history.map((h) => h.message).join(" ") + " " + message).toLowerCase();
+  const data = {};
+  if (/b\.?\s?tech|engineering|cse|computer science|ai\s?\&?\s?ml|mechanical|civil/i.test(fullText)) {
+    data.course = "B.Tech Computer Science / Engineering";
+  } else if (/mbbs|doctor|medical\s?college|bds/i.test(fullText)) {
+    data.course = "MBBS / Medical";
+  } else if (/mba|pgdm|management|master of business/i.test(fullText)) {
+    data.course = "MBA / Management";
+  } else if (/bba|bachelor of business/i.test(fullText)) {
+    data.course = "BBA";
+  } else if (/bca|computer applications|it degree/i.test(fullText)) {
+    data.course = "BCA";
+  } else if (/nursing|b\.?\s?sc\s?nursing/i.test(fullText)) {
+    data.course = "B.Sc Nursing";
+  } else if (/b\.?\s?pharm|pharmacy/i.test(fullText)) {
+    data.course = "B.Pharm";
+  }
+  const gpaMatch = fullText.match(/\b(?:gpa\s*[:=-]?\s*([234]\.\d{1,2})|([234]\.\d{1,2})\s*gpa)\b/i);
+  if (gpaMatch) {
+    data.marks = `GPA ${gpaMatch[1] || gpaMatch[2]}`;
+  } else {
+    const pctMatch = fullText.match(/\b([5-9][0-9](?:\.\d+)?)\s*(?:%|percent|percentage)\b/i);
+    if (pctMatch) {
+      data.marks = `${pctMatch[1]}%`;
+    } else if (/\b(?:first division|distinction|first class)\b/i.test(fullText)) {
+      data.marks = "First Division (60%+)";
+    }
+  }
+  if (/bangladesh|dhaka/i.test(fullText)) {
+    data.country = "Bangladesh";
+  } else if (/india|delhi|bangalore|punjab|chennai/i.test(fullText)) {
+    data.country = "India";
+  }
+  if (/srm\b/i.test(fullText)) {
+    data.university = "SRM Institute of Science and Technology";
+  } else if (/chandigarh\s?university|cu\b/i.test(fullText)) {
+    data.university = "Chandigarh University";
+  } else if (/sharda\b/i.test(fullText)) {
+    data.university = "Sharda University";
+  } else if (/vit\b|vellore/i.test(fullText)) {
+    data.university = "VIT Vellore";
+  } else if (/kumudini/i.test(fullText)) {
+    data.university = "Kumudini Women's Medical College";
+  } else if (/dhaka national/i.test(fullText)) {
+    data.university = "Dhaka National Medical College";
+  }
+  const budgetMatch = fullText.match(/\b(\d{1,2}(?:\s?-\s?\d{1,2})?)\s*(?:lakh|lakhs|lacs|l)\b/i);
+  if (budgetMatch) {
+    data.budget = `${budgetMatch[1]} Lakhs`;
+  } else if (/\b(?:3[0-9]|4[0-9]|50)\s*(?:k|\,000)?\s*(?:usd|\$)\b/i.test(fullText)) {
+    data.budget = "35k - 45k USD (MBBS Full Package)";
+  } else if (/scholarship|low fee|affordable|cheap/i.test(fullText)) {
+    data.budget = "Seeking Max Merit Scholarship";
+  }
+  if (/2026|fall\s?2026|this year|immediately|august/i.test(fullText)) {
+    data.intake = "Fall 2026";
+  } else if (/2027|next year/i.test(fullText)) {
+    data.intake = "2027";
+  }
+  if (/\bneet\b/i.test(fullText)) {
+    data.entranceExam = "NEET";
+  } else if (/\bcee\b/i.test(fullText)) {
+    data.entranceExam = "CEE (Nepal MEC)";
+  } else if (/\bioe\b/i.test(fullText)) {
+    data.entranceExam = "IOE Entrance";
+  } else if (/\bjee\b/i.test(fullText)) {
+    data.entranceExam = "JEE Main";
+  }
+  return { data };
+}
+function calculateQualificationScore(details, latestMessage) {
+  let score = 15;
+  if (details.course) score += 20;
+  if (details.marks) score += 25;
+  if (details.university || details.country) score += 15;
+  if (details.budget) score += 15;
+  if (details.intake) score += 10;
+  if (details.entranceExam) score += 10;
+  if (/admission|fees?|apply|seat|booking|scholarship|enroll|register/i.test(latestMessage)) {
+    score += 10;
+  }
+  return Math.min(100, Math.max(15, score));
+}
+var init_studentAIChatbotService = __esm({
+  "server/services/studentAIChatbotService.ts"() {
+    "use strict";
+    init_database();
+    init_knowledgeBaseService();
+    init_aiSalesService();
+    init_leadDistributionEngine();
+  }
+});
+
 // server/services/integrationService.ts
 var integrationService_exports = {};
 __export(integrationService_exports, {
@@ -4925,7 +5958,23 @@ ${crmLeadUrl}`;
     if (cfg.studentAutoReplyEnabled !== false && counselor.auto_reply_student !== 0 && cleanText2 !== "STOP" && cleanText2 !== "UNSUBSCRIBE") {
       const cleanCounselorDigits = counselorPhone.replace(/[^0-9]/g, "");
       const counselorDirectWaLink = cleanCounselorDigits ? `https://wa.me/${cleanCounselorDigits}` : "";
-      const studentAutoIntroMsg = `Namaste ${lead.student_name || "Student"}! \u{1F44B}
+      let studentReplyMsg = "";
+      try {
+        const aiChatRes = await chatWithStudent({
+          message: textBody,
+          leadId: lead.id,
+          phone: fromNumber,
+          studentName: lead.student_name,
+          source: "WhatsApp Inbound"
+        });
+        if (aiChatRes && aiChatRes.reply) {
+          studentReplyMsg = aiChatRes.reply;
+        }
+      } catch (aiErr) {
+        console.warn("[AI Student Bot Inbound Notice]", aiErr.message);
+      }
+      if (!studentReplyMsg) {
+        studentReplyMsg = `Namaste ${lead.student_name || "Student"}! \u{1F44B}
 
 Thank you for contacting Gems Group Services Admissions.
 
@@ -4940,12 +5989,13 @@ ${counselor.name} has been notified and will personally assist you with universi
 
 \u{1F449} *Click here to connect directly with ${counselor.name} on WhatsApp:*
 ${counselorDirectWaLink || "https://education-sansar-crm.vercel.app"}`;
+      }
       try {
         const sRes = await sendWhatsAppMessage({
           leadId: lead.id,
           recipientPhone: fromNumber,
-          customMessage: studentAutoIntroMsg,
-          performedBy: `${counselor.name} (Admissions Counselor)`
+          customMessage: studentReplyMsg,
+          performedBy: `${counselor.name} (Admissions AI Counselor)`
         });
         studentAutoReplied = sRes.success;
       } catch (err) {
@@ -6135,6 +7185,7 @@ var init_integrationService = __esm({
     init_leadDistributionEngine();
     init_neon();
     init_broadcastService();
+    init_studentAIChatbotService();
   }
 });
 
@@ -10637,6 +11688,8 @@ function getUniversityCommissionsSummary() {
 init_emailService();
 init_broadcastService();
 init_aiSalesService();
+init_knowledgeBaseService();
+init_studentAIChatbotService();
 var apiRouter = Router();
 var cachedBuildInfo = null;
 function getSystemBuildInfo() {
@@ -14783,6 +15836,126 @@ apiRouter.get("/ai/dashboard", (req, res) => {
     res.json(metrics);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to load AI dashboard metrics" });
+  }
+});
+apiRouter.get("/knowledge-base", (req, res) => {
+  try {
+    const { category, search, isActive, limit, offset } = req.query;
+    const result = getKnowledgeBase({
+      category,
+      search,
+      isActive: isActive !== void 0 ? parseInt(isActive, 10) : void 0,
+      limit: limit ? parseInt(limit, 10) : void 0,
+      offset: offset ? parseInt(offset, 10) : void 0
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch knowledge base" });
+  }
+});
+apiRouter.get("/knowledge-base/:id", (req, res) => {
+  try {
+    const item = getKnowledgeItem(req.params.id);
+    if (!item) return res.status(404).json({ error: "Knowledge item not found" });
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch knowledge item" });
+  }
+});
+apiRouter.post("/knowledge-base", (req, res) => {
+  try {
+    const { title, category, question, alternate_questions, answer, keywords, target_courses, target_universities, qualifying_question, nurturing_cta, importance, is_active, created_by } = req.body;
+    if (!title || !question || !answer) {
+      return res.status(400).json({ error: "Title, question, and answer are required" });
+    }
+    const item = createKnowledgeItem({
+      title,
+      category,
+      question,
+      alternate_questions,
+      answer,
+      keywords,
+      target_courses,
+      target_universities,
+      qualifying_question,
+      nurturing_cta,
+      importance: importance !== void 0 ? parseInt(importance, 10) : 5,
+      is_active: is_active !== void 0 ? is_active ? 1 : 0 : 1,
+      created_by
+    });
+    res.status(201).json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create knowledge item" });
+  }
+});
+apiRouter.put("/knowledge-base/:id", (req, res) => {
+  try {
+    const updated = updateKnowledgeItem(req.params.id, req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update knowledge item" });
+  }
+});
+apiRouter.delete("/knowledge-base/:id", (req, res) => {
+  try {
+    const success = deleteKnowledgeItem(req.params.id);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete knowledge item" });
+  }
+});
+apiRouter.post("/knowledge-base/seed", (req, res) => {
+  try {
+    seedDefaultKnowledgeBase();
+    const result = getKnowledgeBase();
+    res.json({ success: true, message: "Knowledge base seeded successfully", ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to seed knowledge base" });
+  }
+});
+apiRouter.post("/knowledge-base/train-text", async (req, res) => {
+  try {
+    const { title, category, rawText, created_by } = req.body;
+    if (!title || !rawText) {
+      return res.status(400).json({ error: "Title and rawText are required" });
+    }
+    const items = await trainFromRawText({
+      title,
+      category: category || "General FAQ",
+      rawText,
+      createdBy: created_by
+    });
+    res.json({ success: true, count: items.length, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to extract knowledge from text" });
+  }
+});
+apiRouter.post("/chatbot/message", async (req, res) => {
+  try {
+    const { message, leadId, phone, studentName, chatHistory, source } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    const response = await chatWithStudent({
+      message,
+      leadId,
+      phone,
+      studentName,
+      chatHistory,
+      source: source || "Student Chat"
+    });
+    res.json(response);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to process student chat" });
+  }
+});
+apiRouter.get("/chatbot/lead-qualification/:leadId", (req, res) => {
+  try {
+    const lead = db.prepare("SELECT id, student_name, phone, preferred_course, preferred_university, lead_temperature, qualification_score, qualification_status, qualification_summary, qualification_details, ai_chat_summary, ai_chat_count, assigned_counselor_name FROM leads WHERE id = ?").get(req.params.leadId);
+    if (!lead) return res.status(404).json({ error: "Lead not found" });
+    res.json(lead);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch lead qualification" });
   }
 });
 

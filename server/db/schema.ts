@@ -196,6 +196,12 @@ CREATE TABLE IF NOT EXISTS leads (
   whatsapp_opt_out_date TEXT,
   last_campaign_id TEXT,
   last_campaign_name TEXT,
+  qualification_score INTEGER DEFAULT 0,
+  qualification_status TEXT DEFAULT 'Unqualified',
+  qualification_summary TEXT,
+  qualification_details TEXT DEFAULT '{}',
+  ai_chat_summary TEXT,
+  ai_chat_count INTEGER DEFAULT 0,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   is_demo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -726,6 +732,32 @@ CREATE TABLE IF NOT EXISTS finance_invoices (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 33. Knowledge Base for Student AI Counseling & Lead Nurturing
+CREATE TABLE IF NOT EXISTS knowledge_base (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'General FAQ', -- 'Course Admissions', 'Fee & Scholarships', 'Partner Universities', 'Visa & Documentation', 'Eligibility & Deadlines', 'Entrance Exams', 'General FAQ'
+  question TEXT NOT NULL,
+  alternate_questions TEXT NOT NULL DEFAULT '[]', -- JSON array of question variants
+  answer TEXT NOT NULL,
+  keywords TEXT NOT NULL DEFAULT '[]', -- JSON array of search keywords/tags
+  target_courses TEXT NOT NULL DEFAULT '[]', -- JSON array of related courses (e.g. ['MBBS', 'B.Tech'])
+  target_universities TEXT NOT NULL DEFAULT '[]', -- JSON array of partner universities
+  qualifying_question TEXT, -- Proactive follow-up question asked by AI to qualify the student
+  nurturing_cta TEXT, -- Call to action nudging student to connect with assigned counselor
+  importance INTEGER NOT NULL DEFAULT 5, -- 1 to 10 priority
+  is_active INTEGER NOT NULL DEFAULT 1, -- 1 = active/trained, 0 = draft
+  times_used INTEGER NOT NULL DEFAULT 0,
+  source_type TEXT NOT NULL DEFAULT 'Manual', -- 'Manual', 'Trained Document', 'Pre-seeded'
+  created_by TEXT NOT NULL DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
+CREATE INDEX IF NOT EXISTS idx_kb_active ON knowledge_base(is_active);
+CREATE INDEX IF NOT EXISTS idx_kb_importance ON knowledge_base(importance);
 
 -- REQUIRED INDEXES FOR HIGH PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);

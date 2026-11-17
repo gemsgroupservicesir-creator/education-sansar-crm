@@ -28,7 +28,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Mail,
-  Sparkles
+  Sparkles,
+  Brain
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { name: 'Leads', path: '/leads', icon: Users, permission: 'leads_view' },
     { name: 'My Leads', path: '/my-leads', icon: UserCheck, permission: 'leads_view', roles: ['Super Admin', 'Admin', 'Counselor', 'Telecaller'] },
     { name: 'AI Sales Copilot', path: '/ai-sales', icon: Sparkles, tag: 'AI', permission: 'leads_view' },
+    { name: 'Knowledge Base', path: '/knowledge-base', icon: Brain, tag: 'AI', permission: 'leads_view' },
     { name: 'Admission Pipeline', path: '/pipeline', icon: Kanban, permission: 'pipeline' },
     { name: 'Follow-ups', path: '/followups', icon: CalendarClock, permission: 'leads_view' },
     { name: 'Applications', path: '/applications', icon: GraduationCap, permission: 'applications' },

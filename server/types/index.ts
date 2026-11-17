@@ -165,6 +165,12 @@ export interface Lead {
   created_by?: string;
   updated_by?: string;
   is_converted_to_student: number;
+  qualification_score?: number;
+  qualification_status?: 'Unqualified' | 'In Progress' | 'Qualified' | 'High Intent';
+  qualification_summary?: string;
+  qualification_details?: string;
+  ai_chat_summary?: string;
+  ai_chat_count?: number;
   is_deleted: number;
   is_demo: number;
   created_at: string;
@@ -454,3 +460,71 @@ export interface LeadActivity {
   metadata?: string;
   created_at: string;
 }
+
+export type KnowledgeCategory = 
+  | 'Course Admissions'
+  | 'Fee & Scholarships'
+  | 'Partner Universities'
+  | 'Visa & Documentation'
+  | 'Eligibility & Deadlines'
+  | 'Entrance Exams'
+  | 'General FAQ';
+
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  category: KnowledgeCategory;
+  question: string;
+  alternate_questions?: string[] | string;
+  answer: string;
+  keywords?: string[] | string;
+  target_courses?: string[] | string;
+  target_universities?: string[] | string;
+  qualifying_question?: string;
+  nurturing_cta?: string;
+  importance: number; // 1 to 10
+  is_active: number; // 1 or 0
+  times_used: number;
+  source_type: 'Manual' | 'Trained Document' | 'Pre-seeded';
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudentAIChatResponse {
+  success: boolean;
+  reply: string;
+  matchedKnowledge?: Array<{
+    id: string;
+    title: string;
+    category: string;
+    snippet: string;
+    relevanceScore: number;
+  }>;
+  qualification?: {
+    score: number; // 0 - 100
+    status: 'Unqualified' | 'In Progress' | 'Qualified' | 'High Intent';
+    summary: string;
+    extractedData: {
+      course?: string;
+      university?: string;
+      marks?: string;
+      budget?: string;
+      intake?: string;
+      entranceExam?: string;
+      location?: string;
+    };
+    suggestedFollowupQuestion?: string;
+    isQualified: boolean;
+  };
+  counselor?: {
+    id?: string;
+    name: string;
+    phone: string;
+    email?: string;
+    waChatUrl: string;
+  };
+  lead?: Partial<Lead>;
+  mode: 'Gemini Generative' | 'Admission Sales Engine';
+}
+

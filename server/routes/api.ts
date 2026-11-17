@@ -142,6 +142,19 @@ import {
   resolveCounselorProfile
 } from '../services/aiSalesService.ts';
 
+import {
+  getKnowledgeBase,
+  getKnowledgeItem,
+  createKnowledgeItem,
+  updateKnowledgeItem,
+  deleteKnowledgeItem,
+  seedDefaultKnowledgeBase,
+  trainFromRawText,
+  searchKnowledgeBase
+} from '../services/knowledgeBaseService.ts';
+
+import { chatWithStudent } from '../services/studentAIChatbotService.ts';
+
 export const apiRouter = Router();
 
 // ==========================================
@@ -4784,4 +4797,147 @@ apiRouter.get('/ai/dashboard', (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || 'Failed to load AI dashboard metrics' });
   }
 });
+
+// ==========================================
+// KNOWLEDGE BASE & STUDENT AI CHATBOT ROUTES
+// ==========================================
+
+// 1. List knowledge items
+apiRouter.get('/knowledge-base', (req: Request, res: Response) => {
+  try {
+    const { category, search, isActive, limit, offset } = req.query;
+    const result = getKnowledgeBase({
+      category: category as string,
+      search: search as string,
+      isActive: isActive !== undefined ? parseInt(isActive as string, 10) : undefined,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch knowledge base' });
+  }
+});
+
+// 2. Get single knowledge item
+apiRouter.get('/knowledge-base/:id', (req: Request, res: Response) => {
+  try {
+    const item = getKnowledgeItem(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Knowledge item not found' });
+    res.json(item);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch knowledge item' });
+  }
+});
+
+// 3. Create knowledge item
+apiRouter.post('/knowledge-base', (req: Request, res: Response) => {
+  try {
+    const { title, category, question, alternate_questions, answer, keywords, target_courses, target_universities, qualifying_question, nurturing_cta, importance, is_active, created_by } = req.body;
+    if (!title || !question || !answer) {
+      return res.status(400).json({ error: 'Title, question, and answer are required' });
+    }
+    const item = createKnowledgeItem({
+      title,
+      category,
+      question,
+      alternate_questions,
+      answer,
+      keywords,
+      target_courses,
+      target_universities,
+      qualifying_question,
+      nurturing_cta,
+      importance: importance !== undefined ? parseInt(importance, 10) : 5,
+      is_active: is_active !== undefined ? (is_active ? 1 : 0) : 1,
+      created_by
+    });
+    res.status(201).json(item);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create knowledge item' });
+  }
+});
+
+// 4. Update knowledge item
+apiRouter.put('/knowledge-base/:id', (req: Request, res: Response) => {
+  try {
+    const updated = updateKnowledgeItem(req.params.id, req.body);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update knowledge item' });
+  }
+});
+
+// 5. Delete knowledge item
+apiRouter.delete('/knowledge-base/:id', (req: Request, res: Response) => {
+  try {
+    const success = deleteKnowledgeItem(req.params.id);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to delete knowledge item' });
+  }
+});
+
+// 6. Bulk seed default knowledge base
+apiRouter.post('/knowledge-base/seed', (req: Request, res: Response) => {
+  try {
+    seedDefaultKnowledgeBase();
+    const result = getKnowledgeBase();
+    res.json({ success: true, message: 'Knowledge base seeded successfully', ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to seed knowledge base' });
+  }
+});
+
+// 7. Train from raw document/prospectus text
+apiRouter.post('/knowledge-base/train-text', async (req: Request, res: Response) => {
+  try {
+    const { title, category, rawText, created_by } = req.body;
+    if (!title || !rawText) {
+      return res.status(400).json({ error: 'Title and rawText are required' });
+    }
+    const items = await trainFromRawText({
+      title,
+      category: category || 'General FAQ',
+      rawText,
+      createdBy: created_by
+    });
+    res.json({ success: true, count: items.length, items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to extract knowledge from text' });
+  }
+});
+
+// 8. Public / In-App Student AI Chatbot endpoint
+apiRouter.post('/chatbot/message', async (req: Request, res: Response) => {
+  try {
+    const { message, leadId, phone, studentName, chatHistory, source } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    const response = await chatWithStudent({
+      message,
+      leadId,
+      phone,
+      studentName,
+      chatHistory,
+      source: source || 'Student Chat'
+    });
+    res.json(response);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to process student chat' });
+  }
+});
+
+// 9. Get live lead qualification dossier
+apiRouter.get('/chatbot/lead-qualification/:leadId', (req: Request, res: Response) => {
+  try {
+    const lead = db.prepare('SELECT id, student_name, phone, preferred_course, preferred_university, lead_temperature, qualification_score, qualification_status, qualification_summary, qualification_details, ai_chat_summary, ai_chat_count, assigned_counselor_name FROM leads WHERE id = ?').get(req.params.leadId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    res.json(lead);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch lead qualification' });
+  }
+});
+
 

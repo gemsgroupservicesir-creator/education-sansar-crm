@@ -1,4 +1,4 @@
-import { BroadcastCampaign, BroadcastRecipient, LeadOptOut, AudiencePreviewResult } from '../types';
+import { BroadcastCampaign, BroadcastRecipient, LeadOptOut, AudiencePreviewResult, KnowledgeItem, StudentAIChatResponse } from '../types';
 
 const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
 const API_BASE = isFileProtocol 
@@ -782,5 +782,53 @@ export const api = {
       body: JSON.stringify({ message, leadContext }),
     }),
   getAIDashboard: () => fetchJson<any>('/ai/dashboard'),
+
+  // Knowledge Base & Student AI Chatbot
+  getKnowledgeBase: (params: { category?: string; search?: string; isActive?: number; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    }
+    const qStr = query.toString();
+    return fetchJson<{ items: KnowledgeItem[]; total: number }>(`/knowledge-base${qStr ? `?${qStr}` : ''}`);
+  },
+  getKnowledgeItem: (id: string) => fetchJson<KnowledgeItem>(`/knowledge-base/${id}`),
+  createKnowledgeItem: (data: any) =>
+    fetchJson<KnowledgeItem>('/knowledge-base', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateKnowledgeItem: (id: string, data: any) =>
+    fetchJson<KnowledgeItem>(`/knowledge-base/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteKnowledgeItem: (id: string) =>
+    fetchJson<{ success: boolean }>(`/knowledge-base/${id}`, {
+      method: 'DELETE',
+    }),
+  seedKnowledgeBase: () =>
+    fetchJson<{ success: boolean; message: string; items: KnowledgeItem[]; total: number }>('/knowledge-base/seed', {
+      method: 'POST',
+    }),
+  trainKnowledgeFromText: (data: { title: string; category?: string; rawText: string; created_by?: string }) =>
+    fetchJson<{ success: boolean; count: number; items: KnowledgeItem[] }>('/knowledge-base/train-text', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendStudentChatMessage: (data: {
+    message: string;
+    leadId?: string;
+    phone?: string;
+    studentName?: string;
+    chatHistory?: Array<{ sender: 'student' | 'ai'; message: string }>;
+    source?: string;
+  }) =>
+    fetchJson<StudentAIChatResponse>('/chatbot/message', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getLeadQualification: (leadId: string) =>
+    fetchJson<any>(`/chatbot/lead-qualification/${leadId}`),
 };
 

@@ -272,7 +272,7 @@ export function distributeLead(lead: {
   preferred_course?: string | null;
   country?: string | null;
   source?: string | null;
-}): { counselorId: string; counselorName: string; method: string; matchedRule?: string; reasons: string[] } | null {
+} = {}): { counselorId: string; counselorName: string; method: string; matchedRule?: string; reasons: string[] } | null {
   
   // 1. Fetch all active counselors with available capacity
   const activeCounselors = db.prepare(`
