@@ -4319,6 +4319,132 @@ apiRouter.get('/broadcasts', (req: Request, res: Response) => {
   }
 });
 
+// Open tracking pixel endpoint: returns 1x1 transparent GIF
+apiRouter.get('/broadcasts/track/open/:token', (req: Request, res: Response) => {
+  try {
+    trackOpenEvent(req.params.token);
+  } catch {}
+  // 1x1 transparent GIF
+  const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  res.writeHead(200, {
+    'Content-Type': 'image/gif',
+    'Content-Length': pixel.length,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+  });
+  res.end(pixel);
+});
+
+// Click / Reply tracking endpoint: records click/reply and redirects to target URL
+apiRouter.get('/broadcasts/track/click/:token', (req: Request, res: Response) => {
+  const { url } = req.query;
+  try {
+    trackClickOrReplyEvent(req.params.token);
+  } catch {}
+  if (url && typeof url === 'string') {
+    return res.redirect(url);
+  }
+  res.send('<html><body><h3>Thank you! Your response has been recorded.</h3></body></html>');
+});
+
+// Public Unsubscribe Endpoint (serves clean confirmation page)
+apiRouter.get('/broadcasts/unsubscribe', (req: Request, res: Response) => {
+  const token = req.query.token as string | undefined;
+  const channel = (req.query.channel as string) === 'WhatsApp' ? 'WhatsApp' : 'Email';
+  const email = req.query.email as string | undefined;
+
+  let success = false;
+  let message = 'Unsubscribed successfully';
+
+  try {
+    const result = handleLeadOptOut({
+      token,
+      identifier: email,
+      channel,
+      reason: 'Student clicked unsubscribe link in email'
+    });
+    success = result.success;
+    message = result.message;
+  } catch (err: any) {
+    message = err.message;
+  }
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Unsubscribe Confirmation | Gems Group Services</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: white; border-radius: 16px; padding: 40px; max-width: 480px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); text-align: center; border: 1px solid #e2e8f0; }
+        .icon { width: 56px; height: 56px; border-radius: 50%; background-color: #ecfdf5; color: #059669; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; }
+        h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 12px; }
+        p { color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
+        .badge { display: inline-block; background-color: #f1f5f9; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 24px; }
+        .footer { font-size: 13px; color: #94a3b8; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="icon">✓</div>
+        <h1>Preferences Updated</h1>
+        <div class="badge">${channel} Broadcasts</div>
+        <p>${success ? `You have been successfully unsubscribed from ${channel} broadcast announcements. You will no longer receive mass marketing messages from our admissions desk.` : message}</p>
+        <div class="footer">
+          Gems Group Services Admissions Directorate<br>
+          If this was done in error, please contact your education counselor to resubscribe.
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// Manual / API Lead Opt-Out
+apiRouter.post('/broadcasts/opt-out', (req: Request, res: Response) => {
+  try {
+    const { leadId, identifier, channel, reason, campaignId } = req.body;
+    if (!channel || (!leadId && !identifier)) {
+      return res.status(400).json({ error: 'channel and (leadId or identifier) are required' });
+    }
+    const result = handleLeadOptOut({
+      leadId,
+      identifier,
+      channel,
+      reason,
+      campaignId
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to record opt-out' });
+  }
+});
+
+// Re-subscribe Lead
+apiRouter.post('/broadcasts/resubscribe', (req: Request, res: Response) => {
+  try {
+    const { leadId, channel } = req.body;
+    if (!leadId || !channel) {
+      return res.status(400).json({ error: 'leadId and channel are required' });
+    }
+    const success = resubscribeLead(leadId, channel);
+    res.json({ success, message: `Successfully resubscribed lead to ${channel}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to resubscribe lead' });
+  }
+});
+
+// List all opt-outs
+apiRouter.get('/broadcasts/opt-outs', (req: Request, res: Response) => {
+  try {
+    const optOuts = getOptOutList();
+    res.json(optOuts);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch opt-outs' });
+  }
+});
+
 // Get single broadcast campaign
 apiRouter.get('/broadcasts/:id', (req: Request, res: Response) => {
   try {
@@ -4452,132 +4578,6 @@ apiRouter.post('/broadcasts/:id/simulate', (req: Request, res: Response) => {
     res.json(updated);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to simulate recipient action' });
-  }
-});
-
-// Open tracking pixel endpoint: returns 1x1 transparent GIF
-apiRouter.get('/broadcasts/track/open/:token', (req: Request, res: Response) => {
-  try {
-    trackOpenEvent(req.params.token);
-  } catch {}
-  // 1x1 transparent GIF
-  const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-  res.writeHead(200, {
-    'Content-Type': 'image/gif',
-    'Content-Length': pixel.length,
-    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-  });
-  res.end(pixel);
-});
-
-// Click / Reply tracking endpoint: records click/reply and redirects to target URL
-apiRouter.get('/broadcasts/track/click/:token', (req: Request, res: Response) => {
-  const { url } = req.query;
-  try {
-    trackClickOrReplyEvent(req.params.token);
-  } catch {}
-  if (url && typeof url === 'string') {
-    return res.redirect(url);
-  }
-  res.send('<html><body><h3>Thank you! Your response has been recorded.</h3></body></html>');
-});
-
-// Public Unsubscribe Endpoint (serves clean confirmation page)
-apiRouter.get('/broadcasts/unsubscribe', (req: Request, res: Response) => {
-  const token = req.query.token as string | undefined;
-  const channel = (req.query.channel as string) === 'WhatsApp' ? 'WhatsApp' : 'Email';
-  const email = req.query.email as string | undefined;
-
-  let success = false;
-  let message = 'Unsubscribed successfully';
-
-  try {
-    const result = handleLeadOptOut({
-      token,
-      identifier: email,
-      channel,
-      reason: 'Student clicked unsubscribe link in email'
-    });
-    success = result.success;
-    message = result.message;
-  } catch (err: any) {
-    message = err.message;
-  }
-
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Unsubscribe Confirmation | Gems Group Services</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-        .card { background: white; border-radius: 16px; padding: 40px; max-width: 480px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); text-align: center; border: 1px solid #e2e8f0; }
-        .icon { width: 56px; height: 56px; border-radius: 50%; background-color: #ecfdf5; color: #059669; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; }
-        h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 12px; }
-        p { color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
-        .badge { display: inline-block; background-color: #f1f5f9; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 24px; }
-        .footer { font-size: 13px; color: #94a3b8; }
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <div class="icon">✓</div>
-        <h1>Preferences Updated</h1>
-        <div class="badge">${channel} Broadcasts</div>
-        <p>${success ? `You have been successfully unsubscribed from ${channel} broadcast announcements. You will no longer receive mass marketing messages from our admissions desk.` : message}</p>
-        <div class="footer">
-          Gems Group Services Admissions Directorate<br>
-          If this was done in error, please contact your education counselor to resubscribe.
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// Manual / API Lead Opt-Out
-apiRouter.post('/broadcasts/opt-out', (req: Request, res: Response) => {
-  try {
-    const { leadId, identifier, channel, reason, campaignId } = req.body;
-    if (!channel || (!leadId && !identifier)) {
-      return res.status(400).json({ error: 'channel and (leadId or identifier) are required' });
-    }
-    const result = handleLeadOptOut({
-      leadId,
-      identifier,
-      channel,
-      reason,
-      campaignId
-    });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to record opt-out' });
-  }
-});
-
-// Re-subscribe Lead
-apiRouter.post('/broadcasts/resubscribe', (req: Request, res: Response) => {
-  try {
-    const { leadId, channel } = req.body;
-    if (!leadId || !channel) {
-      return res.status(400).json({ error: 'leadId and channel are required' });
-    }
-    const success = resubscribeLead(leadId, channel);
-    res.json({ success, message: `Successfully resubscribed lead to ${channel}` });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to resubscribe lead' });
-  }
-});
-
-// List all opt-outs
-apiRouter.get('/broadcasts/opt-outs', (req: Request, res: Response) => {
-  try {
-    const optOuts = getOptOutList();
-    res.json(optOuts);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to fetch opt-outs' });
   }
 });
 
