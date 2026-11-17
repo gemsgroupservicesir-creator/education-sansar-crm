@@ -19,7 +19,9 @@ import {
   updateGoogleSheetConnection,
   deleteGoogleSheetConnection,
   syncAllActiveGoogleSheets,
-  verifyMetaCredentials
+  verifyMetaCredentials,
+  verifyWhatsAppCredentials,
+  handleInboundWhatsAppWebhook
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -3218,10 +3220,48 @@ apiRouter.post('/integrations/meta/test-webhook', async (req: Request, res: Resp
   }
 });
 
-// WhatsApp outreach sender / test endpoint
-apiRouter.post('/integrations/whatsapp/send', (req: Request, res: Response) => {
+// WhatsApp Meta Credentials Verifier (Live Meta Graph API Test)
+apiRouter.post('/integrations/whatsapp/verify-credentials', async (req: Request, res: Response) => {
   try {
-    const result = sendWhatsAppMessage(req.body);
+    const { phoneNumberId, permanentAccessToken, wabaId } = req.body;
+    const result = await verifyWhatsAppCredentials({ phoneNumberId, permanentAccessToken, wabaId });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ valid: false, error: err.message || 'WhatsApp verification failed' });
+  }
+});
+
+// WhatsApp Meta Webhook Challenge Verification (GET)
+apiRouter.get('/integrations/whatsapp/webhook', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  const intRow = db.prepare("SELECT * FROM integrations WHERE name = 'WhatsApp Business API' OR id = 'int-wa'").get() as any;
+  let expectedToken = 'gems_group_services_wa_verify_2026';
+  try {
+    const cfg = typeof intRow?.config === 'string' ? JSON.parse(intRow.config) : intRow?.config;
+    if (cfg?.verifyToken) expectedToken = cfg.verifyToken;
+  } catch {}
+
+  if (mode === 'subscribe' && token === expectedToken) {
+    return res.status(200).send(challenge);
+  }
+  res.status(403).json({ error: 'Forbidden: Invalid verify token' });
+});
+
+// WhatsApp Meta Inbound Webhook Listener (POST)
+apiRouter.post('/integrations/whatsapp/webhook', (req: Request, res: Response) => {
+  // Acknowledge immediately to Meta
+  res.status(200).json({ status: 'EVENT_RECEIVED' });
+  // Process inbound replies and delivery receipts asynchronously
+  handleInboundWhatsAppWebhook(req.body);
+});
+
+// WhatsApp outreach sender / test endpoint
+apiRouter.post('/integrations/whatsapp/send', async (req: Request, res: Response) => {
+  try {
+    const result = await sendWhatsAppMessage(req.body);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

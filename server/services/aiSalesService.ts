@@ -483,7 +483,7 @@ export async function autoDispatchWelcomeOutreach(
     const targetPhone = lead.whatsapp_number || lead.phone;
     if (targetPhone && targetPhone.trim()) {
       try {
-        const waRes = sendWhatsAppMessage({
+        const waRes = await sendWhatsAppMessage({
           leadId: lead.id,
           recipientPhone: targetPhone,
           customMessage: outreach.whatsappMessage,

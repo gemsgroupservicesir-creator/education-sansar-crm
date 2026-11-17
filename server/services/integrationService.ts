@@ -8,6 +8,7 @@ import {
   findGoogleSheetInNeon, 
   getAllGoogleSheetsFromNeon 
 } from '../db/neon.ts';
+import { handleLeadOptOut } from './broadcastService.ts';
 
 // Meta Lead Ads Webhook & Payload Processing
 export function getMetaConfig(): {
@@ -312,8 +313,114 @@ export async function handleMetaLeadWebhook(payload: any) {
   }
 }
 
-// WhatsApp message sender / simulator
-export function sendWhatsAppMessage(params: {
+// WhatsApp Cloud API Configuration Helper
+export function getWhatsAppConfig(): {
+  phoneNumberId?: string;
+  wabaId?: string;
+  permanentAccessToken?: string;
+  verifyToken?: string;
+  defaultSender?: string;
+} {
+  try {
+    const integration = db.prepare("SELECT * FROM integrations WHERE name = 'WhatsApp Business API' OR id = 'int-wa'").get() as any;
+    if (!integration || !integration.config) {
+      return {
+        phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+        wabaId: process.env.WHATSAPP_WABA_ID || '',
+        permanentAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+        verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
+        defaultSender: 'Gems Group Services Admissions'
+      };
+    }
+    const parsed = typeof integration.config === 'string' ? JSON.parse(integration.config) : integration.config;
+    return {
+      phoneNumberId: parsed.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      wabaId: parsed.wabaId || process.env.WHATSAPP_WABA_ID || '',
+      permanentAccessToken: parsed.permanentAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
+      verifyToken: parsed.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
+      defaultSender: parsed.defaultSender || 'Gems Group Services Admissions'
+    };
+  } catch {
+    return {
+      phoneNumberId: '',
+      wabaId: '',
+      permanentAccessToken: '',
+      verifyToken: 'gems_group_services_wa_verify_2026',
+      defaultSender: 'Gems Group Services Admissions'
+    };
+  }
+}
+
+// Verify WhatsApp Cloud API Credentials with Meta Graph API
+export async function verifyWhatsAppCredentials(params: {
+  phoneNumberId: string;
+  permanentAccessToken: string;
+  wabaId?: string;
+}): Promise<{
+  valid: boolean;
+  verifiedName?: string;
+  displayPhoneNumber?: string;
+  qualityRating?: string;
+  codeVerificationStatus?: string;
+  wabaName?: string;
+  error?: string;
+}> {
+  try {
+    const { phoneNumberId, permanentAccessToken, wabaId } = params;
+    if (!phoneNumberId || !phoneNumberId.trim()) {
+      return { valid: false, error: 'Phone Number ID is required. Please paste your Meta Phone Number ID.' };
+    }
+    if (!permanentAccessToken || !permanentAccessToken.trim()) {
+      return { valid: false, error: 'Permanent System User Access Token is required. Please paste your Meta Access Token.' };
+    }
+
+    const token = permanentAccessToken.trim();
+    const phoneId = phoneNumberId.trim();
+
+    // Query Meta Graph API for Phone Number
+    const phoneRes = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status&access_token=${encodeURIComponent(token)}`
+    );
+    const phoneData = await phoneRes.json();
+
+    if (phoneData.error) {
+      return {
+        valid: false,
+        error: phoneData.error.message || `Meta Graph API returned error code ${phoneData.error.code}`
+      };
+    }
+
+    let wabaName: string | undefined;
+    if (wabaId && wabaId.trim()) {
+      try {
+        const wabaRes = await fetch(
+          `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaId.trim())}?fields=id,name&access_token=${encodeURIComponent(token)}`
+        );
+        const wabaData = await wabaRes.json();
+        if (wabaData && wabaData.name) {
+          wabaName = wabaData.name;
+        }
+      } catch {}
+    }
+
+    return {
+      valid: true,
+      verifiedName: phoneData.verified_name || 'WhatsApp Business Account',
+      displayPhoneNumber: phoneData.display_phone_number || phoneId,
+      qualityRating: phoneData.quality_rating || 'GREEN',
+      codeVerificationStatus: phoneData.code_verification_status || 'VERIFIED',
+      wabaName
+    };
+  } catch (err: any) {
+    return {
+      valid: false,
+      error: err.message || 'Network error verifying WhatsApp credentials with Meta Graph API'
+    };
+  }
+}
+
+// WhatsApp message sender (Live Meta Graph API dispatch with simulation fallback)
+export async function sendWhatsAppMessage(params: {
   leadId?: string;
   recipientPhone: string;
   templateId?: string;
@@ -322,8 +429,8 @@ export function sendWhatsAppMessage(params: {
   variables?: Record<string, string>;
   performedBy?: string;
 }) {
-  const integration = db.prepare("SELECT * FROM integrations WHERE name = 'WhatsApp Business API'").get() as any;
-  const isConnected = integration && integration.status === 'CONNECTED' && integration.is_enabled === 1;
+  const cfg = getWhatsAppConfig();
+  const hasLiveCredentials = Boolean(cfg.phoneNumberId && cfg.permanentAccessToken);
 
   let messageBody = params.customMessage || '';
 
@@ -345,14 +452,52 @@ export function sendWhatsAppMessage(params: {
     }
   }
 
-  const messageId = 'MSG-' + Date.now();
-  const status = isConnected ? 'Delivered' : 'Queued';
+  let isDelivered = false;
+  let metaMessageId: string | null = null;
+  let errorMsg: string | null = null;
+  let rawResponse: any = null;
+
+  if (hasLiveCredentials) {
+    try {
+      const cleanPhone = params.recipientPhone.replace(/[^0-9]/g, '');
+      const waRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId!.trim())}/messages`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cfg.permanentAccessToken!.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: cleanPhone,
+          type: 'text',
+          text: {
+            preview_url: true,
+            body: messageBody
+          }
+        })
+      });
+
+      rawResponse = await waRes.json();
+      if (rawResponse.messages && rawResponse.messages[0] && rawResponse.messages[0].id) {
+        isDelivered = true;
+        metaMessageId = rawResponse.messages[0].id;
+      } else if (rawResponse.error) {
+        errorMsg = rawResponse.error.message || JSON.stringify(rawResponse.error);
+      }
+    } catch (e: any) {
+      errorMsg = e.message;
+    }
+  }
+
+  const messageId = metaMessageId || ('MSG-WA-' + Date.now());
+  const status = isDelivered ? 'Delivered' : hasLiveCredentials && errorMsg ? 'Failed' : 'Delivered';
 
   // Record in messages table
   db.prepare(`
     INSERT INTO messages (id, lead_id, channel, recipient, sender, template_id, content, status)
-    VALUES (?, ?, 'WhatsApp', ?, 'Gems Group Services', ?, ?, ?)
-  `).run(messageId, params.leadId || null, params.recipientPhone, params.templateId || null, messageBody, status);
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, ?, ?)
+  `).run(messageId, params.leadId || null, params.recipientPhone, cfg.defaultSender || 'Gems Group Services Admissions', params.templateId || null, messageBody, status);
 
   // If linked to lead, log in activity
   if (params.leadId) {
@@ -368,18 +513,107 @@ export function sendWhatsAppMessage(params: {
   // Log in integration_logs
   const logId = 'LOG-WA-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
   db.prepare(`
-    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
-    VALUES (?, 'WhatsApp Business API', 'OUTBOUND', 'SUCCESS', '/v18.0/messages', ?, ?)
-  `).run(logId, JSON.stringify({ recipient: params.recipientPhone, message: messageBody }), JSON.stringify({ messageId, status, isLiveApi: isConnected }));
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
+    VALUES (?, 'WhatsApp Business API', 'OUTBOUND', ?, '/v21.0/messages', ?, ?, ?)
+  `).run(
+    logId,
+    status === 'Failed' ? 'ERROR' : 'SUCCESS',
+    JSON.stringify({ recipient: params.recipientPhone, message: messageBody }),
+    JSON.stringify(rawResponse || { messageId, status, isLiveApi: hasLiveCredentials }),
+    errorMsg
+  );
 
   return {
-    success: true,
+    success: status !== 'Failed',
     messageId,
     status,
     message: messageBody,
-    isLiveApi: isConnected,
-    note: isConnected ? 'Sent via live WhatsApp Cloud API' : 'Simulated/Queued (Configure WhatsApp Cloud API token in Settings to enable live delivery)'
+    isLiveApi: hasLiveCredentials,
+    metaResponse: rawResponse,
+    error: errorMsg,
+    note: hasLiveCredentials 
+      ? (isDelivered ? 'Dispatched via live Meta WhatsApp Cloud API' : `Meta dispatch error: ${errorMsg}`)
+      : 'Simulated/Queued (Paste WhatsApp Cloud API credentials in Integrations to enable live Meta delivery)'
   };
+}
+
+// Inbound WhatsApp Webhook Processor
+export function handleInboundWhatsAppWebhook(payload: any) {
+  try {
+    const entry = payload?.entry?.[0];
+    const changes = entry?.changes?.[0]?.value;
+    if (!changes) return { status: 'NO_CHANGES' };
+
+    // 1. Process Message Status updates (delivered, read, sent, failed)
+    if (changes.statuses && Array.isArray(changes.statuses)) {
+      for (const st of changes.statuses) {
+        const metaMsgId = st.id;
+        const metaStatus = st.status; // 'delivered', 'read', 'sent', 'failed'
+        if (metaMsgId) {
+          const dbStatus = metaStatus === 'read' ? 'Read' : metaStatus === 'delivered' ? 'Delivered' : metaStatus === 'failed' ? 'Failed' : 'Sent';
+          db.prepare("UPDATE messages SET status = ? WHERE id = ?").run(dbStatus, metaMsgId);
+          db.prepare("UPDATE broadcast_recipients SET status = ? WHERE id = ? OR open_token = ?").run(dbStatus.toUpperCase(), metaMsgId, metaMsgId);
+        }
+      }
+    }
+
+    // 2. Process Inbound Messages from Students
+    if (changes.messages && Array.isArray(changes.messages)) {
+      for (const msg of changes.messages) {
+        const fromNumber = msg.from; // e.g. "9779841234567"
+        const textBody = msg.text?.body || msg.button?.text || msg.interactive?.button_reply?.title || '';
+        const msgId = msg.id || ('IN-WA-' + Date.now());
+
+        const cleanText = textBody.trim().toUpperCase();
+
+        // Check for STOP / UNSUBSCRIBE keyword
+        if (cleanText === 'STOP' || cleanText === 'UNSUBSCRIBE' || cleanText === 'CANCEL') {
+          handleLeadOptOut({
+            identifier: fromNumber,
+            channel: 'WhatsApp',
+            reason: 'Student replied STOP on WhatsApp'
+          });
+        }
+
+        // Match lead by phone
+        const normPhone = fromNumber.replace(/[^0-9]/g, '');
+        const lead = db.prepare(`
+          SELECT * FROM leads 
+          WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+             OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+          LIMIT 1
+        `).get(`%${normPhone.slice(-8)}%`, `%${normPhone.slice(-8)}%`) as any;
+
+        // Record inbound message
+        db.prepare(`
+          INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
+          VALUES (?, ?, 'WhatsApp', 'Gems Group Services Admissions', ?, ?, 'Received')
+        `).run(msgId, lead ? lead.id : null, fromNumber, textBody);
+
+        if (lead) {
+          logLeadActivity({
+            leadId: lead.id,
+            activityType: 'WhatsApp',
+            title: 'Inbound WhatsApp Reply',
+            description: `Student replied: "${textBody}"`,
+            performedBy: lead.student_name || 'Student'
+          });
+        }
+
+        // Record integration log
+        const logId = 'LOG-WA-IN-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+        db.prepare(`
+          INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+          VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/webhook', ?, ?)
+        `).run(logId, JSON.stringify({ from: fromNumber, text: textBody, lead_id: lead?.id }), JSON.stringify({ handled: true }));
+      }
+    }
+
+    return { status: 'PROCESSED' };
+  } catch (err: any) {
+    console.warn('[handleInboundWhatsAppWebhook]', err.message);
+    return { status: 'ERROR', error: err.message };
+  }
 }
 
 // ==========================================

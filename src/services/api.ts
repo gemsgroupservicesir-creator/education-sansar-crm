@@ -326,6 +326,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
+  verifyWhatsAppCredentials: (params: { phoneNumberId: string; permanentAccessToken: string; wabaId?: string }) =>
+    fetchJson<{
+      valid: boolean;
+      verifiedName?: string;
+      displayPhoneNumber?: string;
+      qualityRating?: string;
+      codeVerificationStatus?: string;
+      wabaName?: string;
+      error?: string;
+    }>('/integrations/whatsapp/verify-credentials', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
   sendWhatsApp: (data: any) =>
     fetchJson<any>('/integrations/whatsapp/send', {
       method: 'POST',

@@ -5,7 +5,7 @@ import {
   Play, Settings as SettingsIcon, Check, Info, Bell,
   FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare,
   Link, Sparkles, Unlink, Eye, EyeOff, Table, Plus, Trash2, Edit3, Pause,
-  Layers, MapPin, Tag, X, CheckCircle, HelpCircle, Zap, Globe
+  Layers, MapPin, Tag, X, CheckCircle, HelpCircle, Zap, Globe, ClipboardPaste
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -38,6 +38,19 @@ export const IntegrationsPage: React.FC = () => {
   const [testingMetaToken, setTestingMetaToken] = useState(false);
   const [metaTokenTestResult, setMetaTokenTestResult] = useState<any>(null);
   const [activeMetaGuideTab, setActiveMetaGuideTab] = useState<'direct' | 'webhook' | 'mapping'>('direct');
+
+  // WhatsApp Cloud API Configuration State
+  const [waConfig, setWaConfig] = useState({
+    phoneNumberId: '',
+    wabaId: '',
+    permanentAccessToken: '',
+    verifyToken: 'gems_group_services_wa_verify_2026',
+    defaultSender: 'Gems Group Services Admissions'
+  });
+  const [showWaToken, setShowWaToken] = useState(false);
+  const [savingWa, setSavingWa] = useState(false);
+  const [testingWaToken, setTestingWaToken] = useState(false);
+  const [waTokenTestResult, setWaTokenTestResult] = useState<any>(null);
 
   // Meta Simulation Form State
   const [metaSimData, setMetaSimData] = useState({
@@ -174,6 +187,22 @@ export const IntegrationsPage: React.FC = () => {
             verifyToken: parsed.verifyToken || 'gems_group_services_meta_verify_2026',
             appSecret: parsed.appSecret || '',
             autoAssign: parsed.autoAssign ?? true,
+          }));
+        } catch (e) {}
+      }
+
+      // Pre-fill WhatsApp Cloud API state if configured
+      const waInt = integrationsRes.find((i: any) => i.name === 'WhatsApp Business API' || i.id === 'int-wa');
+      if (waInt && waInt.config) {
+        try {
+          const parsed = typeof waInt.config === 'string' ? JSON.parse(waInt.config) : waInt.config;
+          setWaConfig((prev) => ({
+            ...prev,
+            phoneNumberId: parsed.phoneNumberId || '',
+            wabaId: parsed.wabaId || '',
+            permanentAccessToken: parsed.permanentAccessToken || '',
+            verifyToken: parsed.verifyToken || 'gems_group_services_wa_verify_2026',
+            defaultSender: parsed.defaultSender || 'Gems Group Services Admissions',
           }));
         } catch (e) {}
       }
@@ -484,6 +513,82 @@ export const IntegrationsPage: React.FC = () => {
       addToast(err.message || 'WhatsApp sending failed', 'error');
     } finally {
       setSendingWa(false);
+    }
+  };
+
+  const handleSaveWaConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSavingWa(true);
+      const isConnected = Boolean(waConfig.phoneNumberId.trim() && waConfig.permanentAccessToken.trim());
+      await api.updateIntegration('int-wa', {
+        status: isConnected ? 'CONNECTED' : 'NOT_CONNECTED',
+        is_enabled: isConnected ? 1 : 0,
+        config: waConfig,
+        performedBy: 'Super Admin',
+      });
+      addToast(
+        isConnected
+          ? 'WhatsApp Cloud API credentials saved & status set to CONNECTED!'
+          : 'WhatsApp configuration saved (Simulated/Queued mode active until credentials are provided)',
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'Failed to save WhatsApp configuration', 'error');
+    } finally {
+      setSavingWa(false);
+    }
+  };
+
+  const handleTestWaCredentials = async () => {
+    if (!waConfig.phoneNumberId.trim()) {
+      addToast('Please enter or paste your Phone Number ID first', 'error');
+      return;
+    }
+    if (!waConfig.permanentAccessToken.trim()) {
+      addToast('Please enter or paste your Permanent Access Token first', 'error');
+      return;
+    }
+    try {
+      setTestingWaToken(true);
+      setWaTokenTestResult(null);
+      const res = await api.verifyWhatsAppCredentials({
+        phoneNumberId: waConfig.phoneNumberId,
+        permanentAccessToken: waConfig.permanentAccessToken,
+        wabaId: waConfig.wabaId || undefined,
+      });
+      setWaTokenTestResult(res);
+      if (res.valid) {
+        addToast(
+          `Verified! Meta Phone: "${res.displayPhoneNumber || res.verifiedName}" (Quality: ${res.qualityRating || 'GREEN'})`,
+          'success'
+        );
+      } else {
+        addToast(res.error || 'Token verification failed with Meta Graph API', 'error');
+      }
+    } catch (err: any) {
+      addToast(err.message || 'Verification failed', 'error');
+    } finally {
+      setTestingWaToken(false);
+    }
+  };
+
+  const handlePasteIntoWaField = async (field: 'phoneNumberId' | 'wabaId' | 'permanentAccessToken') => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        addToast('Clipboard paste permission denied. Please press Ctrl+V or Cmd+V directly in the input.', 'warning');
+        return;
+      }
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) {
+        addToast('Clipboard is empty. Copy your token/ID first, then click Paste.', 'warning');
+        return;
+      }
+      setWaConfig((prev) => ({ ...prev, [field]: text.trim() }));
+      addToast(`Pasted successfully into ${field === 'phoneNumberId' ? 'Phone Number ID' : field === 'wabaId' ? 'WABA ID' : 'Access Token'}!`, 'success');
+    } catch (err: any) {
+      addToast('Could not read from clipboard automatically. Please click inside the box and press Ctrl+V / Cmd+V.', 'info');
     }
   };
 
@@ -2503,58 +2608,335 @@ export const IntegrationsPage: React.FC = () => {
       {activeTab === 'whatsapp' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* WhatsApp API Configuration */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-            <div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-gray-900">WhatsApp Cloud API (Meta Graph)</h3>
-                <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                  {waIntegration.status}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Official Cloud API credentials for automated student notifications and counselor chats
-              </p>
-            </div>
-
-            <div className="space-y-4">
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                  Phone Number ID
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 104829104857201"
-                  disabled
-                  className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 cursor-not-allowed"
-                />
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-emerald-600" />
+                    WhatsApp Cloud API (Meta Graph)
+                  </h3>
+                  <span
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${
+                      waIntegration.status === 'CONNECTED'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-100 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    {waIntegration.status === 'CONNECTED' ? 'CONNECTED (LIVE)' : 'NOT CONFIGURED (SIMULATED)'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Connect your official Meta WhatsApp Business Cloud API to send broadcast campaigns, automatic admission alerts, and receive student messages.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                  WhatsApp Business Account (WABA) ID
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 294819284759281"
-                  disabled
-                  className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 cursor-not-allowed"
-                />
-              </div>
+              <form onSubmit={handleSaveWaConfig} className="space-y-4">
+                {/* Phone Number ID */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-700 uppercase flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-emerald-600" />
+                      Phone Number ID <span className="text-red-500">*</span>
+                    </label>
+                    <span className="text-[11px] text-gray-400">From Meta App &gt; WhatsApp &gt; API Setup</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={waConfig.phoneNumberId}
+                      onChange={(e) => setWaConfig({ ...waConfig, phoneNumberId: e.target.value })}
+                      placeholder="e.g. 104829104857201"
+                      className="w-full bg-white border border-gray-300 rounded-lg pl-3 pr-24 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none transition"
+                    />
+                    <div className="absolute right-1.5 flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => handlePasteIntoWaField('phoneNumberId')}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 transition"
+                        title="Paste Phone Number ID from clipboard"
+                      >
+                        <ClipboardPaste className="w-3.5 h-3.5" />
+                        Paste
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">
-                  Permanent System User Access Token
-                </label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••••••••••••••"
-                  disabled
-                  className="w-full bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 cursor-not-allowed"
-                />
-              </div>
+                {/* WhatsApp Business Account (WABA) ID */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-700 uppercase flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      WhatsApp Business Account (WABA) ID
+                    </label>
+                    <span className="text-[11px] text-gray-400">Meta Business Account ID</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      value={waConfig.wabaId}
+                      onChange={(e) => setWaConfig({ ...waConfig, wabaId: e.target.value })}
+                      placeholder="e.g. 294819284759281"
+                      className="w-full bg-white border border-gray-300 rounded-lg pl-3 pr-24 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none transition"
+                    />
+                    <div className="absolute right-1.5 flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => handlePasteIntoWaField('wabaId')}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 transition"
+                        title="Paste WABA ID from clipboard"
+                      >
+                        <ClipboardPaste className="w-3.5 h-3.5" />
+                        Paste
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Permanent System User Access Token */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-700 uppercase flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-600" />
+                      Permanent System User Access Token <span className="text-red-500">*</span>
+                    </label>
+                    <span className="text-[11px] text-gray-400">Meta Business Manager &gt; System Users</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showWaToken ? 'text' : 'password'}
+                      value={waConfig.permanentAccessToken}
+                      onChange={(e) => setWaConfig({ ...waConfig, permanentAccessToken: e.target.value })}
+                      placeholder="Paste EAABw... permanent token here"
+                      className="w-full bg-white border border-gray-300 rounded-lg pl-3 pr-32 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none transition"
+                    />
+                    <div className="absolute right-1.5 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowWaToken(!showWaToken)}
+                        className="p-1 text-gray-400 hover:text-gray-700 rounded transition"
+                        title={showWaToken ? 'Hide Token' : 'Show Token'}
+                      >
+                        {showWaToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePasteIntoWaField('permanentAccessToken')}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-200 transition"
+                        title="Paste Permanent Access Token from clipboard"
+                      >
+                        <ClipboardPaste className="w-3.5 h-3.5" />
+                        Paste
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Token requires <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-700">whatsapp_business_messaging</code> and <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-700">whatsapp_business_management</code> scopes.
+                  </p>
+                </div>
+
+                {/* Default Sender Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                    Default Sender Display Name
+                  </label>
+                  <input
+                    type="text"
+                    value={waConfig.defaultSender}
+                    onChange={(e) => setWaConfig({ ...waConfig, defaultSender: e.target.value })}
+                    placeholder="Gems Group Services Admissions"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none transition"
+                  />
+                </div>
+
+                {/* Form Buttons */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestWaCredentials}
+                    disabled={testingWaToken}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 border border-gray-300 transition disabled:opacity-50"
+                  >
+                    {testingWaToken ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                        Verifying with Meta...
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                        Verify Credentials with Meta
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={savingWa}
+                    className="w-full sm:flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50"
+                  >
+                    {savingWa ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        Save WhatsApp Configuration
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Meta Verification Result Card */}
+              {waTokenTestResult && (
+                <div
+                  className={`p-4 rounded-xl border text-xs space-y-2 ${
+                    waTokenTestResult.valid
+                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                      : 'bg-red-50/80 border-red-200 text-red-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    {waTokenTestResult.valid ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        Meta WhatsApp Account Verified!
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4 text-red-600" />
+                        Verification Failed
+                      </>
+                    )}
+                  </div>
+
+                  {waTokenTestResult.valid ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+                      <div>
+                        <span className="text-emerald-700 font-sans font-semibold">Verified Name: </span>
+                        {waTokenTestResult.verifiedName}
+                      </div>
+                      <div>
+                        <span className="text-emerald-700 font-sans font-semibold">Display Phone: </span>
+                        {waTokenTestResult.displayPhoneNumber}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-700 font-sans font-semibold">Quality Rating: </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          waTokenTestResult.qualityRating === 'GREEN'
+                            ? 'bg-emerald-200 text-emerald-900'
+                            : 'bg-amber-200 text-amber-900'
+                        }`}>
+                          {waTokenTestResult.qualityRating}
+                        </span>
+                      </div>
+                      {waTokenTestResult.codeVerificationStatus && (
+                        <div>
+                          <span className="text-emerald-700 font-sans font-semibold">Status: </span>
+                          {waTokenTestResult.codeVerificationStatus}
+                        </div>
+                      )}
+                      {waTokenTestResult.wabaName && (
+                        <div className="sm:col-span-2">
+                          <span className="text-emerald-700 font-sans font-semibold">WABA Name: </span>
+                          {waTokenTestResult.wabaName}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-red-700 font-medium">
+                      {waTokenTestResult.error}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                <span className="font-bold">Gems Group Services Dispatch Logic:</span> When credentials are not yet saved, the CRM safely logs simulated WhatsApp dispatches to the database and creates counselor notifications.
+                <span className="font-bold">Gems Group Services Dispatch Mode:</span> When live credentials are saved, messages dispatch directly through Meta Graph API v21.0. If credentials are empty, the CRM safely records simulated dispatches in the database and creates counselor notifications.
+              </div>
+            </div>
+
+            {/* Meta Webhook Setup Card */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-emerald-600" />
+                  Meta Webhook Configuration (Inbound &amp; Delivery Receipts)
+                </h4>
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-semibold border border-emerald-200">
+                  Realtime Inbound Sync
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Configure your Meta App Webhook so the CRM automatically receives inbound student WhatsApp messages, delivery confirmations, and opt-out requests (STOP).
+              </p>
+
+              <div className="space-y-3">
+                {/* Callback URL */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 uppercase mb-1">
+                    Callback URL (Meta App &gt; WhatsApp &gt; Configuration &gt; Edit)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/api/integrations/whatsapp/webhook`}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(`${window.location.origin}/api/integrations/whatsapp/webhook`, 'wa_callback_url')}
+                      className="px-3 py-2 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 transition"
+                    >
+                      {copiedKey === 'wa_callback_url' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                {/* Verify Token */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 uppercase mb-1">
+                    Verify Token
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={waConfig.verifyToken}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(waConfig.verifyToken, 'wa_verify_token')}
+                      className="px-3 py-2 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 transition"
+                    >
+                      {copiedKey === 'wa_verify_token' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                {/* Subscribed Fields */}
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600 space-y-1">
+                  <span className="font-semibold text-gray-800">Webhook Fields to Subscribe:</span>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700">
+                      messages
+                    </span>
+                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700">
+                      message_template_status_update
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 pt-1">
+                    Incoming replies are logged directly to the student's lead activity timeline. Replying &ldquo;STOP&rdquo; or &ldquo;UNSUBSCRIBE&rdquo; automatically updates broadcast opt-out preferences.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -2564,11 +2946,11 @@ export const IntegrationsPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-emerald-600" />
-                  WhatsApp Template Message Tester
+                  <Send className="w-5 h-5 text-emerald-600" />
+                  WhatsApp Outreach &amp; Template Tester
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Verify variable interpolation and delivery payload
+                  Verify variable interpolation, live delivery or simulated queuing
                 </p>
               </div>
             </div>
@@ -2635,9 +3017,19 @@ export const IntegrationsPage: React.FC = () => {
             </form>
 
             {waResult && (
-              <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-x-auto">
-                <div className="text-emerald-400 font-bold mb-2">✓ WhatsApp Dispatch Status:</div>
-                <pre>{JSON.stringify(waResult, null, 2)}</pre>
+              <div className="mt-4 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-x-auto space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-emerald-400 font-bold">
+                    ✓ WhatsApp Dispatch Status: {waResult.status}
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    waResult.isLiveApi ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-300'
+                  }`}>
+                    {waResult.isLiveApi ? 'Live Meta Graph API' : 'Simulated Queued'}
+                  </span>
+                </div>
+                <div className="text-gray-400 text-[11px]">{waResult.note}</div>
+                <pre className="text-[11px] pt-1">{JSON.stringify(waResult, null, 2)}</pre>
               </div>
             )}
           </div>
