@@ -564,6 +564,12 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
     if (!user && isNeonEnabled()) {
       try {
+        const rows = await sql`SELECT * FROM users WHERE id = ${req.params.id} LIMIT 1`;
+        if (rows && rows.length > 0) user = rows[0];
+      } catch (e) {}
+    }
+    if (!user && isNeonEnabled()) {
+      try {
         user = await findUserInNeon(req.params.id);
       } catch (e) {}
     }
@@ -635,6 +641,12 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
 apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
   try {
     let user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id) as any;
+    if (!user && isNeonEnabled()) {
+      try {
+        const rows = await sql`SELECT * FROM users WHERE id = ${req.params.id} LIMIT 1`;
+        if (rows && rows.length > 0) user = rows[0];
+      } catch (e) {}
+    }
     if (!user && isNeonEnabled()) {
       try {
         user = await findUserInNeon(req.params.id);

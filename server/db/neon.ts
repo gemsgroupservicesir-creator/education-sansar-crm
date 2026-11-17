@@ -32,7 +32,8 @@ export async function findUserInNeon(identifier: string): Promise<any | null> {
     const rows = await sql.query(`
       SELECT * FROM users 
       WHERE (
-        LOWER(email) = $1 
+        id = $1
+        OR LOWER(email) = $1 
         OR LOWER(email) = $2
         OR LOWER(email) LIKE $2 || '@%'
         OR LOWER(SPLIT_PART(email, '@', 1)) = $2

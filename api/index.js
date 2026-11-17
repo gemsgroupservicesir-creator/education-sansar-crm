@@ -722,7 +722,8 @@ async function findUserInNeon(identifier) {
     const rows = await sql.query(`
       SELECT * FROM users 
       WHERE (
-        LOWER(email) = $1 
+        id = $1
+        OR LOWER(email) = $1 
         OR LOWER(email) = $2
         OR LOWER(email) LIKE $2 || '@%'
         OR LOWER(SPLIT_PART(email, '@', 1)) = $2
@@ -9183,6 +9184,13 @@ apiRouter.put("/users/:id", async (req, res) => {
     let user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
     if (!user && isNeonEnabled()) {
       try {
+        const rows = await sql`SELECT * FROM users WHERE id = ${req.params.id} LIMIT 1`;
+        if (rows && rows.length > 0) user = rows[0];
+      } catch (e) {
+      }
+    }
+    if (!user && isNeonEnabled()) {
+      try {
         user = await findUserInNeon(req.params.id);
       } catch (e) {
       }
@@ -9247,6 +9255,13 @@ apiRouter.put("/users/:id", async (req, res) => {
 apiRouter.delete("/users/:id", async (req, res) => {
   try {
     let user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+    if (!user && isNeonEnabled()) {
+      try {
+        const rows = await sql`SELECT * FROM users WHERE id = ${req.params.id} LIMIT 1`;
+        if (rows && rows.length > 0) user = rows[0];
+      } catch (e) {
+      }
+    }
     if (!user && isNeonEnabled()) {
       try {
         user = await findUserInNeon(req.params.id);
