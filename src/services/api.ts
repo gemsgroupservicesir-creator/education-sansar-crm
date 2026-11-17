@@ -834,7 +834,7 @@ export const api = {
   // WhatsApp Web Hub
   getWhatsAppSession: (counselorId?: string) =>
     fetchJson<WhatsAppSession>(`/whatsapp-web/session${counselorId ? `?counselorId=${counselorId}` : ''}`),
-  startWhatsAppSession: (data: { counselorId?: string; counselorName?: string }) =>
+  startWhatsAppSession: (data: { counselorId?: string; counselorName?: string; phoneNumber?: string }) =>
     fetchJson<WhatsAppSession>('/whatsapp-web/session/start', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -866,6 +866,11 @@ export const api = {
     fetchJson<{ lead: any; messages: any[]; qualification: any }>(`/whatsapp-web/chats/${encodeURIComponent(phone)}/messages`),
   sendWhatsAppChatMessage: (phone: string, data: { message: string; senderName?: string; counselorId?: string; triggerAiResponse?: boolean }) =>
     fetchJson<{ success: boolean; sentMessage: any; aiReply?: any }>(`/whatsapp-web/chats/${encodeURIComponent(phone)}/send`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  simulateInboundWhatsAppMessage: (data: { phone: string; studentName?: string; message: string; counselorId?: string }) =>
+    fetchJson<{ success: boolean; incomingMessage: any; aiReply?: any; lead: any; qualification: any }>('/whatsapp-web/chats/simulate-inbound', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

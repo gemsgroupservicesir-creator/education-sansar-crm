@@ -163,7 +163,8 @@ import {
   getWhatsAppChats,
   getWhatsAppChatMessages,
   sendWhatsAppChatMessage,
-  promoteLeadToActive
+  promoteLeadToActive,
+  handleIncomingWhatsAppMessage
 } from '../services/whatsappWebService.ts';
 
 export const apiRouter = Router();
@@ -4966,11 +4967,11 @@ apiRouter.get('/whatsapp-web/session', (req: Request, res: Response) => {
   }
 });
 
-// Start/Refresh QR session
-apiRouter.post('/whatsapp-web/session/start', (req: Request, res: Response) => {
+// Start/Refresh QR session (with Baileys WhatsApp Web socket and Phone Pairing)
+apiRouter.post('/whatsapp-web/session/start', async (req: Request, res: Response) => {
   try {
-    const { counselorId, counselorName } = req.body;
-    const session = startWhatsAppSession(counselorId, counselorName);
+    const { counselorId, counselorName, phoneNumber } = req.body;
+    const session = await startWhatsAppSession({ counselorId, counselorName, phoneNumber });
     res.json(session);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to initialize QR session' });
@@ -5071,6 +5072,25 @@ apiRouter.post('/whatsapp-web/chats/:phone/promote-lead', (req: Request, res: Re
     res.json({ success: true, lead });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to promote lead' });
+  }
+});
+
+// Simulate Inbound Student WhatsApp Message (Triggers AI chatbot, qualification & CRM capture)
+apiRouter.post('/whatsapp-web/chats/simulate-inbound', async (req: Request, res: Response) => {
+  try {
+    const { phone, studentName, message, counselorId } = req.body;
+    if (!phone || !message) {
+      return res.status(400).json({ error: 'phone and message are required' });
+    }
+    const result = await handleIncomingWhatsAppMessage({
+      phone,
+      studentName: studentName || 'Student',
+      message,
+      counselorId
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to process inbound WhatsApp message' });
   }
 });
 

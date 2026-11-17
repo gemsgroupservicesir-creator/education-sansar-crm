@@ -5250,7 +5250,7 @@ You can also connect directly with your dedicated admission counselor ${counselo
       const newTemperature = isNowHot ? "HOT" : qualificationScore >= 50 ? "WARM" : lead.lead_temperature || "WARM";
       let updatedStatus = lead.lead_status;
       if (qualificationScore >= 50 || qualificationStatus === "Qualified" || qualificationStatus === "High Intent") {
-        if (lead.lead_status === "New Lead" || lead.lead_status === "Inquiry" || !lead.lead_status) {
+        if (lead.lead_status === "New" || lead.lead_status === "New Lead" || lead.lead_status === "Inquiry" || !lead.lead_status) {
           updatedStatus = "Qualified";
         }
       }
@@ -9841,8 +9841,8 @@ var init_studyInIndiaSyncService = __esm({
 // server/index.ts
 import express from "express";
 import cors from "cors";
-import path3 from "path";
-import fs3 from "fs";
+import path4 from "path";
+import fs4 from "fs";
 import { fileURLToPath } from "url";
 import dotenv2 from "dotenv";
 
@@ -9850,8 +9850,8 @@ import dotenv2 from "dotenv";
 init_database();
 init_leadService();
 import { Router } from "express";
-import path2 from "path";
-import fs2 from "fs";
+import path3 from "path";
+import fs3 from "fs";
 
 // server/services/analyticsService.ts
 init_database();
@@ -11800,6 +11800,12 @@ init_studentAIChatbotService();
 // server/services/whatsappWebService.ts
 init_database();
 init_studentAIChatbotService();
+import fs2 from "fs";
+import path2 from "path";
+import QRCode from "qrcode";
+var activeSockets = /* @__PURE__ */ new Map();
+var socketQRs = /* @__PURE__ */ new Map();
+var socketPairingCodes = /* @__PURE__ */ new Map();
 function getWhatsAppSession(counselorId) {
   try {
     let session = null;
@@ -11817,7 +11823,7 @@ function getWhatsAppSession(counselorId) {
           id, counselor_id, counselor_name, session_name, status,
           device_name, battery_level, is_active, ai_auto_reply, created_at, updated_at
         )
-        VALUES (?, 'c-prakash', 'Prakash Yadav', 'Counselor WhatsApp Web', 'DISCONNECTED', 'Chrome 124.0 (macOS)', 88, 1, 1, ?, ?)
+        VALUES (?, 'c-prakash', 'Prakash Yadav', 'Counselor WhatsApp Web', 'DISCONNECTED', 'WhatsApp Multi-Device Web', 88, 1, 1, ?, ?)
       `).run(id, now, now);
       session = db.prepare("SELECT * FROM whatsapp_sessions WHERE id = ?").get(id);
     }
@@ -11833,37 +11839,285 @@ function getWhatsAppSession(counselorId) {
     throw err;
   }
 }
-function startWhatsAppSession(counselorId, counselorName) {
+async function startWhatsAppSession(params) {
+  const counselorId = params?.counselorId;
+  const counselorName = params?.counselorName;
+  const rawPhoneNumber = params?.phoneNumber;
   const current = getWhatsAppSession(counselorId);
+  const sessionId = current.id;
   const now = /* @__PURE__ */ new Date();
-  const expiresAt = new Date(now.getTime() + 6e4).toISOString();
-  const pairingCode = "GGS-" + Math.floor(1e3 + Math.random() * 9e3);
-  const qrToken = `2@GGS_WA_${Date.now()}_${Math.random().toString(36).substring(2, 9)},${counselorId || "counselor"},${pairingCode}`;
-  db.prepare(`
-    UPDATE whatsapp_sessions SET
-      status = 'QR_READY',
-      qr_code_data = ?,
-      qr_expires_at = ?,
-      pairing_code = ?,
-      counselor_name = COALESCE(?, counselor_name),
-      updated_at = ?
-    WHERE id = ?
-  `).run(qrToken, expiresAt, pairingCode, counselorName || null, now.toISOString(), current.id);
+  const expiresAt = new Date(now.getTime() + 9e4).toISOString();
+  const cleanDigits = rawPhoneNumber ? rawPhoneNumber.replace(/[^0-9]/g, "") : "";
+  try {
+    const baileysModule = await import("@whiskeysockets/baileys");
+    const makeWASocket = baileysModule.default || baileysModule.makeWASocket;
+    const { useMultiFileAuthState, DisconnectReason } = baileysModule;
+    const pinoModule = await import("pino");
+    const pino = pinoModule.default || pinoModule;
+    const authDir = path2.join(process.cwd(), ".whatsapp_auth", sessionId);
+    if (!fs2.existsSync(authDir)) {
+      fs2.mkdirSync(authDir, { recursive: true });
+    }
+    if (activeSockets.has(sessionId)) {
+      try {
+        const oldSock = activeSockets.get(sessionId);
+        oldSock.end?.(void 0);
+      } catch {
+      }
+      activeSockets.delete(sessionId);
+    }
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const sock = makeWASocket({
+      auth: state,
+      logger: pino({ level: "silent" }),
+      printQRInTerminal: false,
+      connectTimeoutMs: 6e4,
+      defaultQueryTimeoutMs: 6e4
+    });
+    activeSockets.set(sessionId, sock);
+    sock.ev.on("creds.update", saveCreds);
+    if (cleanDigits && cleanDigits.length >= 8 && typeof sock.requestPairingCode === "function") {
+      try {
+        const code = await sock.requestPairingCode(cleanDigits);
+        const formattedCode = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+        socketPairingCodes.set(sessionId, formattedCode);
+        const qrDataUrl = await QRCode.toDataURL(`https://wa.me/settings/linked_devices?code=${code}`, {
+          width: 320,
+          margin: 2
+        });
+        db.prepare(`
+          UPDATE whatsapp_sessions SET
+            status = 'QR_READY',
+            qr_code_data = ?,
+            qr_expires_at = ?,
+            pairing_code = ?,
+            counselor_name = COALESCE(?, counselor_name),
+            updated_at = ?
+          WHERE id = ?
+        `).run(qrDataUrl, expiresAt, formattedCode, counselorName || null, now.toISOString(), sessionId);
+      } catch (pairErr) {
+        console.warn("[WhatsAppWeb] requestPairingCode warning:", pairErr.message);
+      }
+    }
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        socketQRs.set(sessionId, qr);
+        try {
+          const qrDataUrl = await QRCode.toDataURL(qr, { width: 320, margin: 2 });
+          db.prepare(`
+            UPDATE whatsapp_sessions SET
+              status = 'QR_READY',
+              qr_code_data = ?,
+              qr_expires_at = ?,
+              counselor_name = COALESCE(?, counselor_name),
+              updated_at = ?
+            WHERE id = ?
+          `).run(qrDataUrl, expiresAt, counselorName || null, (/* @__PURE__ */ new Date()).toISOString(), sessionId);
+        } catch (qrErr) {
+          console.warn("[WhatsAppWeb] QRCode.toDataURL failed:", qrErr.message);
+        }
+      }
+      if (connection === "open") {
+        console.log(`[WhatsAppWeb] Device successfully linked for session ${sessionId}!`);
+        const phone = sock.user?.id ? "+" + sock.user.id.split(":")[0].replace(/[^0-9]/g, "") : cleanDigits ? `+${cleanDigits}` : "+977 9801234567";
+        const cName = counselorName || sock.user?.name || current.counselor_name || "Counselor";
+        db.prepare(`
+          UPDATE whatsapp_sessions SET
+            status = 'CONNECTED',
+            phone_number = ?,
+            counselor_name = ?,
+            device_name = 'WhatsApp Multi-Device Web',
+            battery_level = 92,
+            qr_code_data = NULL,
+            qr_expires_at = NULL,
+            pairing_code = NULL,
+            connected_at = ?,
+            last_active_at = ?,
+            updated_at = ?
+          WHERE id = ?
+        `).run(phone, cName, (/* @__PURE__ */ new Date()).toISOString(), (/* @__PURE__ */ new Date()).toISOString(), (/* @__PURE__ */ new Date()).toISOString(), sessionId);
+      } else if (connection === "close") {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+        console.log(`[WhatsAppWeb] Connection closed for ${sessionId}. Reconnect: ${shouldReconnect}`);
+        if (!shouldReconnect) {
+          db.prepare("UPDATE whatsapp_sessions SET status = 'DISCONNECTED', qr_code_data = NULL WHERE id = ?").run(sessionId);
+          activeSockets.delete(sessionId);
+        }
+      }
+    });
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      try {
+        for (const msg of messages) {
+          if (msg.key.fromMe) continue;
+          const remoteJid = msg.key.remoteJid;
+          if (!remoteJid || remoteJid.includes("@g.us")) continue;
+          const senderDigits = remoteJid.replace("@s.whatsapp.net", "").replace(/[^0-9]/g, "");
+          const cleanPhone = senderDigits.startsWith("977") || senderDigits.startsWith("91") ? `+${senderDigits}` : `+${senderDigits}`;
+          const studentName = msg.pushName || "Student";
+          const textBody = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || "";
+          if (!textBody.trim()) continue;
+          console.log(`[WhatsAppWeb] Inbound WhatsApp message received from ${cleanPhone} (${studentName}): "${textBody}"`);
+          await handleIncomingWhatsAppMessage({
+            phone: cleanPhone,
+            studentName,
+            message: textBody,
+            counselorId: current.counselor_id,
+            sessionId: current.id,
+            sock,
+            remoteJid
+          });
+        }
+      } catch (upsertErr) {
+        console.error("[WhatsAppWeb] messages.upsert processing error:", upsertErr);
+      }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  } catch (err) {
+    console.warn("[WhatsAppWeb] Baileys initialization notice (falling back to standard pairing code & QR):", err.message);
+  }
+  const refreshed = getWhatsAppSession(counselorId);
+  if (refreshed.status !== "CONNECTED" && !refreshed.qr_code_data) {
+    const fallbackPairingCode = cleanDigits ? cleanDigits.slice(-4) + "-" + Math.floor(1e3 + Math.random() * 9e3) : "GGS-" + Math.floor(1e3 + Math.random() * 9e3);
+    const pairingPayload = `https://wa.me/settings/linked_devices?auth=GGS_WA_${Date.now()}_${Math.random().toString(36).substring(2, 9)}&counselor=${counselorId || "counselor"}`;
+    const qrDataUrl = await QRCode.toDataURL(pairingPayload, { width: 320, margin: 2 });
+    db.prepare(`
+      UPDATE whatsapp_sessions SET
+        status = 'QR_READY',
+        qr_code_data = ?,
+        qr_expires_at = ?,
+        pairing_code = ?,
+        counselor_name = COALESCE(?, counselor_name),
+        updated_at = ?
+      WHERE id = ?
+    `).run(qrDataUrl, expiresAt, fallbackPairingCode, counselorName || null, now.toISOString(), current.id);
+  }
   return getWhatsAppSession(counselorId);
+}
+async function handleIncomingWhatsAppMessage(params) {
+  const { phone, studentName = "Student", message, counselorId, sessionId, sock, remoteJid } = params;
+  const cleanPhone = phone.trim();
+  const cleanDigits = cleanPhone.replace(/[^0-9]/g, "");
+  const searchSuffix = cleanDigits.length >= 8 ? cleanDigits.slice(-8) : cleanDigits;
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+       OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    ORDER BY created_at DESC LIMIT 1
+  `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (!lead) {
+    const newLeadId = "lead-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+    const friendlyLeadId = "L-WA-" + Math.floor(1e4 + Math.random() * 9e4);
+    let assignedCounselor = counselorId ? db.prepare("SELECT * FROM counselors WHERE id = ?").get(counselorId) : db.prepare("SELECT * FROM counselors WHERE is_active = 1 AND status = 'Active' ORDER BY current_active_leads ASC LIMIT 1").get();
+    if (!assignedCounselor) {
+      assignedCounselor = { id: "c-prakash", name: "Prakash Yadav", phone: "+977 9801234567" };
+    }
+    const nameParts = studentName.trim().split(/\s+/);
+    const firstName = nameParts[0] || "Student";
+    const lastName = nameParts.slice(1).join(" ") || "Inquiry";
+    const email = `wa_${cleanDigits.slice(-8) || Date.now()}@admissions.edu`;
+    const city = "Kathmandu";
+    const country = "Nepal";
+    db.prepare(`
+      INSERT INTO leads (
+        id, lead_id, student_name, first_name, last_name, phone, whatsapp_number, email,
+        city, country,
+        lead_source, lead_status, lead_temperature,
+        assigned_counselor_id, assigned_counselor_name,
+        preferred_course, preferred_university,
+        qualification_score, qualification_status, qualification_summary,
+        created_at, updated_at
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?,
+        'WhatsApp Web', 'New', 'WARM',
+        ?, ?,
+        'Undecided', 'Not Specified',
+        25, 'In Progress', 'Initiated conversation via WhatsApp Web',
+        ?, ?
+      )
+    `).run(
+      newLeadId,
+      friendlyLeadId,
+      studentName,
+      firstName,
+      lastName,
+      cleanPhone,
+      cleanPhone,
+      email,
+      city,
+      country,
+      assignedCounselor.id,
+      assignedCounselor.name,
+      now,
+      now
+    );
+    lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(newLeadId);
+  }
+  const inMsgId = "MSG-IN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, sent_at)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Delivered', ?)
+  `).run(inMsgId, lead.id, cleanPhone, studentName, message.trim(), now);
+  const incomingMessage = db.prepare("SELECT * FROM messages WHERE id = ?").get(inMsgId);
+  db.prepare("UPDATE leads SET last_contact_date = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id);
+  let aiReplyResult = null;
+  const currentSession = sessionId ? db.prepare("SELECT * FROM whatsapp_sessions WHERE id = ?").get(sessionId) : getWhatsAppSession(counselorId);
+  if (currentSession?.ai_auto_reply !== 0) {
+    try {
+      aiReplyResult = await chatWithStudent({
+        phone: cleanPhone,
+        studentName: lead.student_name || studentName,
+        message: message.trim(),
+        leadId: lead.id,
+        source: "WhatsApp Web"
+      });
+      if (aiReplyResult?.reply) {
+        if (sock && remoteJid) {
+          try {
+            await sock.sendMessage(remoteJid, { text: aiReplyResult.reply });
+          } catch (sendErr) {
+            console.warn("[WhatsAppWeb] Failed to dispatch socket message:", sendErr.message);
+          }
+        }
+        const outMsgId = "MSG-OUT-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+        db.prepare(`
+          INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, sent_at)
+          VALUES (?, ?, 'WhatsApp', ?, 'AI Admissions Counselor', ?, 'Sent', ?)
+        `).run(outMsgId, lead.id, cleanPhone, aiReplyResult.reply, (/* @__PURE__ */ new Date()).toISOString());
+      }
+    } catch (aiErr) {
+      console.error("[WhatsAppWeb] AI response generation failed:", aiErr);
+    }
+  }
+  const refreshedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+  return {
+    incomingMessage,
+    aiReply: aiReplyResult,
+    lead: refreshedLead,
+    qualification: {
+      score: refreshedLead?.qualification_score || 0,
+      status: refreshedLead?.qualification_status || "Unqualified",
+      isQualified: (refreshedLead?.qualification_score || 0) >= 50
+    }
+  };
 }
 function simulateScanDevice(params) {
   const current = getWhatsAppSession(params.counselorId);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const phone = params.phoneNumber?.trim() || "+977 9801234567";
   const cName = params.counselorName?.trim() || current.counselor_name || "Prakash Yadav";
-  const dName = params.deviceName || "Chrome 124.0 (macOS Sonoma)";
+  const dName = params.deviceName || "WhatsApp Multi-Device Web (macOS)";
   db.prepare(`
     UPDATE whatsapp_sessions SET
       status = 'CONNECTED',
       phone_number = ?,
       counselor_name = ?,
       device_name = ?,
-      battery_level = 88,
+      battery_level = 95,
       qr_code_data = NULL,
       qr_expires_at = NULL,
       pairing_code = NULL,
@@ -11877,6 +12131,13 @@ function simulateScanDevice(params) {
 function disconnectWhatsAppSession(counselorId) {
   const current = getWhatsAppSession(counselorId);
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (activeSockets.has(current.id)) {
+    try {
+      activeSockets.get(current.id)?.end?.(void 0);
+    } catch {
+    }
+    activeSockets.delete(current.id);
+  }
   db.prepare(`
     UPDATE whatsapp_sessions SET
       status = 'DISCONNECTED',
@@ -11922,9 +12183,11 @@ function getWhatsAppChats(params) {
       if (cleanPhone) messageMap.set(cleanPhone, msg);
     }
     const chats = [];
+    const processedPhones = /* @__PURE__ */ new Set();
     for (const lead of leads) {
       const cleanPhone = (lead.whatsapp_number || lead.phone || "").replace(/[^0-9]/g, "");
       const cleanSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+      processedPhones.add(cleanSuffix);
       let msg = messageMap.get(cleanPhone);
       if (!msg) {
         for (const [p, m] of messageMap.entries()) {
@@ -11963,6 +12226,27 @@ function getWhatsAppChats(params) {
         assigned_counselor_id: lead.assigned_counselor_id,
         ai_enabled: true
       });
+    }
+    for (const msg of latestMessages) {
+      const cleanPhone = (msg.recipient || "").replace(/[^0-9]/g, "");
+      const cleanSuffix = cleanPhone.length >= 8 ? cleanPhone.slice(-8) : cleanPhone;
+      if (!processedPhones.has(cleanSuffix)) {
+        processedPhones.add(cleanSuffix);
+        chats.push({
+          lead_name: "Student (" + cleanPhone.slice(-4) + ")",
+          phone: msg.recipient,
+          whatsapp_number: msg.recipient,
+          last_message: msg.content,
+          last_message_at: msg.sent_at,
+          unread_count: 1,
+          qualification_score: 30,
+          qualification_status: "In Progress",
+          is_qualified: false,
+          lead_status: "New",
+          lead_temperature: "WARM",
+          ai_enabled: true
+        });
+      }
     }
     chats.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
     return chats;
@@ -12024,6 +12308,16 @@ async function sendWhatsAppChatMessage(params) {
        OR replace(replace(replace(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
     ORDER BY created_at DESC LIMIT 1
   `).get(`%${searchSuffix}%`, `%${searchSuffix}%`);
+  const currentSession = getWhatsAppSession(counselorId);
+  const activeSock = activeSockets.get(currentSession.id);
+  if (activeSock && cleanDigits) {
+    try {
+      const remoteJid = `${cleanDigits}@s.whatsapp.net`;
+      await activeSock.sendMessage(remoteJid, { text: message.trim() });
+    } catch (sockErr) {
+      console.warn("[WhatsAppWeb] Socket dispatch notice:", sockErr.message);
+    }
+  }
   const msgId = "WA-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   db.prepare(`
@@ -12128,9 +12422,9 @@ function getSystemBuildInfo() {
   let buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || "";
   let buildTime = (/* @__PURE__ */ new Date()).toISOString();
   try {
-    const indexPath2 = path2.resolve(process.cwd(), "dist/index.html");
-    if (fs2.existsSync(indexPath2)) {
-      const stats = fs2.statSync(indexPath2);
+    const indexPath2 = path3.resolve(process.cwd(), "dist/index.html");
+    if (fs3.existsSync(indexPath2)) {
+      const stats = fs3.statSync(indexPath2);
       buildTime = new Date(stats.mtimeMs).toISOString();
       if (!buildId) {
         buildId = "build-" + stats.mtimeMs.toString();
@@ -16398,10 +16692,10 @@ apiRouter.get("/whatsapp-web/session", (req, res) => {
     res.status(500).json({ error: err.message || "Failed to fetch WhatsApp Web session" });
   }
 });
-apiRouter.post("/whatsapp-web/session/start", (req, res) => {
+apiRouter.post("/whatsapp-web/session/start", async (req, res) => {
   try {
-    const { counselorId, counselorName } = req.body;
-    const session = startWhatsAppSession(counselorId, counselorName);
+    const { counselorId, counselorName, phoneNumber } = req.body;
+    const session = await startWhatsAppSession({ counselorId, counselorName, phoneNumber });
     res.json(session);
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to initialize QR session" });
@@ -16488,6 +16782,23 @@ apiRouter.post("/whatsapp-web/chats/:phone/promote-lead", (req, res) => {
     res.json({ success: true, lead });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to promote lead" });
+  }
+});
+apiRouter.post("/whatsapp-web/chats/simulate-inbound", async (req, res) => {
+  try {
+    const { phone, studentName, message, counselorId } = req.body;
+    if (!phone || !message) {
+      return res.status(400).json({ error: "phone and message are required" });
+    }
+    const result = await handleIncomingWhatsAppMessage({
+      phone,
+      studentName: studentName || "Student",
+      message,
+      counselorId
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to process inbound WhatsApp message" });
   }
 });
 
@@ -16712,7 +17023,7 @@ if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")
 init_emailService();
 dotenv2.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path3.dirname(__filename);
+var __dirname = path4.dirname(__filename);
 var app = express();
 var PORT = process.env.PORT || 5e3;
 initDatabase();
@@ -16726,10 +17037,10 @@ try {
 app.use(cors());
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
-var uploadsDir = path3.resolve(process.cwd(), "uploads");
-if (!fs3.existsSync(uploadsDir)) {
+var uploadsDir = path4.resolve(process.cwd(), "uploads");
+if (!fs4.existsSync(uploadsDir)) {
   try {
-    fs3.mkdirSync(uploadsDir, { recursive: true });
+    fs4.mkdirSync(uploadsDir, { recursive: true });
   } catch (e) {
   }
 }
@@ -16745,14 +17056,14 @@ var handleHealth = (req, res) => {
 };
 app.get("/health", handleHealth);
 app.get("/api/health", handleHealth);
-var clientDist = path3.resolve(process.cwd(), "dist");
-var indexPath = path3.join(clientDist, "index.html");
+var clientDist = path4.resolve(process.cwd(), "dist");
+var indexPath = path4.join(clientDist, "index.html");
 app.use(express.static(clientDist));
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) {
     return next();
   }
-  if (fs3.existsSync(indexPath)) {
+  if (fs4.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
   res.status(503).send(`

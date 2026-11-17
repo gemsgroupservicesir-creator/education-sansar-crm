@@ -246,7 +246,7 @@ Generate your helpful, knowledgeable counseling response now. Remember to ground
       // Promote to 'Qualified' status in the Leads Tab when qualification criteria is met
       let updatedStatus = lead.lead_status;
       if (qualificationScore >= 50 || qualificationStatus === 'Qualified' || qualificationStatus === 'High Intent') {
-        if (lead.lead_status === 'New Lead' || lead.lead_status === 'Inquiry' || !lead.lead_status) {
+        if (lead.lead_status === 'New' || lead.lead_status === 'New Lead' || lead.lead_status === 'Inquiry' || !lead.lead_status) {
           updatedStatus = 'Qualified';
         }
       }
