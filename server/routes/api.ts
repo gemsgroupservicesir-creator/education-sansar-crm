@@ -666,7 +666,7 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
     db.prepare('DELETE FROM users WHERE id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
     db.prepare('DELETE FROM counselors WHERE user_id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
     db.prepare('DELETE FROM hr_employees WHERE user_id = ? OR LOWER(email) = ?').run(req.params.id, userEmail);
-    db.prepare('UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = "Unassigned" WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = ? OR LOWER(email) = ?)').run(req.params.id, userEmail);
+    db.prepare("UPDATE leads SET assigned_counselor_id = NULL, assigned_counselor_name = 'Unassigned' WHERE assigned_counselor_id IN (SELECT id FROM counselors WHERE user_id = ? OR LOWER(email) = ?)").run(req.params.id, userEmail);
 
     // Record tombstone in SQLite
     const tombId = 'DEL-U-' + Date.now() + '-' + Math.random().toString(36).substring(2, 8);
