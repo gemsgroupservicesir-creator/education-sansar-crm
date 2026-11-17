@@ -112,6 +112,9 @@ export interface Counselor {
   total_assigned_leads: number;
   total_admissions: number;
   conversion_rate: number;
+  whatsapp_number?: string;
+  notify_on_whatsapp?: number;
+  auto_reply_student?: number;
   created_at: string;
   updated_at: string;
 }

@@ -120,6 +120,9 @@ export interface Counselor {
   department?: string;
   employee_code?: string;
   alternate_phone?: string;
+  whatsapp_number?: string;
+  notify_on_whatsapp?: number;
+  auto_reply_student?: number;
   work_location?: string;
   notes?: string;
   created_at: string;

@@ -1,5 +1,6 @@
-import { db, logAudit, logLeadActivity } from '../db/database.ts';
+import { db, logAudit, logLeadActivity, createNotification } from '../db/database.ts';
 import { createLead, checkDuplicate, updateLead } from './leadService.ts';
+import { distributeLead } from './leadDistributionEngine.ts';
 import type { Lead } from '../types/index.ts';
 import { 
   isNeonEnabled, 
@@ -320,6 +321,8 @@ export function getWhatsAppConfig(): {
   permanentAccessToken?: string;
   verifyToken?: string;
   defaultSender?: string;
+  counselorNotifyEnabled?: boolean;
+  studentAutoReplyEnabled?: boolean;
 } {
   try {
     const integration = db.prepare("SELECT * FROM integrations WHERE name = 'WhatsApp Business API' OR id = 'int-wa'").get() as any;
@@ -329,7 +332,9 @@ export function getWhatsAppConfig(): {
         wabaId: process.env.WHATSAPP_WABA_ID || '',
         permanentAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
         verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
-        defaultSender: 'Gems Group Services Admissions'
+        defaultSender: 'Gems Group Services Admissions',
+        counselorNotifyEnabled: true,
+        studentAutoReplyEnabled: true
       };
     }
     const parsed = typeof integration.config === 'string' ? JSON.parse(integration.config) : integration.config;
@@ -338,7 +343,9 @@ export function getWhatsAppConfig(): {
       wabaId: parsed.wabaId || process.env.WHATSAPP_WABA_ID || '',
       permanentAccessToken: parsed.permanentAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
       verifyToken: parsed.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
-      defaultSender: parsed.defaultSender || 'Gems Group Services Admissions'
+      defaultSender: parsed.defaultSender || 'Gems Group Services Admissions',
+      counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
+      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true
     };
   } catch {
     return {
@@ -346,7 +353,9 @@ export function getWhatsAppConfig(): {
       wabaId: '',
       permanentAccessToken: '',
       verifyToken: 'gems_group_services_wa_verify_2026',
-      defaultSender: 'Gems Group Services Admissions'
+      defaultSender: 'Gems Group Services Admissions',
+      counselorNotifyEnabled: true,
+      studentAutoReplyEnabled: true
     };
   }
 }
@@ -490,7 +499,7 @@ export async function sendWhatsAppMessage(params: {
     }
   }
 
-  const messageId = metaMessageId || ('MSG-WA-' + Date.now());
+  const messageId = metaMessageId || ('MSG-WA-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
   const status = isDelivered ? 'Delivered' : hasLiveCredentials && errorMsg ? 'Failed' : 'Delivered';
 
   // Record in messages table
@@ -537,8 +546,261 @@ export async function sendWhatsAppMessage(params: {
   };
 }
 
+// Direct Counselor WhatsApp Automation & Inbound Message Processor
+export async function processInboundWhatsAppMessage(params: {
+  fromNumber: string;
+  textBody: string;
+  senderName?: string;
+  metaMsgId?: string;
+  preferredCourse?: string;
+  preferredUniversity?: string;
+  performedBy?: string;
+}) {
+  const fromNumber = (params.fromNumber || '').trim();
+  const textBody = (params.textBody || '').trim();
+  const cleanDigits = fromNumber.replace(/[^0-9]/g, '');
+  const cleanText = textBody.toUpperCase();
+
+  // 1. Check for Opt-Out Keywords
+  if (cleanText === 'STOP' || cleanText === 'UNSUBSCRIBE' || cleanText === 'CANCEL') {
+    handleLeadOptOut({
+      identifier: fromNumber,
+      channel: 'WhatsApp',
+      reason: 'Student replied STOP on WhatsApp'
+    });
+  }
+
+  // 2. Match or Auto-Create Lead
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE is_deleted = 0 AND (
+      REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+      OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    )
+    LIMIT 1
+  `).get(`%${cleanDigits.slice(-8)}%`, `%${cleanDigits.slice(-8)}%`) as any;
+
+  let isNewLead = false;
+  if (!lead) {
+    isNewLead = true;
+    const studentName = params.senderName?.trim() || `WhatsApp Student (+${cleanDigits.slice(-10)})`;
+    const formattedPhone = fromNumber.startsWith('+') ? fromNumber : `+${fromNumber}`;
+    lead = createLead({
+      student_name: studentName,
+      phone: formattedPhone,
+      whatsapp_number: formattedPhone,
+      preferred_course: params.preferredCourse || 'Not Specified',
+      preferred_university: params.preferredUniversity || 'Not Specified',
+      lead_source: 'WhatsApp Inbound',
+      lead_status: 'New Lead',
+      lead_temperature: 'HOT',
+      priority: 'HIGH',
+      remarks: `Direct student WhatsApp inquiry: "${textBody}"`,
+      country: cleanDigits.startsWith('977') ? 'Nepal' : cleanDigits.startsWith('91') ? 'India' : 'Nepal'
+    }, params.performedBy || 'WhatsApp Automation');
+  } else {
+    // If lead exists but has no assigned counselor, route & assign now
+    if (!lead.assigned_counselor_id) {
+      const assignment = distributeLead({
+        city: lead.city,
+        preferred_course: lead.preferred_course,
+        preferred_university: lead.preferred_university,
+        country: lead.country,
+        source: 'WhatsApp'
+      });
+      if (assignment) {
+        db.prepare(`
+          UPDATE leads 
+          SET assigned_counselor_id = ?, assigned_counselor_name = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(assignment.counselorId, assignment.counselorName, lead.id);
+        lead.assigned_counselor_id = assignment.counselorId;
+        lead.assigned_counselor_name = assignment.counselorName;
+
+        db.prepare(`
+          INSERT INTO lead_assignments (id, lead_id, previous_counselor_id, previous_counselor_name, new_counselor_id, new_counselor_name, assignment_method, assigned_by)
+          VALUES (?, ?, NULL, NULL, ?, ?, ?, 'WhatsApp Automation')
+        `).run('ASG-' + Date.now(), lead.id, assignment.counselorId, assignment.counselorName, assignment.method);
+      }
+    }
+
+    // Refresh contact timestamp and bump temperature
+    db.prepare(`
+      UPDATE leads 
+      SET last_contact_date = datetime('now'),
+          lead_temperature = CASE WHEN lead_temperature = 'COLD' THEN 'HOT' ELSE lead_temperature END,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(lead.id);
+
+    logLeadActivity({
+      leadId: lead.id,
+      activityType: 'WhatsApp',
+      title: 'Inbound WhatsApp Message',
+      description: `Student replied: "${textBody}"`,
+      performedBy: lead.student_name || 'Student'
+    });
+  }
+
+  // 3. Record Inbound Message in messages table
+  const msgId = params.metaMsgId || ('IN-WA-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Received')
+  `).run(
+    msgId, 
+    lead.id, 
+    lead.assigned_counselor_name || 'Gems Group Services Admissions', 
+    lead.student_name || fromNumber, 
+    textBody
+  );
+
+  // 4. Retrieve Counselor Details for Direct Automation
+  let counselor: any = null;
+  if (lead.assigned_counselor_id) {
+    counselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(lead.assigned_counselor_id) as any;
+  }
+  if (!counselor) {
+    // Fallback to active counselor with lowest load
+    counselor = db.prepare("SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1").get() as any;
+  }
+
+  const cfg = getWhatsAppConfig();
+  let counselorNotified = false;
+  let studentAutoReplied = false;
+  let counselorPhone = '';
+  let directChatUrl = '';
+
+  if (counselor) {
+    counselorPhone = counselor.whatsapp_number || counselor.phone || counselor.alternate_phone || '';
+    const cleanStudentDigits = (lead.whatsapp_number || lead.phone || cleanDigits).replace(/[^0-9]/g, '');
+    directChatUrl = `https://wa.me/${cleanStudentDigits}`;
+    const crmLeadUrl = `https://education-sansar-crm.vercel.app/leads?search=${cleanStudentDigits.slice(-8)}`;
+
+    // A. Direct WhatsApp Alert to Counselor
+    if (cfg.counselorNotifyEnabled !== false && counselor.notify_on_whatsapp !== 0 && counselorPhone) {
+      const counselorAlertMsg = 
+`🔔 *New Inbound WhatsApp Message from Student!*
+
+👤 *Student:* ${lead.student_name}
+📱 *Phone:* ${lead.whatsapp_number || lead.phone || fromNumber}
+🎓 *Course:* ${lead.preferred_course || 'General Admissions'}
+🏛 *University:* ${lead.preferred_university || 'Not Specified'}
+
+💬 *Inbound Message:*
+"${textBody}"
+
+👉 *Click to chat directly with ${lead.student_name} on WhatsApp:*
+${directChatUrl}
+
+📋 *Open Lead in CRM:*
+${crmLeadUrl}`;
+
+      try {
+        const cRes = await sendWhatsAppMessage({
+          leadId: lead.id,
+          recipientPhone: counselorPhone,
+          customMessage: counselorAlertMsg,
+          performedBy: 'Counselor WhatsApp Automation'
+        });
+        counselorNotified = cRes.success;
+      } catch (err: any) {
+        console.warn('[Counselor WhatsApp Alert Failed]', err.message);
+      }
+    }
+
+    // B. Real-time In-App Notification for Counselor
+    try {
+      createNotification({
+        counselorId: counselor.id,
+        userId: counselor.user_id,
+        title: `💬 WhatsApp: ${lead.student_name}`,
+        message: `"${textBody.slice(0, 90)}${textBody.length > 90 ? '...' : ''}" — Click to open direct WhatsApp chat.`,
+        type: 'WHATSAPP_INBOUND',
+        entityType: 'lead',
+        entityId: lead.id
+      });
+    } catch (e: any) {
+      console.warn('[Counselor Notification Failed]', e.message);
+    }
+
+    // C. Direct WhatsApp Auto-Introduction to Student
+    if (cfg.studentAutoReplyEnabled !== false && counselor.auto_reply_student !== 0 && cleanText !== 'STOP' && cleanText !== 'UNSUBSCRIBE') {
+      const cleanCounselorDigits = counselorPhone.replace(/[^0-9]/g, '');
+      const counselorDirectWaLink = cleanCounselorDigits ? `https://wa.me/${cleanCounselorDigits}` : '';
+
+      const studentAutoIntroMsg = 
+`Namaste ${lead.student_name || 'Student'}! 👋
+
+Thank you for contacting Gems Group Services Admissions.
+
+Your designated Senior Admissions Counselor is *${counselor.name}*.
+📱 Counselor Direct WhatsApp: ${counselorPhone || 'Office WhatsApp'}
+📧 Email: ${counselor.email || 'admissions@gemsgroup.com'}
+
+We have received your message:
+"${textBody}"
+
+${counselor.name} has been notified and will personally assist you with university admissions, course eligibility, and scholarships.
+
+👉 *Click here to connect directly with ${counselor.name} on WhatsApp:*
+${counselorDirectWaLink || 'https://education-sansar-crm.vercel.app'}`;
+
+      try {
+        const sRes = await sendWhatsAppMessage({
+          leadId: lead.id,
+          recipientPhone: fromNumber,
+          customMessage: studentAutoIntroMsg,
+          performedBy: `${counselor.name} (Admissions Counselor)`
+        });
+        studentAutoReplied = sRes.success;
+      } catch (err: any) {
+        console.warn('[Student Auto-Reply Failed]', err.message);
+      }
+    }
+  }
+
+  // 5. Integration Log
+  const logId = 'LOG-WA-IN-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+    VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/webhook', ?, ?)
+  `).run(
+    logId, 
+    JSON.stringify({ from: fromNumber, text: textBody, lead_id: lead?.id, isNewLead }), 
+    JSON.stringify({ counselorId: counselor?.id, counselorNotified, studentAutoReplied })
+  );
+
+  return {
+    success: true,
+    isNewLead,
+    lead: {
+      id: lead.id,
+      lead_id: lead.lead_id,
+      student_name: lead.student_name,
+      phone: lead.phone,
+      whatsapp_number: lead.whatsapp_number,
+      preferred_course: lead.preferred_course,
+      preferred_university: lead.preferred_university,
+      assigned_counselor_id: lead.assigned_counselor_id,
+      assigned_counselor_name: lead.assigned_counselor_name
+    },
+    counselor: counselor ? {
+      id: counselor.id,
+      name: counselor.name,
+      phone: counselorPhone,
+      email: counselor.email,
+      directChatUrl
+    } : null,
+    counselorNotifiedOnWhatsApp: counselorNotified,
+    counselorInAppNotified: Boolean(counselor),
+    studentAutoReplied,
+    message: textBody
+  };
+}
+
 // Inbound WhatsApp Webhook Processor
-export function handleInboundWhatsAppWebhook(payload: any) {
+export async function handleInboundWhatsAppWebhook(payload: any) {
   try {
     const entry = payload?.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
@@ -559,53 +821,19 @@ export function handleInboundWhatsAppWebhook(payload: any) {
 
     // 2. Process Inbound Messages from Students
     if (changes.messages && Array.isArray(changes.messages)) {
+      const contactProfile = changes.contacts?.[0]?.profile?.name || '';
       for (const msg of changes.messages) {
         const fromNumber = msg.from; // e.g. "9779841234567"
         const textBody = msg.text?.body || msg.button?.text || msg.interactive?.button_reply?.title || '';
         const msgId = msg.id || ('IN-WA-' + Date.now());
 
-        const cleanText = textBody.trim().toUpperCase();
-
-        // Check for STOP / UNSUBSCRIBE keyword
-        if (cleanText === 'STOP' || cleanText === 'UNSUBSCRIBE' || cleanText === 'CANCEL') {
-          handleLeadOptOut({
-            identifier: fromNumber,
-            channel: 'WhatsApp',
-            reason: 'Student replied STOP on WhatsApp'
-          });
-        }
-
-        // Match lead by phone
-        const normPhone = fromNumber.replace(/[^0-9]/g, '');
-        const lead = db.prepare(`
-          SELECT * FROM leads 
-          WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
-             OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
-          LIMIT 1
-        `).get(`%${normPhone.slice(-8)}%`, `%${normPhone.slice(-8)}%`) as any;
-
-        // Record inbound message
-        db.prepare(`
-          INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
-          VALUES (?, ?, 'WhatsApp', 'Gems Group Services Admissions', ?, ?, 'Received')
-        `).run(msgId, lead ? lead.id : null, fromNumber, textBody);
-
-        if (lead) {
-          logLeadActivity({
-            leadId: lead.id,
-            activityType: 'WhatsApp',
-            title: 'Inbound WhatsApp Reply',
-            description: `Student replied: "${textBody}"`,
-            performedBy: lead.student_name || 'Student'
-          });
-        }
-
-        // Record integration log
-        const logId = 'LOG-WA-IN-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-        db.prepare(`
-          INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
-          VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/webhook', ?, ?)
-        `).run(logId, JSON.stringify({ from: fromNumber, text: textBody, lead_id: lead?.id }), JSON.stringify({ handled: true }));
+        await processInboundWhatsAppMessage({
+          fromNumber,
+          textBody,
+          senderName: contactProfile,
+          metaMsgId: msgId,
+          performedBy: 'WhatsApp Inbound Webhook'
+        });
       }
     }
 

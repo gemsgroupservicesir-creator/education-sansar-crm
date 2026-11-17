@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS counselors (
   total_admissions INTEGER NOT NULL DEFAULT 0,
   conversion_rate REAL NOT NULL DEFAULT 0.0,
   username TEXT,
+  whatsapp_number TEXT,
+  notify_on_whatsapp INTEGER NOT NULL DEFAULT 1,
+  auto_reply_student INTEGER NOT NULL DEFAULT 1,
   joining_date TEXT DEFAULT (date('now')),
   status TEXT NOT NULL DEFAULT 'Active',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -2702,6 +2705,9 @@ function runSafeMigrations() {
   addColumnIfNotExists("counselors", "department", "TEXT DEFAULT 'Counseling & Admissions'");
   addColumnIfNotExists("counselors", "employee_code", "TEXT");
   addColumnIfNotExists("counselors", "alternate_phone", "TEXT");
+  addColumnIfNotExists("counselors", "whatsapp_number", "TEXT");
+  addColumnIfNotExists("counselors", "notify_on_whatsapp", "INTEGER DEFAULT 1");
+  addColumnIfNotExists("counselors", "auto_reply_student", "INTEGER DEFAULT 1");
   addColumnIfNotExists("counselors", "work_location", "TEXT DEFAULT 'Office'");
   addColumnIfNotExists("counselors", "notes", "TEXT");
   addColumnIfNotExists("message_templates", "target_courses", "TEXT DEFAULT '[]'");
@@ -2934,6 +2940,409 @@ var init_database = __esm({
     }
     db.pragma("foreign_keys = ON");
     initDatabase();
+  }
+});
+
+// server/services/leadDistributionEngine.ts
+function parseKeywords(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map((k) => String(k).trim()).filter(Boolean);
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed.map((k) => String(k).trim()).filter(Boolean);
+    } catch {
+      return val.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+function getRoutingRules(counselorId) {
+  try {
+    let query = `
+      SELECT r.*, c.name as current_counselor_name, c.is_active as counselor_active, c.email as counselor_email
+      FROM lead_routing_rules r
+      LEFT JOIN counselors c ON r.counselor_id = c.id
+    `;
+    const params = [];
+    if (counselorId) {
+      query += ` WHERE r.counselor_id = ? `;
+      params.push(counselorId);
+    }
+    query += ` ORDER BY r.priority DESC, r.created_at ASC `;
+    const rows = db.prepare(query).all(...params);
+    return rows.map((r) => ({
+      ...r,
+      counselor_name: r.current_counselor_name || r.counselor_name || "Counselor",
+      course_keywords: parseKeywords(r.course_keywords),
+      university_keywords: parseKeywords(r.university_keywords),
+      target_cities: parseKeywords(r.target_cities),
+      lead_sources: parseKeywords(r.lead_sources)
+    }));
+  } catch (err) {
+    console.warn("[Routing Rules] Query failed:", err.message);
+    return [];
+  }
+}
+function createRoutingRule(data, performedBy = "Super Admin") {
+  const id = "RULE-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  let counselorName = data.counselor_name || "";
+  if (data.counselor_id && !counselorName) {
+    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
+    if (c) counselorName = c.name;
+  }
+  const courseKw = JSON.stringify(parseKeywords(data.course_keywords));
+  const uniKw = JSON.stringify(parseKeywords(data.university_keywords));
+  const cities = JSON.stringify(parseKeywords(data.target_cities));
+  const sources = JSON.stringify(parseKeywords(data.lead_sources));
+  db.prepare(`
+    INSERT INTO lead_routing_rules (
+      id, name, course_keywords, university_keywords, target_cities, lead_sources,
+      counselor_id, counselor_name, priority, max_daily_leads, is_active, description
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.name || "Custom Routing Rule",
+    courseKw,
+    uniKw,
+    cities,
+    sources,
+    data.counselor_id,
+    counselorName,
+    data.priority !== void 0 ? Number(data.priority) : 1,
+    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
+    data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
+    data.description || null
+  );
+  const createdRule = {
+    id,
+    name: data.name || "Custom Routing Rule",
+    course_keywords: parseKeywords(data.course_keywords),
+    university_keywords: parseKeywords(data.university_keywords),
+    target_cities: parseKeywords(data.target_cities),
+    lead_sources: parseKeywords(data.lead_sources),
+    counselor_id: data.counselor_id,
+    counselor_name: counselorName,
+    priority: data.priority !== void 0 ? Number(data.priority) : 1,
+    max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
+    is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
+    description: data.description
+  };
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon(createdRule).catch(
+      (err) => console.warn("[Neon Sync] Routing rule create warning:", err.message)
+    );
+  }
+  logAudit({
+    userName: performedBy,
+    action: "CREATE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    newValue: { name: data.name, counselor_name: counselorName, priority: data.priority }
+  });
+  return createdRule;
+}
+function updateRoutingRule(id, data, performedBy = "Super Admin") {
+  const existing = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
+  if (!existing) return false;
+  let counselorName = existing.counselor_name;
+  if (data.counselor_id && data.counselor_id !== existing.counselor_id) {
+    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
+    if (c) counselorName = c.name;
+  }
+  const courseKw = data.course_keywords !== void 0 ? JSON.stringify(parseKeywords(data.course_keywords)) : existing.course_keywords;
+  const uniKw = data.university_keywords !== void 0 ? JSON.stringify(parseKeywords(data.university_keywords)) : existing.university_keywords;
+  const cities = data.target_cities !== void 0 ? JSON.stringify(parseKeywords(data.target_cities)) : existing.target_cities;
+  const sources = data.lead_sources !== void 0 ? JSON.stringify(parseKeywords(data.lead_sources)) : existing.lead_sources || "[]";
+  db.prepare(`
+    UPDATE lead_routing_rules
+    SET name = ?,
+        course_keywords = ?,
+        university_keywords = ?,
+        target_cities = ?,
+        lead_sources = ?,
+        counselor_id = ?,
+        counselor_name = ?,
+        priority = ?,
+        max_daily_leads = ?,
+        is_active = ?,
+        description = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    data.name !== void 0 ? data.name : existing.name,
+    courseKw,
+    uniKw,
+    cities,
+    sources,
+    data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
+    counselorName,
+    data.priority !== void 0 ? Number(data.priority) : existing.priority,
+    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
+    data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
+    data.description !== void 0 ? data.description : existing.description,
+    id
+  );
+  if (isNeonEnabled()) {
+    persistRoutingRuleToNeon({
+      id,
+      name: data.name !== void 0 ? data.name : existing.name,
+      course_keywords: parseKeywords(courseKw),
+      university_keywords: parseKeywords(uniKw),
+      target_cities: parseKeywords(cities),
+      lead_sources: parseKeywords(sources),
+      counselor_id: data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
+      counselor_name: counselorName,
+      priority: data.priority !== void 0 ? Number(data.priority) : existing.priority,
+      max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
+      is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
+      description: data.description !== void 0 ? data.description : existing.description
+    }).catch((err) => console.warn("[Neon Sync] Routing rule update warning:", err.message));
+  }
+  logAudit({
+    userName: performedBy,
+    action: "UPDATE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    oldValue: existing,
+    newValue: data
+  });
+  return true;
+}
+function deleteRoutingRule(id, performedBy = "Super Admin") {
+  const rule = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
+  if (!rule) return false;
+  db.prepare("DELETE FROM lead_routing_rules WHERE id = ?").run(id);
+  logAudit({
+    userName: performedBy,
+    action: "DELETE_LEAD_ROUTING_RULE",
+    entity: "lead_routing_rule",
+    entityId: id,
+    oldValue: rule
+  });
+  return true;
+}
+function checkAndResetDailyQuotas(counselors) {
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  for (const c of counselors) {
+    if (c.last_assigned_date !== today) {
+      db.prepare(`
+        UPDATE counselors
+        SET leads_assigned_today = 0, last_assigned_date = ?
+        WHERE id = ?
+      `).run(today, c.id);
+      c.leads_assigned_today = 0;
+      c.last_assigned_date = today;
+    }
+  }
+}
+function matchesKeywords(text, keywords) {
+  if (!keywords || keywords.length === 0) return true;
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return keywords.some((k) => lower.includes(k.toLowerCase().trim()));
+}
+function distributeLead(lead) {
+  const activeCounselors = db.prepare(`
+    SELECT * FROM counselors
+    WHERE is_active = 1 AND current_active_leads < max_capacity
+    ORDER BY current_active_leads ASC
+  `).all();
+  if (activeCounselors.length === 0) {
+    const fallbackCounselors = db.prepare(`
+      SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1
+    `).all();
+    if (fallbackCounselors.length === 0) return null;
+    const fallback = fallbackCounselors[0];
+    return {
+      counselorId: fallback.id,
+      counselorName: fallback.name,
+      method: "Fallback (Capacity Exceeded)",
+      reasons: ["All counselors at capacity, routed to lowest load active counselor"]
+    };
+  }
+  checkAndResetDailyQuotas(activeCounselors);
+  const counselorMap = /* @__PURE__ */ new Map();
+  for (const c of activeCounselors) counselorMap.set(c.id, c);
+  const rules = getRoutingRules().filter((r) => r.is_active === 1);
+  for (const rule of rules) {
+    const counselor = counselorMap.get(rule.counselor_id);
+    if (!counselor) continue;
+    const dailyQuota = rule.max_daily_leads || counselor.daily_lead_quota || 25;
+    if ((counselor.leads_assigned_today || 0) >= dailyQuota) {
+      continue;
+    }
+    const hasCourseFilter = rule.course_keywords && rule.course_keywords.length > 0;
+    const hasUniFilter = rule.university_keywords && rule.university_keywords.length > 0;
+    const hasCityFilter = rule.target_cities && rule.target_cities.length > 0;
+    const hasSourceFilter = rule.lead_sources && rule.lead_sources.length > 0;
+    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter && !hasSourceFilter) continue;
+    const courseMatches = matchesKeywords(lead.preferred_course, rule.course_keywords);
+    const uniMatches = matchesKeywords(lead.preferred_university, rule.university_keywords);
+    const cityMatches = matchesKeywords(lead.city, rule.target_cities);
+    const sourceMatches = matchesKeywords(lead.source, rule.lead_sources);
+    if (hasSourceFilter && !sourceMatches) continue;
+    if (hasCourseFilter && !courseMatches) continue;
+    if (hasUniFilter && !uniMatches) continue;
+    if (hasCityFilter && !cityMatches) continue;
+    const matchReasons = [];
+    if (hasSourceFilter && sourceMatches) matchReasons.push(`Matched Source [${lead.source}]`);
+    if (hasCourseFilter && courseMatches) matchReasons.push(`Matched Course [${lead.preferred_course}]`);
+    if (hasUniFilter && uniMatches) matchReasons.push(`Matched University [${lead.preferred_university}]`);
+    if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
+    return {
+      counselorId: counselor.id,
+      counselorName: counselor.name,
+      method: `Automated Rule (${rule.name})`,
+      matchedRule: rule.name,
+      reasons: matchReasons.length > 0 ? matchReasons : [`Rule criteria satisfied (${rule.name})`]
+    };
+  }
+  for (const c of activeCounselors) {
+    const specCourses = parseKeywords(c.specialization_courses);
+    const specUnis = parseKeywords(c.specialization_universities);
+    const courseMatches = matchesKeywords(lead.preferred_course, specCourses);
+    const uniMatches = matchesKeywords(lead.preferred_university, specUnis);
+    if (specCourses.length > 0 && courseMatches) {
+      return {
+        counselorId: c.id,
+        counselorName: c.name,
+        method: "Counselor Course Specialization",
+        reasons: [`Counselor specializes in ${lead.preferred_course}`]
+      };
+    }
+    if (specUnis.length > 0 && uniMatches) {
+      return {
+        counselorId: c.id,
+        counselorName: c.name,
+        method: "Counselor University Specialization",
+        reasons: [`Counselor specializes in ${lead.preferred_university}`]
+      };
+    }
+  }
+  activeCounselors.sort((a, b) => {
+    const ratioA = (a.current_active_leads || 0) / (a.max_capacity || 100);
+    const ratioB = (b.current_active_leads || 0) / (b.max_capacity || 100);
+    if (ratioA !== ratioB) return ratioA - ratioB;
+    return (a.total_assigned_leads || 0) - (b.total_assigned_leads || 0);
+  });
+  const selected = activeCounselors[0];
+  return {
+    counselorId: selected.id,
+    counselorName: selected.name,
+    method: "Capacity-Balanced Round Robin",
+    reasons: [`Selected counselor with lowest workload ratio (${selected.current_active_leads}/${selected.max_capacity})`]
+  };
+}
+async function distributeUnassignedLeads(performedBy = "Super Admin") {
+  const unassigned = db.prepare(`
+    SELECT * FROM leads 
+    WHERE is_deleted = 0 AND (assigned_counselor_id IS NULL OR assigned_counselor_id = '')
+    ORDER BY created_at ASC
+  `).all();
+  let totalAssigned = 0;
+  const details = [];
+  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  for (const lead of unassigned) {
+    const route = distributeLead({
+      city: lead.city,
+      preferred_course: lead.preferred_course,
+      preferred_university: lead.preferred_university,
+      country: lead.country,
+      source: lead.source
+    });
+    if (route) {
+      db.prepare(`
+        UPDATE leads 
+        SET assigned_counselor_id = ?,
+            assigned_counselor_name = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(route.counselorId, route.counselorName, lead.id);
+      db.prepare(`
+        UPDATE counselors 
+        SET current_active_leads = current_active_leads + 1,
+            total_assigned_leads = total_assigned_leads + 1,
+            leads_assigned_today = leads_assigned_today + 1,
+            last_assigned_date = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+      `).run(today, route.counselorId);
+      const assignId = "ASGN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+      db.prepare(`
+        INSERT INTO lead_assignments (id, lead_id, previous_counselor_id, previous_counselor_name, new_counselor_id, new_counselor_name, assignment_method, assigned_by)
+        VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)
+      `).run(assignId, lead.id, route.counselorId, route.counselorName, route.method, performedBy);
+      logLeadActivity({
+        leadId: lead.id,
+        activityType: "COUNSELOR_ASSIGNED",
+        title: "Assigned via Lead Distribution Engine",
+        description: `Assigned to ${route.counselorName} via ${route.method}. Reason: ${route.reasons.join(", ")}`,
+        performedBy
+      });
+      createNotification({
+        counselorId: route.counselorId,
+        title: "New Student Lead Assigned",
+        message: `${lead.student_name} interested in ${lead.preferred_course} at ${lead.preferred_university} was assigned to you via ${route.method}.`,
+        type: "LEAD_ASSIGNED",
+        entityType: "lead",
+        entityId: lead.id
+      });
+      if (isNeonEnabled()) {
+        const updatedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
+        if (updatedLead) {
+          persistLeadToNeon(updatedLead).catch(() => {
+          });
+        }
+      }
+      totalAssigned++;
+      details.push({
+        leadId: lead.id,
+        leadNumber: lead.lead_id,
+        studentName: lead.student_name,
+        preferredCourse: lead.preferred_course,
+        preferredUniversity: lead.preferred_university,
+        assignedTo: route.counselorName,
+        method: route.method,
+        matchedRule: route.matchedRule
+      });
+    }
+  }
+  logAudit({
+    userName: performedBy,
+    action: "BATCH_LEAD_DISTRIBUTION",
+    entity: "lead_distribution_engine",
+    newValue: { totalProcessed: unassigned.length, totalAssigned }
+  });
+  return {
+    totalProcessed: unassigned.length,
+    totalAssigned,
+    details
+  };
+}
+function simulateLeadRouting(params) {
+  const result = distributeLead(params);
+  if (!result) {
+    return {
+      success: false,
+      message: "No eligible active counselors found to take this lead."
+    };
+  }
+  return {
+    success: true,
+    counselorId: result.counselorId,
+    counselorName: result.counselorName,
+    method: result.method,
+    matchedRule: result.matchedRule,
+    reasons: result.reasons
+  };
+}
+var init_leadDistributionEngine = __esm({
+  "server/services/leadDistributionEngine.ts"() {
+    "use strict";
+    init_database();
+    init_neon();
   }
 });
 
@@ -3961,6 +4370,7 @@ __export(integrationService_exports, {
   handleMetaLeadWebhook: () => handleMetaLeadWebhook,
   parseGoogleSheetUrl: () => parseGoogleSheetUrl,
   parseMetaFieldData: () => parseMetaFieldData,
+  processInboundWhatsAppMessage: () => processInboundWhatsAppMessage,
   sendWhatsAppMessage: () => sendWhatsAppMessage,
   syncAllActiveGoogleSheets: () => syncAllActiveGoogleSheets,
   syncLiveGoogleSheetLeads: () => syncLiveGoogleSheetLeads,
@@ -4199,7 +4609,9 @@ function getWhatsAppConfig() {
         wabaId: process.env.WHATSAPP_WABA_ID || "",
         permanentAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
         verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "gems_group_services_wa_verify_2026",
-        defaultSender: "Gems Group Services Admissions"
+        defaultSender: "Gems Group Services Admissions",
+        counselorNotifyEnabled: true,
+        studentAutoReplyEnabled: true
       };
     }
     const parsed = typeof integration.config === "string" ? JSON.parse(integration.config) : integration.config;
@@ -4208,7 +4620,9 @@ function getWhatsAppConfig() {
       wabaId: parsed.wabaId || process.env.WHATSAPP_WABA_ID || "",
       permanentAccessToken: parsed.permanentAccessToken || process.env.WHATSAPP_ACCESS_TOKEN || "",
       verifyToken: parsed.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || "gems_group_services_wa_verify_2026",
-      defaultSender: parsed.defaultSender || "Gems Group Services Admissions"
+      defaultSender: parsed.defaultSender || "Gems Group Services Admissions",
+      counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
+      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true
     };
   } catch {
     return {
@@ -4216,7 +4630,9 @@ function getWhatsAppConfig() {
       wabaId: "",
       permanentAccessToken: "",
       verifyToken: "gems_group_services_wa_verify_2026",
-      defaultSender: "Gems Group Services Admissions"
+      defaultSender: "Gems Group Services Admissions",
+      counselorNotifyEnabled: true,
+      studentAutoReplyEnabled: true
     };
   }
 }
@@ -4324,7 +4740,7 @@ async function sendWhatsAppMessage(params) {
       errorMsg = e.message;
     }
   }
-  const messageId = metaMessageId || "MSG-WA-" + Date.now();
+  const messageId = metaMessageId || "MSG-WA-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
   const status = isDelivered ? "Delivered" : hasLiveCredentials && errorMsg ? "Failed" : "Delivered";
   db.prepare(`
     INSERT INTO messages (id, lead_id, channel, recipient, sender, template_id, content, status)
@@ -4361,7 +4777,219 @@ async function sendWhatsAppMessage(params) {
     note: hasLiveCredentials ? isDelivered ? "Dispatched via live Meta WhatsApp Cloud API" : `Meta dispatch error: ${errorMsg}` : "Simulated/Queued (Paste WhatsApp Cloud API credentials in Integrations to enable live Meta delivery)"
   };
 }
-function handleInboundWhatsAppWebhook(payload) {
+async function processInboundWhatsAppMessage(params) {
+  const fromNumber = (params.fromNumber || "").trim();
+  const textBody = (params.textBody || "").trim();
+  const cleanDigits = fromNumber.replace(/[^0-9]/g, "");
+  const cleanText2 = textBody.toUpperCase();
+  if (cleanText2 === "STOP" || cleanText2 === "UNSUBSCRIBE" || cleanText2 === "CANCEL") {
+    handleLeadOptOut({
+      identifier: fromNumber,
+      channel: "WhatsApp",
+      reason: "Student replied STOP on WhatsApp"
+    });
+  }
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE is_deleted = 0 AND (
+      REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+      OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    )
+    LIMIT 1
+  `).get(`%${cleanDigits.slice(-8)}%`, `%${cleanDigits.slice(-8)}%`);
+  let isNewLead = false;
+  if (!lead) {
+    isNewLead = true;
+    const studentName = params.senderName?.trim() || `WhatsApp Student (+${cleanDigits.slice(-10)})`;
+    const formattedPhone = fromNumber.startsWith("+") ? fromNumber : `+${fromNumber}`;
+    lead = createLead({
+      student_name: studentName,
+      phone: formattedPhone,
+      whatsapp_number: formattedPhone,
+      preferred_course: params.preferredCourse || "Not Specified",
+      preferred_university: params.preferredUniversity || "Not Specified",
+      lead_source: "WhatsApp Inbound",
+      lead_status: "New Lead",
+      lead_temperature: "HOT",
+      priority: "HIGH",
+      remarks: `Direct student WhatsApp inquiry: "${textBody}"`,
+      country: cleanDigits.startsWith("977") ? "Nepal" : cleanDigits.startsWith("91") ? "India" : "Nepal"
+    }, params.performedBy || "WhatsApp Automation");
+  } else {
+    if (!lead.assigned_counselor_id) {
+      const assignment = distributeLead({
+        city: lead.city,
+        preferred_course: lead.preferred_course,
+        preferred_university: lead.preferred_university,
+        country: lead.country,
+        source: "WhatsApp"
+      });
+      if (assignment) {
+        db.prepare(`
+          UPDATE leads 
+          SET assigned_counselor_id = ?, assigned_counselor_name = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(assignment.counselorId, assignment.counselorName, lead.id);
+        lead.assigned_counselor_id = assignment.counselorId;
+        lead.assigned_counselor_name = assignment.counselorName;
+        db.prepare(`
+          INSERT INTO lead_assignments (id, lead_id, previous_counselor_id, previous_counselor_name, new_counselor_id, new_counselor_name, assignment_method, assigned_by)
+          VALUES (?, ?, NULL, NULL, ?, ?, ?, 'WhatsApp Automation')
+        `).run("ASG-" + Date.now(), lead.id, assignment.counselorId, assignment.counselorName, assignment.method);
+      }
+    }
+    db.prepare(`
+      UPDATE leads 
+      SET last_contact_date = datetime('now'),
+          lead_temperature = CASE WHEN lead_temperature = 'COLD' THEN 'HOT' ELSE lead_temperature END,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(lead.id);
+    logLeadActivity({
+      leadId: lead.id,
+      activityType: "WhatsApp",
+      title: "Inbound WhatsApp Message",
+      description: `Student replied: "${textBody}"`,
+      performedBy: lead.student_name || "Student"
+    });
+  }
+  const msgId = params.metaMsgId || "IN-WA-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Received')
+  `).run(
+    msgId,
+    lead.id,
+    lead.assigned_counselor_name || "Gems Group Services Admissions",
+    lead.student_name || fromNumber,
+    textBody
+  );
+  let counselor = null;
+  if (lead.assigned_counselor_id) {
+    counselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(lead.assigned_counselor_id);
+  }
+  if (!counselor) {
+    counselor = db.prepare("SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1").get();
+  }
+  const cfg = getWhatsAppConfig();
+  let counselorNotified = false;
+  let studentAutoReplied = false;
+  let counselorPhone = "";
+  let directChatUrl = "";
+  if (counselor) {
+    counselorPhone = counselor.whatsapp_number || counselor.phone || counselor.alternate_phone || "";
+    const cleanStudentDigits = (lead.whatsapp_number || lead.phone || cleanDigits).replace(/[^0-9]/g, "");
+    directChatUrl = `https://wa.me/${cleanStudentDigits}`;
+    const crmLeadUrl = `https://education-sansar-crm.vercel.app/leads?search=${cleanStudentDigits.slice(-8)}`;
+    if (cfg.counselorNotifyEnabled !== false && counselor.notify_on_whatsapp !== 0 && counselorPhone) {
+      const counselorAlertMsg = `\u{1F514} *New Inbound WhatsApp Message from Student!*
+
+\u{1F464} *Student:* ${lead.student_name}
+\u{1F4F1} *Phone:* ${lead.whatsapp_number || lead.phone || fromNumber}
+\u{1F393} *Course:* ${lead.preferred_course || "General Admissions"}
+\u{1F3DB} *University:* ${lead.preferred_university || "Not Specified"}
+
+\u{1F4AC} *Inbound Message:*
+"${textBody}"
+
+\u{1F449} *Click to chat directly with ${lead.student_name} on WhatsApp:*
+${directChatUrl}
+
+\u{1F4CB} *Open Lead in CRM:*
+${crmLeadUrl}`;
+      try {
+        const cRes = await sendWhatsAppMessage({
+          leadId: lead.id,
+          recipientPhone: counselorPhone,
+          customMessage: counselorAlertMsg,
+          performedBy: "Counselor WhatsApp Automation"
+        });
+        counselorNotified = cRes.success;
+      } catch (err) {
+        console.warn("[Counselor WhatsApp Alert Failed]", err.message);
+      }
+    }
+    try {
+      createNotification({
+        counselorId: counselor.id,
+        userId: counselor.user_id,
+        title: `\u{1F4AC} WhatsApp: ${lead.student_name}`,
+        message: `"${textBody.slice(0, 90)}${textBody.length > 90 ? "..." : ""}" \u2014 Click to open direct WhatsApp chat.`,
+        type: "WHATSAPP_INBOUND",
+        entityType: "lead",
+        entityId: lead.id
+      });
+    } catch (e) {
+      console.warn("[Counselor Notification Failed]", e.message);
+    }
+    if (cfg.studentAutoReplyEnabled !== false && counselor.auto_reply_student !== 0 && cleanText2 !== "STOP" && cleanText2 !== "UNSUBSCRIBE") {
+      const cleanCounselorDigits = counselorPhone.replace(/[^0-9]/g, "");
+      const counselorDirectWaLink = cleanCounselorDigits ? `https://wa.me/${cleanCounselorDigits}` : "";
+      const studentAutoIntroMsg = `Namaste ${lead.student_name || "Student"}! \u{1F44B}
+
+Thank you for contacting Gems Group Services Admissions.
+
+Your designated Senior Admissions Counselor is *${counselor.name}*.
+\u{1F4F1} Counselor Direct WhatsApp: ${counselorPhone || "Office WhatsApp"}
+\u{1F4E7} Email: ${counselor.email || "admissions@gemsgroup.com"}
+
+We have received your message:
+"${textBody}"
+
+${counselor.name} has been notified and will personally assist you with university admissions, course eligibility, and scholarships.
+
+\u{1F449} *Click here to connect directly with ${counselor.name} on WhatsApp:*
+${counselorDirectWaLink || "https://education-sansar-crm.vercel.app"}`;
+      try {
+        const sRes = await sendWhatsAppMessage({
+          leadId: lead.id,
+          recipientPhone: fromNumber,
+          customMessage: studentAutoIntroMsg,
+          performedBy: `${counselor.name} (Admissions Counselor)`
+        });
+        studentAutoReplied = sRes.success;
+      } catch (err) {
+        console.warn("[Student Auto-Reply Failed]", err.message);
+      }
+    }
+  }
+  const logId = "LOG-WA-IN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+    VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/webhook', ?, ?)
+  `).run(
+    logId,
+    JSON.stringify({ from: fromNumber, text: textBody, lead_id: lead?.id, isNewLead }),
+    JSON.stringify({ counselorId: counselor?.id, counselorNotified, studentAutoReplied })
+  );
+  return {
+    success: true,
+    isNewLead,
+    lead: {
+      id: lead.id,
+      lead_id: lead.lead_id,
+      student_name: lead.student_name,
+      phone: lead.phone,
+      whatsapp_number: lead.whatsapp_number,
+      preferred_course: lead.preferred_course,
+      preferred_university: lead.preferred_university,
+      assigned_counselor_id: lead.assigned_counselor_id,
+      assigned_counselor_name: lead.assigned_counselor_name
+    },
+    counselor: counselor ? {
+      id: counselor.id,
+      name: counselor.name,
+      phone: counselorPhone,
+      email: counselor.email,
+      directChatUrl
+    } : null,
+    counselorNotifiedOnWhatsApp: counselorNotified,
+    counselorInAppNotified: Boolean(counselor),
+    studentAutoReplied,
+    message: textBody
+  };
+}
+async function handleInboundWhatsAppWebhook(payload) {
   try {
     const entry = payload?.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
@@ -4378,43 +5006,18 @@ function handleInboundWhatsAppWebhook(payload) {
       }
     }
     if (changes.messages && Array.isArray(changes.messages)) {
+      const contactProfile = changes.contacts?.[0]?.profile?.name || "";
       for (const msg of changes.messages) {
         const fromNumber = msg.from;
         const textBody = msg.text?.body || msg.button?.text || msg.interactive?.button_reply?.title || "";
         const msgId = msg.id || "IN-WA-" + Date.now();
-        const cleanText2 = textBody.trim().toUpperCase();
-        if (cleanText2 === "STOP" || cleanText2 === "UNSUBSCRIBE" || cleanText2 === "CANCEL") {
-          handleLeadOptOut({
-            identifier: fromNumber,
-            channel: "WhatsApp",
-            reason: "Student replied STOP on WhatsApp"
-          });
-        }
-        const normPhone = fromNumber.replace(/[^0-9]/g, "");
-        const lead = db.prepare(`
-          SELECT * FROM leads 
-          WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
-             OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
-          LIMIT 1
-        `).get(`%${normPhone.slice(-8)}%`, `%${normPhone.slice(-8)}%`);
-        db.prepare(`
-          INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status)
-          VALUES (?, ?, 'WhatsApp', 'Gems Group Services Admissions', ?, ?, 'Received')
-        `).run(msgId, lead ? lead.id : null, fromNumber, textBody);
-        if (lead) {
-          logLeadActivity({
-            leadId: lead.id,
-            activityType: "WhatsApp",
-            title: "Inbound WhatsApp Reply",
-            description: `Student replied: "${textBody}"`,
-            performedBy: lead.student_name || "Student"
-          });
-        }
-        const logId = "LOG-WA-IN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
-        db.prepare(`
-          INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
-          VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/webhook', ?, ?)
-        `).run(logId, JSON.stringify({ from: fromNumber, text: textBody, lead_id: lead?.id }), JSON.stringify({ handled: true }));
+        await processInboundWhatsAppMessage({
+          fromNumber,
+          textBody,
+          senderName: contactProfile,
+          metaMsgId: msgId,
+          performedBy: "WhatsApp Inbound Webhook"
+        });
       }
     }
     return { status: "PROCESSED" };
@@ -5529,6 +6132,7 @@ var init_integrationService = __esm({
     "use strict";
     init_database();
     init_leadService();
+    init_leadDistributionEngine();
     init_neon();
     init_broadcastService();
   }
@@ -6943,409 +7547,6 @@ var init_aiSalesService = __esm({
     init_database();
     init_integrationService();
     init_emailService();
-  }
-});
-
-// server/services/leadDistributionEngine.ts
-function parseKeywords(val) {
-  if (!val) return [];
-  if (Array.isArray(val)) return val.map((k) => String(k).trim()).filter(Boolean);
-  if (typeof val === "string") {
-    try {
-      const parsed = JSON.parse(val);
-      if (Array.isArray(parsed)) return parsed.map((k) => String(k).trim()).filter(Boolean);
-    } catch {
-      return val.split(",").map((s) => s.trim()).filter(Boolean);
-    }
-  }
-  return [];
-}
-function getRoutingRules(counselorId) {
-  try {
-    let query = `
-      SELECT r.*, c.name as current_counselor_name, c.is_active as counselor_active, c.email as counselor_email
-      FROM lead_routing_rules r
-      LEFT JOIN counselors c ON r.counselor_id = c.id
-    `;
-    const params = [];
-    if (counselorId) {
-      query += ` WHERE r.counselor_id = ? `;
-      params.push(counselorId);
-    }
-    query += ` ORDER BY r.priority DESC, r.created_at ASC `;
-    const rows = db.prepare(query).all(...params);
-    return rows.map((r) => ({
-      ...r,
-      counselor_name: r.current_counselor_name || r.counselor_name || "Counselor",
-      course_keywords: parseKeywords(r.course_keywords),
-      university_keywords: parseKeywords(r.university_keywords),
-      target_cities: parseKeywords(r.target_cities),
-      lead_sources: parseKeywords(r.lead_sources)
-    }));
-  } catch (err) {
-    console.warn("[Routing Rules] Query failed:", err.message);
-    return [];
-  }
-}
-function createRoutingRule(data, performedBy = "Super Admin") {
-  const id = "RULE-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
-  let counselorName = data.counselor_name || "";
-  if (data.counselor_id && !counselorName) {
-    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
-    if (c) counselorName = c.name;
-  }
-  const courseKw = JSON.stringify(parseKeywords(data.course_keywords));
-  const uniKw = JSON.stringify(parseKeywords(data.university_keywords));
-  const cities = JSON.stringify(parseKeywords(data.target_cities));
-  const sources = JSON.stringify(parseKeywords(data.lead_sources));
-  db.prepare(`
-    INSERT INTO lead_routing_rules (
-      id, name, course_keywords, university_keywords, target_cities, lead_sources,
-      counselor_id, counselor_name, priority, max_daily_leads, is_active, description
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    data.name || "Custom Routing Rule",
-    courseKw,
-    uniKw,
-    cities,
-    sources,
-    data.counselor_id,
-    counselorName,
-    data.priority !== void 0 ? Number(data.priority) : 1,
-    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
-    data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
-    data.description || null
-  );
-  const createdRule = {
-    id,
-    name: data.name || "Custom Routing Rule",
-    course_keywords: parseKeywords(data.course_keywords),
-    university_keywords: parseKeywords(data.university_keywords),
-    target_cities: parseKeywords(data.target_cities),
-    lead_sources: parseKeywords(data.lead_sources),
-    counselor_id: data.counselor_id,
-    counselor_name: counselorName,
-    priority: data.priority !== void 0 ? Number(data.priority) : 1,
-    max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : 20,
-    is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : 1,
-    description: data.description
-  };
-  if (isNeonEnabled()) {
-    persistRoutingRuleToNeon(createdRule).catch(
-      (err) => console.warn("[Neon Sync] Routing rule create warning:", err.message)
-    );
-  }
-  logAudit({
-    userName: performedBy,
-    action: "CREATE_LEAD_ROUTING_RULE",
-    entity: "lead_routing_rule",
-    entityId: id,
-    newValue: { name: data.name, counselor_name: counselorName, priority: data.priority }
-  });
-  return createdRule;
-}
-function updateRoutingRule(id, data, performedBy = "Super Admin") {
-  const existing = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
-  if (!existing) return false;
-  let counselorName = existing.counselor_name;
-  if (data.counselor_id && data.counselor_id !== existing.counselor_id) {
-    const c = db.prepare("SELECT name FROM counselors WHERE id = ?").get(data.counselor_id);
-    if (c) counselorName = c.name;
-  }
-  const courseKw = data.course_keywords !== void 0 ? JSON.stringify(parseKeywords(data.course_keywords)) : existing.course_keywords;
-  const uniKw = data.university_keywords !== void 0 ? JSON.stringify(parseKeywords(data.university_keywords)) : existing.university_keywords;
-  const cities = data.target_cities !== void 0 ? JSON.stringify(parseKeywords(data.target_cities)) : existing.target_cities;
-  const sources = data.lead_sources !== void 0 ? JSON.stringify(parseKeywords(data.lead_sources)) : existing.lead_sources || "[]";
-  db.prepare(`
-    UPDATE lead_routing_rules
-    SET name = ?,
-        course_keywords = ?,
-        university_keywords = ?,
-        target_cities = ?,
-        lead_sources = ?,
-        counselor_id = ?,
-        counselor_name = ?,
-        priority = ?,
-        max_daily_leads = ?,
-        is_active = ?,
-        description = ?,
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(
-    data.name !== void 0 ? data.name : existing.name,
-    courseKw,
-    uniKw,
-    cities,
-    sources,
-    data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
-    counselorName,
-    data.priority !== void 0 ? Number(data.priority) : existing.priority,
-    data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
-    data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
-    data.description !== void 0 ? data.description : existing.description,
-    id
-  );
-  if (isNeonEnabled()) {
-    persistRoutingRuleToNeon({
-      id,
-      name: data.name !== void 0 ? data.name : existing.name,
-      course_keywords: parseKeywords(courseKw),
-      university_keywords: parseKeywords(uniKw),
-      target_cities: parseKeywords(cities),
-      lead_sources: parseKeywords(sources),
-      counselor_id: data.counselor_id !== void 0 ? data.counselor_id : existing.counselor_id,
-      counselor_name: counselorName,
-      priority: data.priority !== void 0 ? Number(data.priority) : existing.priority,
-      max_daily_leads: data.max_daily_leads !== void 0 ? Number(data.max_daily_leads) : existing.max_daily_leads,
-      is_active: data.is_active !== void 0 ? data.is_active ? 1 : 0 : existing.is_active,
-      description: data.description !== void 0 ? data.description : existing.description
-    }).catch((err) => console.warn("[Neon Sync] Routing rule update warning:", err.message));
-  }
-  logAudit({
-    userName: performedBy,
-    action: "UPDATE_LEAD_ROUTING_RULE",
-    entity: "lead_routing_rule",
-    entityId: id,
-    oldValue: existing,
-    newValue: data
-  });
-  return true;
-}
-function deleteRoutingRule(id, performedBy = "Super Admin") {
-  const rule = db.prepare("SELECT * FROM lead_routing_rules WHERE id = ?").get(id);
-  if (!rule) return false;
-  db.prepare("DELETE FROM lead_routing_rules WHERE id = ?").run(id);
-  logAudit({
-    userName: performedBy,
-    action: "DELETE_LEAD_ROUTING_RULE",
-    entity: "lead_routing_rule",
-    entityId: id,
-    oldValue: rule
-  });
-  return true;
-}
-function checkAndResetDailyQuotas(counselors) {
-  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  for (const c of counselors) {
-    if (c.last_assigned_date !== today) {
-      db.prepare(`
-        UPDATE counselors
-        SET leads_assigned_today = 0, last_assigned_date = ?
-        WHERE id = ?
-      `).run(today, c.id);
-      c.leads_assigned_today = 0;
-      c.last_assigned_date = today;
-    }
-  }
-}
-function matchesKeywords(text, keywords) {
-  if (!keywords || keywords.length === 0) return true;
-  if (!text) return false;
-  const lower = text.toLowerCase();
-  return keywords.some((k) => lower.includes(k.toLowerCase().trim()));
-}
-function distributeLead(lead) {
-  const activeCounselors = db.prepare(`
-    SELECT * FROM counselors
-    WHERE is_active = 1 AND current_active_leads < max_capacity
-    ORDER BY current_active_leads ASC
-  `).all();
-  if (activeCounselors.length === 0) {
-    const fallbackCounselors = db.prepare(`
-      SELECT * FROM counselors WHERE is_active = 1 ORDER BY current_active_leads ASC LIMIT 1
-    `).all();
-    if (fallbackCounselors.length === 0) return null;
-    const fallback = fallbackCounselors[0];
-    return {
-      counselorId: fallback.id,
-      counselorName: fallback.name,
-      method: "Fallback (Capacity Exceeded)",
-      reasons: ["All counselors at capacity, routed to lowest load active counselor"]
-    };
-  }
-  checkAndResetDailyQuotas(activeCounselors);
-  const counselorMap = /* @__PURE__ */ new Map();
-  for (const c of activeCounselors) counselorMap.set(c.id, c);
-  const rules = getRoutingRules().filter((r) => r.is_active === 1);
-  for (const rule of rules) {
-    const counselor = counselorMap.get(rule.counselor_id);
-    if (!counselor) continue;
-    const dailyQuota = rule.max_daily_leads || counselor.daily_lead_quota || 25;
-    if ((counselor.leads_assigned_today || 0) >= dailyQuota) {
-      continue;
-    }
-    const hasCourseFilter = rule.course_keywords && rule.course_keywords.length > 0;
-    const hasUniFilter = rule.university_keywords && rule.university_keywords.length > 0;
-    const hasCityFilter = rule.target_cities && rule.target_cities.length > 0;
-    const hasSourceFilter = rule.lead_sources && rule.lead_sources.length > 0;
-    if (!hasCourseFilter && !hasUniFilter && !hasCityFilter && !hasSourceFilter) continue;
-    const courseMatches = matchesKeywords(lead.preferred_course, rule.course_keywords);
-    const uniMatches = matchesKeywords(lead.preferred_university, rule.university_keywords);
-    const cityMatches = matchesKeywords(lead.city, rule.target_cities);
-    const sourceMatches = matchesKeywords(lead.source, rule.lead_sources);
-    if (hasSourceFilter && !sourceMatches) continue;
-    if (hasCourseFilter && !courseMatches) continue;
-    if (hasUniFilter && !uniMatches) continue;
-    if (hasCityFilter && !cityMatches) continue;
-    const matchReasons = [];
-    if (hasSourceFilter && sourceMatches) matchReasons.push(`Matched Source [${lead.source}]`);
-    if (hasCourseFilter && courseMatches) matchReasons.push(`Matched Course [${lead.preferred_course}]`);
-    if (hasUniFilter && uniMatches) matchReasons.push(`Matched University [${lead.preferred_university}]`);
-    if (hasCityFilter && cityMatches) matchReasons.push(`Matched City [${lead.city}]`);
-    return {
-      counselorId: counselor.id,
-      counselorName: counselor.name,
-      method: `Automated Rule (${rule.name})`,
-      matchedRule: rule.name,
-      reasons: matchReasons.length > 0 ? matchReasons : [`Rule criteria satisfied (${rule.name})`]
-    };
-  }
-  for (const c of activeCounselors) {
-    const specCourses = parseKeywords(c.specialization_courses);
-    const specUnis = parseKeywords(c.specialization_universities);
-    const courseMatches = matchesKeywords(lead.preferred_course, specCourses);
-    const uniMatches = matchesKeywords(lead.preferred_university, specUnis);
-    if (specCourses.length > 0 && courseMatches) {
-      return {
-        counselorId: c.id,
-        counselorName: c.name,
-        method: "Counselor Course Specialization",
-        reasons: [`Counselor specializes in ${lead.preferred_course}`]
-      };
-    }
-    if (specUnis.length > 0 && uniMatches) {
-      return {
-        counselorId: c.id,
-        counselorName: c.name,
-        method: "Counselor University Specialization",
-        reasons: [`Counselor specializes in ${lead.preferred_university}`]
-      };
-    }
-  }
-  activeCounselors.sort((a, b) => {
-    const ratioA = (a.current_active_leads || 0) / (a.max_capacity || 100);
-    const ratioB = (b.current_active_leads || 0) / (b.max_capacity || 100);
-    if (ratioA !== ratioB) return ratioA - ratioB;
-    return (a.total_assigned_leads || 0) - (b.total_assigned_leads || 0);
-  });
-  const selected = activeCounselors[0];
-  return {
-    counselorId: selected.id,
-    counselorName: selected.name,
-    method: "Capacity-Balanced Round Robin",
-    reasons: [`Selected counselor with lowest workload ratio (${selected.current_active_leads}/${selected.max_capacity})`]
-  };
-}
-async function distributeUnassignedLeads(performedBy = "Super Admin") {
-  const unassigned = db.prepare(`
-    SELECT * FROM leads 
-    WHERE is_deleted = 0 AND (assigned_counselor_id IS NULL OR assigned_counselor_id = '')
-    ORDER BY created_at ASC
-  `).all();
-  let totalAssigned = 0;
-  const details = [];
-  const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  for (const lead of unassigned) {
-    const route = distributeLead({
-      city: lead.city,
-      preferred_course: lead.preferred_course,
-      preferred_university: lead.preferred_university,
-      country: lead.country,
-      source: lead.source
-    });
-    if (route) {
-      db.prepare(`
-        UPDATE leads 
-        SET assigned_counselor_id = ?,
-            assigned_counselor_name = ?,
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(route.counselorId, route.counselorName, lead.id);
-      db.prepare(`
-        UPDATE counselors 
-        SET current_active_leads = current_active_leads + 1,
-            total_assigned_leads = total_assigned_leads + 1,
-            leads_assigned_today = leads_assigned_today + 1,
-            last_assigned_date = ?,
-            updated_at = datetime('now')
-        WHERE id = ?
-      `).run(today, route.counselorId);
-      const assignId = "ASGN-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
-      db.prepare(`
-        INSERT INTO lead_assignments (id, lead_id, previous_counselor_id, previous_counselor_name, new_counselor_id, new_counselor_name, assignment_method, assigned_by)
-        VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)
-      `).run(assignId, lead.id, route.counselorId, route.counselorName, route.method, performedBy);
-      logLeadActivity({
-        leadId: lead.id,
-        activityType: "COUNSELOR_ASSIGNED",
-        title: "Assigned via Lead Distribution Engine",
-        description: `Assigned to ${route.counselorName} via ${route.method}. Reason: ${route.reasons.join(", ")}`,
-        performedBy
-      });
-      createNotification({
-        counselorId: route.counselorId,
-        title: "New Student Lead Assigned",
-        message: `${lead.student_name} interested in ${lead.preferred_course} at ${lead.preferred_university} was assigned to you via ${route.method}.`,
-        type: "LEAD_ASSIGNED",
-        entityType: "lead",
-        entityId: lead.id
-      });
-      if (isNeonEnabled()) {
-        const updatedLead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lead.id);
-        if (updatedLead) {
-          persistLeadToNeon(updatedLead).catch(() => {
-          });
-        }
-      }
-      totalAssigned++;
-      details.push({
-        leadId: lead.id,
-        leadNumber: lead.lead_id,
-        studentName: lead.student_name,
-        preferredCourse: lead.preferred_course,
-        preferredUniversity: lead.preferred_university,
-        assignedTo: route.counselorName,
-        method: route.method,
-        matchedRule: route.matchedRule
-      });
-    }
-  }
-  logAudit({
-    userName: performedBy,
-    action: "BATCH_LEAD_DISTRIBUTION",
-    entity: "lead_distribution_engine",
-    newValue: { totalProcessed: unassigned.length, totalAssigned }
-  });
-  return {
-    totalProcessed: unassigned.length,
-    totalAssigned,
-    details
-  };
-}
-function simulateLeadRouting(params) {
-  const result = distributeLead(params);
-  if (!result) {
-    return {
-      success: false,
-      message: "No eligible active counselors found to take this lead."
-    };
-  }
-  return {
-    success: true,
-    counselorId: result.counselorId,
-    counselorName: result.counselorName,
-    method: result.method,
-    matchedRule: result.matchedRule,
-    reasons: result.reasons
-  };
-}
-var init_leadDistributionEngine = __esm({
-  "server/services/leadDistributionEngine.ts"() {
-    "use strict";
-    init_database();
-    init_neon();
   }
 });
 
@@ -11347,6 +11548,9 @@ apiRouter.post("/counselors", async (req, res) => {
       alternate_phone,
       work_location,
       notes,
+      whatsapp_number,
+      notify_on_whatsapp,
+      auto_reply_student,
       routing_rules
     } = req.body;
     if (!name || !email) {
@@ -11355,6 +11559,9 @@ apiRouter.post("/counselors", async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const cleanPhone = phone?.trim() || "";
+    const cleanWhatsApp = whatsapp_number?.trim() || cleanPhone;
+    const notifyWaVal = notify_on_whatsapp !== void 0 ? notify_on_whatsapp ? 1 : 0 : 1;
+    const autoReplyVal = auto_reply_student !== void 0 ? auto_reply_student ? 1 : 0 : 1;
     const userRole = role || "Counselor";
     const permsJson = JSON.stringify(permissions || []);
     const specCoursesJson = JSON.stringify(specialization_courses || []);
@@ -11392,12 +11599,12 @@ apiRouter.post("/counselors", async (req, res) => {
     }
     db.prepare(`
       INSERT INTO counselors (
-        id, user_id, name, username, email, phone, specialization_country, assigned_cities,
-        max_capacity, is_active, status, joining_date, specialization_courses,
-        specialization_universities, daily_lead_quota, role, designation, department,
-        employee_code, alternate_phone, work_location, notes, created_at, updated_at
+        id, user_id, name, username, email, phone, whatsapp_number, notify_on_whatsapp, auto_reply_student,
+        specialization_country, assigned_cities, max_capacity, is_active, status, joining_date,
+        specialization_courses, specialization_universities, daily_lead_quota, role, designation,
+        department, employee_code, alternate_phone, work_location, notes, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -11405,6 +11612,9 @@ apiRouter.post("/counselors", async (req, res) => {
       uname,
       cleanEmail,
       cleanPhone,
+      cleanWhatsApp,
+      notifyWaVal,
+      autoReplyVal,
       specialization_country || "Nepal & India",
       JSON.stringify(assigned_cities || []),
       max_capacity || 100,
@@ -11517,17 +11727,25 @@ apiRouter.put("/counselors/:id", async (req, res) => {
       employee_code,
       alternate_phone,
       work_location,
-      notes
+      notes,
+      whatsapp_number,
+      notify_on_whatsapp,
+      auto_reply_student
     } = req.body;
     const counselor = db.prepare("SELECT * FROM counselors WHERE id = ?").get(req.params.id);
     if (!counselor) return res.status(404).json({ error: "Counselor not found" });
     const activeVal = is_active !== void 0 ? is_active : status === "Inactive" ? 0 : status === "Active" ? 1 : counselor.is_active;
     const statusVal = status || (activeVal === 1 ? "Active" : "Inactive");
+    const notifyWaVal = notify_on_whatsapp !== void 0 ? notify_on_whatsapp ? 1 : 0 : null;
+    const autoReplyVal = auto_reply_student !== void 0 ? auto_reply_student ? 1 : 0 : null;
     db.prepare(`
       UPDATE counselors 
       SET name = COALESCE(?, name),
           email = COALESCE(?, email),
           phone = COALESCE(?, phone),
+          whatsapp_number = COALESCE(?, whatsapp_number),
+          notify_on_whatsapp = COALESCE(?, notify_on_whatsapp),
+          auto_reply_student = COALESCE(?, auto_reply_student),
           specialization_country = COALESCE(?, specialization_country),
           assigned_cities = COALESCE(?, assigned_cities),
           max_capacity = COALESCE(?, max_capacity),
@@ -11548,6 +11766,9 @@ apiRouter.put("/counselors/:id", async (req, res) => {
       name,
       email,
       phone,
+      whatsapp_number !== void 0 ? whatsapp_number : null,
+      notifyWaVal,
+      autoReplyVal,
       specialization_country,
       assigned_cities ? JSON.stringify(assigned_cities) : null,
       max_capacity,
@@ -13257,7 +13478,23 @@ apiRouter.get("/integrations/whatsapp/webhook", (req, res) => {
 });
 apiRouter.post("/integrations/whatsapp/webhook", (req, res) => {
   res.status(200).json({ status: "EVENT_RECEIVED" });
-  handleInboundWhatsAppWebhook(req.body);
+  handleInboundWhatsAppWebhook(req.body).catch((err) => console.warn("[WhatsApp Inbound Error]", err.message));
+});
+apiRouter.post("/integrations/whatsapp/simulate-inbound", async (req, res) => {
+  try {
+    const { fromNumber, textBody, senderName, preferredCourse, preferredUniversity } = req.body;
+    const result = await processInboundWhatsAppMessage({
+      fromNumber: fromNumber || "+977 9841234567",
+      textBody: textBody || "Hello, I want to inquire about B.Tech admissions and scholarships.",
+      senderName: senderName || "Aarav Sharma",
+      preferredCourse,
+      preferredUniversity,
+      performedBy: "Counselor Automation Simulator"
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Simulation failed" });
+  }
 });
 apiRouter.post("/integrations/whatsapp/send", async (req, res) => {
   try {

@@ -21,7 +21,8 @@ import {
   syncAllActiveGoogleSheets,
   verifyMetaCredentials,
   verifyWhatsAppCredentials,
-  handleInboundWhatsAppWebhook
+  handleInboundWhatsAppWebhook,
+  processInboundWhatsAppMessage
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -1152,6 +1153,7 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       max_capacity, password, username, role, permissions,
       specialization_courses, specialization_universities, daily_lead_quota,
       designation, department, employee_code, alternate_phone, work_location, notes,
+      whatsapp_number, notify_on_whatsapp, auto_reply_student,
       routing_rules
     } = req.body;
     if (!name || !email) {
@@ -1161,6 +1163,9 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
     const cleanPhone = phone?.trim() || '';
+    const cleanWhatsApp = whatsapp_number?.trim() || cleanPhone;
+    const notifyWaVal = notify_on_whatsapp !== undefined ? (notify_on_whatsapp ? 1 : 0) : 1;
+    const autoReplyVal = auto_reply_student !== undefined ? (auto_reply_student ? 1 : 0) : 1;
     const userRole = role || 'Counselor';
     const permsJson = JSON.stringify(permissions || []);
     const specCoursesJson = JSON.stringify(specialization_courses || []);
@@ -1207,12 +1212,12 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
     // 4. Insert into counselors table
     db.prepare(`
       INSERT INTO counselors (
-        id, user_id, name, username, email, phone, specialization_country, assigned_cities,
-        max_capacity, is_active, status, joining_date, specialization_courses,
-        specialization_universities, daily_lead_quota, role, designation, department,
-        employee_code, alternate_phone, work_location, notes, created_at, updated_at
+        id, user_id, name, username, email, phone, whatsapp_number, notify_on_whatsapp, auto_reply_student,
+        specialization_country, assigned_cities, max_capacity, is_active, status, joining_date,
+        specialization_courses, specialization_universities, daily_lead_quota, role, designation,
+        department, employee_code, alternate_phone, work_location, notes, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       cId,
       uId,
@@ -1220,6 +1225,9 @@ apiRouter.post('/counselors', async (req: Request, res: Response) => {
       uname,
       cleanEmail,
       cleanPhone,
+      cleanWhatsApp,
+      notifyWaVal,
+      autoReplyVal,
       specialization_country || 'Nepal & India',
       JSON.stringify(assigned_cities || []),
       max_capacity || 100,
@@ -1325,19 +1333,25 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
       name, email, phone, specialization_country, assigned_cities, max_capacity, 
       is_active, status, role, permissions, specialization_courses, 
       specialization_universities, daily_lead_quota,
-      designation, department, employee_code, alternate_phone, work_location, notes
+      designation, department, employee_code, alternate_phone, work_location, notes,
+      whatsapp_number, notify_on_whatsapp, auto_reply_student
     } = req.body;
     const counselor = db.prepare('SELECT * FROM counselors WHERE id = ?').get(req.params.id) as any;
     if (!counselor) return res.status(404).json({ error: 'Counselor not found' });
 
     const activeVal = is_active !== undefined ? is_active : (status === 'Inactive' ? 0 : (status === 'Active' ? 1 : counselor.is_active));
     const statusVal = status || (activeVal === 1 ? 'Active' : 'Inactive');
+    const notifyWaVal = notify_on_whatsapp !== undefined ? (notify_on_whatsapp ? 1 : 0) : null;
+    const autoReplyVal = auto_reply_student !== undefined ? (auto_reply_student ? 1 : 0) : null;
 
     db.prepare(`
       UPDATE counselors 
       SET name = COALESCE(?, name),
           email = COALESCE(?, email),
           phone = COALESCE(?, phone),
+          whatsapp_number = COALESCE(?, whatsapp_number),
+          notify_on_whatsapp = COALESCE(?, notify_on_whatsapp),
+          auto_reply_student = COALESCE(?, auto_reply_student),
           specialization_country = COALESCE(?, specialization_country),
           assigned_cities = COALESCE(?, assigned_cities),
           max_capacity = COALESCE(?, max_capacity),
@@ -1358,6 +1372,9 @@ apiRouter.put('/counselors/:id', async (req: Request, res: Response) => {
       name, 
       email, 
       phone, 
+      whatsapp_number !== undefined ? whatsapp_number : null,
+      notifyWaVal,
+      autoReplyVal,
       specialization_country, 
       assigned_cities ? JSON.stringify(assigned_cities) : null, 
       max_capacity, 
@@ -3254,8 +3271,26 @@ apiRouter.get('/integrations/whatsapp/webhook', (req: Request, res: Response) =>
 apiRouter.post('/integrations/whatsapp/webhook', (req: Request, res: Response) => {
   // Acknowledge immediately to Meta
   res.status(200).json({ status: 'EVENT_RECEIVED' });
-  // Process inbound replies and delivery receipts asynchronously
-  handleInboundWhatsAppWebhook(req.body);
+  // Process inbound replies, counselor alerts, and auto-replies asynchronously
+  handleInboundWhatsAppWebhook(req.body).catch(err => console.warn('[WhatsApp Inbound Error]', err.message));
+});
+
+// Inbound WhatsApp Simulator (Testing Direct Counselor Automation)
+apiRouter.post('/integrations/whatsapp/simulate-inbound', async (req: Request, res: Response) => {
+  try {
+    const { fromNumber, textBody, senderName, preferredCourse, preferredUniversity } = req.body;
+    const result = await processInboundWhatsAppMessage({
+      fromNumber: fromNumber || '+977 9841234567',
+      textBody: textBody || 'Hello, I want to inquire about B.Tech admissions and scholarships.',
+      senderName: senderName || 'Aarav Sharma',
+      preferredCourse,
+      preferredUniversity,
+      performedBy: 'Counselor Automation Simulator'
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Simulation failed' });
+  }
 });
 
 // WhatsApp outreach sender / test endpoint

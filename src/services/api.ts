@@ -344,6 +344,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  simulateInboundWhatsApp: (data: {
+    fromNumber: string;
+    textBody: string;
+    senderName?: string;
+    preferredCourse?: string;
+    preferredUniversity?: string;
+  }) =>
+    fetchJson<any>('/integrations/whatsapp/simulate-inbound', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   testGoogleSheetsInbound: (row: any) =>
     fetchJson<any>('/integrations/google-sheets/test-inbound', {
       method: 'POST',

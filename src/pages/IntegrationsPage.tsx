@@ -45,12 +45,25 @@ export const IntegrationsPage: React.FC = () => {
     wabaId: '',
     permanentAccessToken: '',
     verifyToken: 'gems_group_services_wa_verify_2026',
-    defaultSender: 'Gems Group Services Admissions'
+    defaultSender: 'Gems Group Services Admissions',
+    counselorNotifyEnabled: true,
+    studentAutoReplyEnabled: true,
   });
   const [showWaToken, setShowWaToken] = useState(false);
   const [savingWa, setSavingWa] = useState(false);
   const [testingWaToken, setTestingWaToken] = useState(false);
   const [waTokenTestResult, setWaTokenTestResult] = useState<any>(null);
+
+  // Inbound WhatsApp & Counselor Direct Automation Simulator State
+  const [simWaInbound, setSimWaInbound] = useState({
+    fromNumber: '+977 9841234567',
+    senderName: 'Aarav Sharma',
+    preferredCourse: 'B.Tech Computer Science & Engineering',
+    preferredUniversity: 'SRM Institute of Science and Technology',
+    textBody: 'Hello! I am inquiring about 2026 B.Tech admissions and scholarship eligibility. Please connect me with a counselor.',
+  });
+  const [simulatingWaInbound, setSimulatingWaInbound] = useState(false);
+  const [simWaInboundResult, setSimWaInboundResult] = useState<any>(null);
 
   // Meta Simulation Form State
   const [metaSimData, setMetaSimData] = useState({
@@ -203,6 +216,8 @@ export const IntegrationsPage: React.FC = () => {
             permanentAccessToken: parsed.permanentAccessToken || '',
             verifyToken: parsed.verifyToken || 'gems_group_services_wa_verify_2026',
             defaultSender: parsed.defaultSender || 'Gems Group Services Admissions',
+            counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
+            studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true,
           }));
         } catch (e) {}
       }
@@ -589,6 +604,25 @@ export const IntegrationsPage: React.FC = () => {
       addToast(`Pasted successfully into ${field === 'phoneNumberId' ? 'Phone Number ID' : field === 'wabaId' ? 'WABA ID' : 'Access Token'}!`, 'success');
     } catch (err: any) {
       addToast('Could not read from clipboard automatically. Please click inside the box and press Ctrl+V / Cmd+V.', 'info');
+    }
+  };
+
+  const handleSimulateInboundWhatsApp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSimulatingWaInbound(true);
+      setSimWaInboundResult(null);
+      const res = await api.simulateInboundWhatsApp(simWaInbound);
+      setSimWaInboundResult(res);
+      addToast(
+        `Inbound message routed to Counselor ${res.counselor?.name || 'Assigned'} with direct WhatsApp alerts!`,
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'WhatsApp inbound simulation failed', 'error');
+    } finally {
+      setSimulatingWaInbound(false);
     }
   };
 
@@ -2750,6 +2784,44 @@ export const IntegrationsPage: React.FC = () => {
                   />
                 </div>
 
+                {/* Counselor Direct Automation Controls */}
+                <div className="pt-2 border-t border-gray-100 space-y-3">
+                  <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5 uppercase">
+                    <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                    Counselor Direct WhatsApp Automation
+                  </span>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.counselorNotifyEnabled}
+                      onChange={(e) => setWaConfig({ ...waConfig, counselorNotifyEnabled: e.target.checked })}
+                      className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-gray-900">Alert Assigned Counselor via WhatsApp</span>
+                      <p className="text-[11px] text-gray-600 mt-0.5">
+                        When a student messages on WhatsApp, immediately send a WhatsApp alert to the counselor's phone with student details and a 1-click direct <code className="bg-white px-1 py-0.5 rounded text-emerald-700 font-mono">wa.me</code> reply link.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer bg-blue-50/60 p-2.5 rounded-lg border border-blue-200">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.studentAutoReplyEnabled}
+                      onChange={(e) => setWaConfig({ ...waConfig, studentAutoReplyEnabled: e.target.checked })}
+                      className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-gray-900">Send Student Auto-Introduction with Counselor Link</span>
+                      <p className="text-[11px] text-gray-600 mt-0.5">
+                        Instantly reply to the student introducing their assigned Senior Admissions Counselor with counselor's phone, email, and direct click-to-chat WhatsApp link.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
                 {/* Form Buttons */}
                 <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
                   <button
@@ -2941,19 +3013,195 @@ export const IntegrationsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* WhatsApp Outbound Dispatch Simulator */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <Send className="w-5 h-5 text-emerald-600" />
-                  WhatsApp Outreach &amp; Template Tester
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Verify variable interpolation, live delivery or simulated queuing
-                </p>
+          {/* Right Column: Counselor Direct WhatsApp Automation & Outbound Dispatch Testers */}
+          <div className="space-y-6">
+            {/* Counselor Direct Automation Tester: Inbound WhatsApp Simulator */}
+            <div className="bg-white p-6 rounded-xl border border-emerald-200 shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-emerald-600" />
+                    Inbound WhatsApp &amp; Counselor Automation Tester
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Simulate a student messaging on WhatsApp to test auto-lead assignment, counselor WhatsApp alerts, and student intro replies.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                  <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                  Live Flow
+                </span>
               </div>
+
+              <form onSubmit={handleSimulateInboundWhatsApp} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Student Mobile Number</label>
+                    <input
+                      type="text"
+                      required
+                      value={simWaInbound.fromNumber}
+                      onChange={(e) => setSimWaInbound({ ...simWaInbound, fromNumber: e.target.value })}
+                      placeholder="+977 98XXXXXXXX / +91 98XXXXXXXX"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Student Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={simWaInbound.senderName}
+                      onChange={(e) => setSimWaInbound({ ...simWaInbound, senderName: e.target.value })}
+                      placeholder="e.g. Aarav Sharma"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Interested Course</label>
+                    <input
+                      type="text"
+                      value={simWaInbound.preferredCourse}
+                      onChange={(e) => setSimWaInbound({ ...simWaInbound, preferredCourse: e.target.value })}
+                      placeholder="e.g. B.Tech Computer Science"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Target University</label>
+                    <input
+                      type="text"
+                      value={simWaInbound.preferredUniversity}
+                      onChange={(e) => setSimWaInbound({ ...simWaInbound, preferredUniversity: e.target.value })}
+                      placeholder="e.g. SRM Institute of Science and Technology"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Incoming Student Message</label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={simWaInbound.textBody}
+                    onChange={(e) => setSimWaInbound({ ...simWaInbound, textBody: e.target.value })}
+                    placeholder="Type student message..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={simulatingWaInbound}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50"
+                >
+                  {simulatingWaInbound ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Routing Inbound Message &amp; Alerting Counselor...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      Simulate Inbound Student WhatsApp &amp; Trigger Counselor Automation
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {simWaInboundResult && (
+                <div className="mt-4 p-4 rounded-xl border border-emerald-300 bg-emerald-50/70 space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-900 flex items-center gap-1.5 text-sm">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Counselor WhatsApp Automation Executed!
+                    </span>
+                    <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
+                      {simWaInboundResult.isNewLead ? 'New Lead Created' : 'Existing Lead Matched'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-gray-800">
+                    <div>
+                      <span className="font-semibold text-gray-600">Student: </span>
+                      {simWaInboundResult.lead?.student_name} ({simWaInboundResult.lead?.phone})
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-600">Assigned Counselor: </span>
+                      <strong className="text-emerald-700">{simWaInboundResult.counselor?.name || 'Assigned'}</strong>
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-600">Counselor Phone: </span>
+                      {simWaInboundResult.counselor?.phone || 'Not Set'}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-600">Course / Uni: </span>
+                      {simWaInboundResult.lead?.preferred_course || 'B.Tech'}
+                    </div>
+                  </div>
+
+                  {/* Automation Status Pills */}
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-emerald-200 text-[11px]">
+                    <span className="flex items-center gap-1 px-2.5 py-1 bg-white border border-emerald-200 rounded-lg text-emerald-800 font-medium">
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      Counselor WhatsApp Alert: Dispatched
+                    </span>
+                    <span className="flex items-center gap-1 px-2.5 py-1 bg-white border border-blue-200 rounded-lg text-blue-800 font-medium">
+                      <Check className="w-3.5 h-3.5 text-blue-600" />
+                      Student Auto-Reply: Dispatched
+                    </span>
+                    <span className="flex items-center gap-1 px-2.5 py-1 bg-white border border-purple-200 rounded-lg text-purple-800 font-medium">
+                      <Check className="w-3.5 h-3.5 text-purple-600" />
+                      Counselor In-App Notification: Created
+                    </span>
+                  </div>
+
+                  {/* 1-Click WhatsApp Chat Buttons for Counselor */}
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {simWaInboundResult.counselor?.directChatUrl && (
+                      <a
+                        href={simWaInboundResult.counselor.directChatUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold flex items-center gap-1.5 transition text-xs"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        Chat on WhatsApp with {simWaInboundResult.lead?.student_name} (wa.me)
+                      </a>
+                    )}
+                    {simWaInboundResult.counselor?.phone && (
+                      <a
+                        href={`https://wa.me/${simWaInboundResult.counselor.phone.replace(/[^0-9]/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 rounded-lg font-medium flex items-center gap-1.5 transition text-xs"
+                      >
+                        <Key className="w-3.5 h-3.5 text-emerald-600" />
+                        Chat with Counselor ({simWaInboundResult.counselor.name})
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* WhatsApp Outbound Dispatch Simulator */}
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <Send className="w-5 h-5 text-emerald-600" />
+                    WhatsApp Outreach &amp; Template Tester
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Verify variable interpolation, live delivery or simulated queuing
+                  </p>
+                </div>
+              </div>
 
             <form onSubmit={handleSendWhatsAppTest} className="space-y-4">
               <div>
@@ -3034,6 +3282,7 @@ export const IntegrationsPage: React.FC = () => {
             )}
           </div>
         </div>
+      </div>
       )}
 
       {/* Tab: Message Templates */}

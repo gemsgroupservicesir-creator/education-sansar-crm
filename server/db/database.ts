@@ -194,6 +194,9 @@ function runSafeMigrations() {
   addColumnIfNotExists('counselors', 'department', "TEXT DEFAULT 'Counseling & Admissions'");
   addColumnIfNotExists('counselors', 'employee_code', 'TEXT');
   addColumnIfNotExists('counselors', 'alternate_phone', 'TEXT');
+  addColumnIfNotExists('counselors', 'whatsapp_number', 'TEXT');
+  addColumnIfNotExists('counselors', 'notify_on_whatsapp', 'INTEGER DEFAULT 1');
+  addColumnIfNotExists('counselors', 'auto_reply_student', 'INTEGER DEFAULT 1');
   addColumnIfNotExists('counselors', 'work_location', "TEXT DEFAULT 'Office'");
   addColumnIfNotExists('counselors', 'notes', 'TEXT');
 
