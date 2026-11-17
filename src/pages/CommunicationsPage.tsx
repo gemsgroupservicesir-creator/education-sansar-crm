@@ -26,12 +26,19 @@ import {
   Smartphone,
   CheckCheck,
   Share2,
-  ExternalLink
+  ExternalLink,
+  ShieldAlert,
+  Calendar,
+  Award
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
-import { EmailTemplate, BulkEmailCampaign } from '../types';
+import { EmailTemplate, BulkEmailCampaign, BroadcastCampaign, BroadcastChannel } from '../types';
+import { BroadcastWizardModal } from '../components/communications/BroadcastWizardModal';
+import { BroadcastAnalyticsDrawer } from '../components/communications/BroadcastAnalyticsDrawer';
+import { BroadcastApprovalModal } from '../components/communications/BroadcastApprovalModal';
+import { OptOutManagementTab } from '../components/communications/OptOutManagementTab';
 
 // Safe helper utilities to prevent any string/array method mismatches
 const toArray = (val: any): string[] => {
@@ -100,7 +107,85 @@ export const CommunicationsPage: React.FC = () => {
   const canSendBulk = isSuperAdmin || hasPermission('bulk_email');
   const canManageTemplates = isSuperAdmin || hasPermission('email_templates');
 
-  const [activeTab, setActiveTab] = useState<'send' | 'templates' | 'history'>('send');
+  const [activeTab, setActiveTab] = useState<'broadcasts' | 'send' | 'templates' | 'optouts' | 'history'>('broadcasts');
+
+  // Broadcast campaigns state
+  const [broadcasts, setBroadcasts] = useState<BroadcastCampaign[]>([]);
+  const [loadingBroadcasts, setLoadingBroadcasts] = useState(false);
+  const [broadcastStatusFilter, setBroadcastStatusFilter] = useState('ALL');
+  const [broadcastChannelFilter, setBroadcastChannelFilter] = useState('ALL');
+  const [broadcastSearch, setBroadcastSearch] = useState('');
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [editingBroadcast, setEditingBroadcast] = useState<BroadcastCampaign | null>(null);
+  const [selectedAnalyticsBroadcast, setSelectedAnalyticsBroadcast] = useState<BroadcastCampaign | null>(null);
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [approvalTargetBroadcast, setApprovalTargetBroadcast] = useState<BroadcastCampaign | null>(null);
+
+  const fetchBroadcasts = async () => {
+    setLoadingBroadcasts(true);
+    try {
+      const data = await api.getBroadcastCampaigns();
+      setBroadcasts(data);
+    } catch (err: any) {
+      console.warn('Failed to fetch broadcasts:', err);
+    } finally {
+      setLoadingBroadcasts(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBroadcasts();
+  }, []);
+
+  const handleOpenNewWizard = () => {
+    setEditingBroadcast(null);
+    setWizardOpen(true);
+  };
+
+  const handleEditBroadcast = (bc: BroadcastCampaign) => {
+    setEditingBroadcast(bc);
+    setWizardOpen(true);
+  };
+
+  const handleSubmitBroadcastApproval = async (bc: BroadcastCampaign) => {
+    try {
+      await api.submitBroadcastForApproval(bc.id, user?.name);
+      addToast(`Campaign "${bc.name}" submitted for approval!`, 'success');
+      fetchBroadcasts();
+    } catch (err: any) {
+      addToast(err.message || 'Submission failed', 'error');
+    }
+  };
+
+  const handleApproveBroadcastModal = (bc: BroadcastCampaign) => {
+    setApprovalTargetBroadcast(bc);
+    setApprovalModalOpen(true);
+  };
+
+  const handleDispatchNow = async (bc: BroadcastCampaign) => {
+    if (!window.confirm(`Are you sure you want to dispatch broadcast campaign "${bc.name}" immediately?`)) {
+      return;
+    }
+    try {
+      await api.dispatchBroadcastCampaign(bc.id, user?.name);
+      addToast(`Campaign "${bc.name}" dispatched successfully!`, 'success');
+      fetchBroadcasts();
+    } catch (err: any) {
+      addToast(err.message || 'Dispatch failed', 'error');
+    }
+  };
+
+  const handleDeleteBroadcast = async (bc: BroadcastCampaign) => {
+    if (!window.confirm(`Delete broadcast campaign "${bc.name}"?`)) return;
+    try {
+      await api.deleteBroadcastCampaign(bc.id);
+      addToast(`Campaign deleted.`, 'info');
+      fetchBroadcasts();
+    } catch (err: any) {
+      addToast(err.message || 'Delete failed', 'error');
+    }
+  };
+
   // Channel state: WhatsApp (Default) vs Email
   const [outreachChannel, setOutreachChannel] = useState<'WhatsApp' | 'Email'>('WhatsApp');
 
@@ -585,7 +670,23 @@ export const CommunicationsPage: React.FC = () => {
           </div>
 
           {/* Module Tabs */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+          <div className="flex flex-wrap items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 gap-1">
+            <button
+              onClick={() => setActiveTab('broadcasts')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'broadcasts'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Broadcast Campaigns</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                activeTab === 'broadcasts' ? 'bg-indigo-700 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {broadcasts.length}
+              </span>
+            </button>
             <button
               onClick={() => setActiveTab('send')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
@@ -595,7 +696,7 @@ export const CommunicationsPage: React.FC = () => {
               }`}
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Compose &amp; Send</span>
+              <span>Quick Outreach</span>
             </button>
             <button
               onClick={() => setActiveTab('templates')}
@@ -607,6 +708,17 @@ export const CommunicationsPage: React.FC = () => {
             >
               <FileText className="w-3.5 h-3.5" />
               <span>Templates</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('optouts')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                activeTab === 'optouts'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+              <span>Opt-Out Registry</span>
             </button>
             <button
               onClick={() => setActiveTab('history')}
@@ -622,6 +734,430 @@ export const CommunicationsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* TAB 0: MULTI-CHANNEL BROADCAST CAMPAIGNS (PRIMARY TAB) */}
+      {activeTab === 'broadcasts' && (
+        <div className="space-y-6">
+          {/* Top KPI Metrics Row */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <span>Campaigns</span>
+                <Sparkles className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-black text-slate-900">{broadcasts.length}</div>
+              <div className="text-[11px] text-slate-500">
+                {broadcasts.filter(b => b.status === 'COMPLETED').length} executed · {broadcasts.filter(b => b.status === 'PENDING_APPROVAL').length} pending
+              </div>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-bold text-blue-600 uppercase tracking-wider">
+                <span>Audience Reached</span>
+                <Users className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="text-2xl font-black text-slate-900">
+                {broadcasts.reduce((sum, b) => sum + (b.delivered_count || 0), 0)}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                of {broadcasts.reduce((sum, b) => sum + (b.total_targeted || 0), 0)} targeted leads
+              </div>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-bold text-indigo-600 uppercase tracking-wider">
+                <span>Avg Open Rate</span>
+                <Eye className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-black text-slate-900">
+                {(() => {
+                  const delivered = broadcasts.reduce((sum, b) => sum + (b.delivered_count || 0), 0);
+                  const opened = broadcasts.reduce((sum, b) => sum + (b.opened_count || 0), 0);
+                  return delivered > 0 ? `${Math.round((opened / delivered) * 100)}%` : '0%';
+                })()}
+              </div>
+              <div className="text-[11px] text-indigo-600 font-medium">via pixel receipts</div>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs space-y-1">
+              <div className="flex items-center justify-between text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                <span>Avg Reply Rate</span>
+                <MessageSquare className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-black text-slate-900">
+                {(() => {
+                  const delivered = broadcasts.reduce((sum, b) => sum + (b.delivered_count || 0), 0);
+                  const replied = broadcasts.reduce((sum, b) => sum + (b.replied_count || 0), 0);
+                  return delivered > 0 ? `${Math.round((replied / delivered) * 100)}%` : '0%';
+                })()}
+              </div>
+              <div className="text-[11px] text-emerald-600 font-medium">active replies &amp; clicks</div>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white shadow-xs space-y-1 col-span-2 md:col-span-1">
+              <div className="flex items-center justify-between text-xs font-bold text-emerald-100 uppercase tracking-wider">
+                <span>Attributed Revenue</span>
+                <Award className="w-4 h-4 text-emerald-100" />
+              </div>
+              <div className="text-2xl font-black">
+                NPR {broadcasts.reduce((sum, b) => sum + (b.conversions_revenue || 0), 0).toLocaleString()}
+              </div>
+              <div className="text-[11px] text-emerald-100">
+                {broadcasts.reduce((sum, b) => sum + (b.conversions_count || 0), 0)} enrollments attributed
+              </div>
+            </div>
+          </div>
+
+          {/* Action & Filter Bar */}
+          <div className="p-4 rounded-3xl bg-white border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Status Tabs */}
+            <div className="flex flex-wrap items-center gap-1">
+              {[
+                { label: 'All', value: 'ALL' },
+                { label: 'Drafts', value: 'DRAFT' },
+                { label: 'Pending Approval', value: 'PENDING_APPROVAL' },
+                { label: 'Approved', value: 'APPROVED' },
+                { label: 'Scheduled', value: 'SCHEDULED' },
+                { label: 'Completed', value: 'COMPLETED' },
+                { label: 'Rejected', value: 'REJECTED' }
+              ].map(st => (
+                <button
+                  key={st.value}
+                  onClick={() => setBroadcastStatusFilter(st.value)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    broadcastStatusFilter === st.value
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {st.label}
+                  {st.value === 'PENDING_APPROVAL' && broadcasts.filter(b => b.status === 'PENDING_APPROVAL').length > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[9px] bg-amber-500 text-white font-black animate-pulse">
+                      {broadcasts.filter(b => b.status === 'PENDING_APPROVAL').length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Right Controls: Search, Channel, and Create Button */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={broadcastSearch}
+                  onChange={e => setBroadcastSearch(e.target.value)}
+                  placeholder="Search campaigns..."
+                  className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs w-44 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
+                />
+              </div>
+
+              <select
+                value={broadcastChannelFilter}
+                onChange={e => setBroadcastChannelFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 focus:outline-none"
+              >
+                <option value="ALL">All Channels</option>
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Email">Email</option>
+                <option value="Both">Multi-Channel</option>
+              </select>
+
+              <button
+                onClick={handleOpenNewWizard}
+                className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white text-xs font-black shadow-md shadow-indigo-600/20 active:scale-98 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>New Broadcast Campaign</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Broadcasts Data Table */}
+          <div className="border border-slate-200 rounded-3xl overflow-hidden bg-white shadow-xs">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="px-5 py-3.5">Campaign Name &amp; Channel</th>
+                  <th className="px-5 py-3.5">Approval &amp; Status</th>
+                  <th className="px-5 py-3.5">Audience &amp; Progress</th>
+                  <th className="px-5 py-3.5">Delivery &amp; Engagement</th>
+                  <th className="px-5 py-3.5">Lead Attribution</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {broadcasts
+                  .filter(b => {
+                    if (broadcastStatusFilter !== 'ALL' && b.status !== broadcastStatusFilter) return false;
+                    if (broadcastChannelFilter !== 'ALL' && b.channel !== broadcastChannelFilter) return false;
+                    if (broadcastSearch.trim()) {
+                      const t = broadcastSearch.toLowerCase();
+                      return (
+                        b.name.toLowerCase().includes(t) ||
+                        (b.subject && b.subject.toLowerCase().includes(t)) ||
+                        b.created_by.toLowerCase().includes(t)
+                      );
+                    }
+                    return true;
+                  })
+                  .map(bc => {
+                    const isDraft = bc.status === 'DRAFT';
+                    const isPending = bc.status === 'PENDING_APPROVAL';
+                    const isApproved = bc.status === 'APPROVED';
+                    const isScheduled = bc.status === 'SCHEDULED';
+                    const isSending = bc.status === 'SENDING';
+                    const isCompleted = bc.status === 'COMPLETED';
+                    const isRejected = bc.status === 'REJECTED';
+
+                    return (
+                      <tr key={bc.id} className="hover:bg-slate-50/70 transition-all">
+                        {/* Name & Channel */}
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                bc.channel === 'WhatsApp'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : bc.channel === 'Email'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-purple-100 text-purple-800'
+                              }`}
+                            >
+                              {bc.channel === 'WhatsApp' ? 'WhatsApp' : bc.channel === 'Email' ? 'Email' : 'Multi-Channel'}
+                            </span>
+                            <span className="text-[11px] text-slate-400">By {bc.created_by}</span>
+                          </div>
+                          <div className="font-bold text-slate-900 text-sm mt-1">{bc.name}</div>
+                          {bc.subject && (
+                            <div className="text-[11px] text-slate-500 truncate max-w-xs mt-0.5">
+                              Subject: {bc.subject}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Approval Status */}
+                        <td className="px-5 py-4">
+                          {isDraft && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                              Draft
+                            </span>
+                          )}
+                          {isPending && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 animate-pulse">
+                              <Clock className="w-3 h-3" />
+                              Pending Approval
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Approved
+                            </span>
+                          )}
+                          {isScheduled && (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800">
+                                <Calendar className="w-3 h-3" />
+                                Scheduled
+                              </span>
+                              {bc.scheduled_at && (
+                                <div className="text-[10px] text-slate-500 font-medium">
+                                  {new Date(bc.scheduled_at).toLocaleDateString()} {new Date(bc.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {isSending && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              Sending...
+                            </span>
+                          )}
+                          {isCompleted && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Completed
+                            </span>
+                          )}
+                          {isRejected && (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                                <AlertCircle className="w-3 h-3" />
+                                Rejected
+                              </span>
+                              {bc.rejection_reason && (
+                                <div className="text-[10px] text-rose-600 font-medium max-w-xs truncate" title={bc.rejection_reason}>
+                                  Reason: {bc.rejection_reason}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Audience & Progress */}
+                        <td className="px-5 py-4">
+                          <div className="font-bold text-slate-800">
+                            {bc.delivered_count} / {bc.total_targeted} Leads
+                          </div>
+                          <div className="w-36 h-2 rounded-full bg-slate-100 overflow-hidden mt-1.5">
+                            <div
+                              className="h-full bg-indigo-600 rounded-full"
+                              style={{
+                                width: `${bc.total_targeted > 0 ? Math.min(100, Math.round((bc.delivered_count / bc.total_targeted) * 100)) : 0}%`
+                              }}
+                            />
+                          </div>
+                          {bc.opt_out_count > 0 && (
+                            <div className="text-[10px] text-amber-700 font-medium mt-1">
+                              {bc.opt_out_count} unsubscribed
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Delivery & Engagement */}
+                        <td className="px-5 py-4">
+                          {isCompleted || isSending ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="text-slate-500">Delivered:</span>
+                                <span className="font-bold text-blue-700">{bc.delivery_rate || 0}%</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="text-slate-500">Open Rate:</span>
+                                <span className="font-bold text-indigo-700">{bc.open_rate || 0}%</span>
+                                <span className="text-slate-400">({bc.opened_count})</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <span className="text-slate-500">Reply Rate:</span>
+                                <span className="font-bold text-emerald-700">{bc.reply_rate || 0}%</span>
+                                <span className="text-slate-400">({bc.replied_count})</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">Awaiting dispatch</span>
+                          )}
+                        </td>
+
+                        {/* Lead Attribution */}
+                        <td className="px-5 py-4">
+                          {bc.conversions_count > 0 ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Award className="w-3.5 h-3.5" />
+                                <span>{bc.conversions_count} Enrolled</span>
+                              </span>
+                              <div className="text-[11px] font-black text-emerald-800">
+                                NPR {bc.conversions_revenue?.toLocaleString()}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">Touchpoint logged</span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Draft / Rejected actions */}
+                            {(isDraft || isRejected) && (
+                              <>
+                                <button
+                                  onClick={() => handleEditBroadcast(bc)}
+                                  className="px-2.5 py-1 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition-all"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleSubmitBroadcastApproval(bc)}
+                                  className="px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 text-xs font-bold transition-all"
+                                >
+                                  Submit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteBroadcast(bc)}
+                                  className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all"
+                                  title="Delete Campaign"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+
+                            {/* Pending Approval actions */}
+                            {isPending && (
+                              <>
+                                {(isSuperAdmin || hasPermission('broadcast_approval') || user?.role === 'Admin') ? (
+                                  <button
+                                    onClick={() => handleApproveBroadcastModal(bc)}
+                                    className="px-3 py-1.5 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-bold transition-all shadow-xs"
+                                  >
+                                    Review &amp; Approve
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-amber-600 font-semibold italic">Under Admin Review</span>
+                                )}
+                              </>
+                            )}
+
+                            {/* Approved / Scheduled actions */}
+                            {(isApproved || isScheduled) && (
+                              <button
+                                onClick={() => handleDispatchNow(bc)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold transition-all shadow-xs"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>Send Now</span>
+                              </button>
+                            )}
+
+                            {/* Completed actions: Analytics drawer */}
+                            {isCompleted && (
+                              <button
+                                onClick={() => setSelectedAnalyticsBroadcast(bc)}
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-bold transition-all"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Analytics &amp; Logs</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                {broadcasts.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400 font-medium space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto">
+                        <Sparkles className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-slate-800 text-sm">No Broadcast Campaigns Yet</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          Create targeted multi-channel outreach campaigns with variable merge tags, approval workflows, and delivery tracking.
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleOpenNewWizard}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 transition-all shadow-xs inline-flex items-center gap-1.5"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create Your First Broadcast
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: OPT-OUT REGISTRY & COMPLIANCE */}
+      {activeTab === 'optouts' && <OptOutManagementTab />}
 
       {/* TAB 1: BULK OUTREACH DISPATCH ENGINE */}
       {activeTab === 'send' && (
@@ -1582,6 +2118,9 @@ export const CommunicationsPage: React.FC = () => {
         </div>
       )}
 
+      {/* TAB: OPT-OUT & UNSUBSCRIBE REGISTRY */}
+      {activeTab === 'optouts' && <OptOutManagementTab />}
+
       {/* Create / Edit Template Modal */}
       {templateModalOpen && (
         <div className="fixed inset-0 z-50 p-4 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center overflow-y-auto">
@@ -1877,6 +2416,32 @@ export const CommunicationsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Broadcast Campaign Modals & Drawers */}
+      <BroadcastWizardModal
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onSuccess={fetchBroadcasts}
+        initialData={editingBroadcast}
+        templates={templates}
+        userRole={user?.role}
+        userName={user?.name}
+      />
+
+      <BroadcastAnalyticsDrawer
+        isOpen={Boolean(selectedAnalyticsBroadcast)}
+        onClose={() => setSelectedAnalyticsBroadcast(null)}
+        campaign={selectedAnalyticsBroadcast}
+        onRefreshCampaign={fetchBroadcasts}
+      />
+
+      <BroadcastApprovalModal
+        isOpen={approvalModalOpen}
+        onClose={() => setApprovalModalOpen(false)}
+        campaign={approvalTargetBroadcast}
+        onSuccess={fetchBroadcasts}
+        userName={user?.name}
+      />
     </div>
   );
 };

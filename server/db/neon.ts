@@ -1197,9 +1197,81 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS daily_lead_quota INTEGER DEFAULT 25;
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS leads_assigned_today INTEGER DEFAULT 0;
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS last_assigned_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_opt_out INTEGER DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_opt_out_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_opt_out INTEGER DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_opt_out_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_campaign_id TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_campaign_name TEXT;
+
+        CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          channel TEXT NOT NULL DEFAULT 'Email',
+          status TEXT NOT NULL DEFAULT 'DRAFT',
+          approval_status TEXT NOT NULL DEFAULT 'DRAFT',
+          rejection_reason TEXT,
+          submitted_by TEXT,
+          submitted_at TEXT,
+          approved_by TEXT,
+          approved_at TEXT,
+          scheduled_at TEXT,
+          executed_at TEXT,
+          template_id TEXT,
+          subject TEXT,
+          content TEXT NOT NULL,
+          preview_text TEXT,
+          sender_name TEXT DEFAULT 'Gems Group Services Admissions',
+          sender_email TEXT DEFAULT 'admissions@gemsgroupservices.com',
+          sender_phone TEXT DEFAULT '+977 9801234567',
+          filter_criteria TEXT NOT NULL DEFAULT '{}',
+          total_targeted INTEGER NOT NULL DEFAULT 0,
+          sent_count INTEGER NOT NULL DEFAULT 0,
+          delivered_count INTEGER NOT NULL DEFAULT 0,
+          opened_count INTEGER NOT NULL DEFAULT 0,
+          replied_count INTEGER NOT NULL DEFAULT 0,
+          bounced_count INTEGER NOT NULL DEFAULT 0,
+          opt_out_count INTEGER NOT NULL DEFAULT 0,
+          conversions_count INTEGER NOT NULL DEFAULT 0,
+          conversions_revenue REAL NOT NULL DEFAULT 0.0,
+          created_by TEXT NOT NULL DEFAULT 'Super Admin',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS broadcast_recipients (
+          id TEXT PRIMARY KEY,
+          broadcast_id TEXT NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+          lead_id TEXT NOT NULL,
+          recipient_name TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          address TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'QUEUED',
+          open_token TEXT UNIQUE NOT NULL,
+          error_message TEXT,
+          sent_at TEXT,
+          delivered_at TEXT,
+          opened_at TEXT,
+          replied_at TEXT,
+          opted_out_at TEXT,
+          is_converted INTEGER NOT NULL DEFAULT 0,
+          converted_at TEXT,
+          conversion_revenue REAL NOT NULL DEFAULT 0.0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_opt_outs (
+          id TEXT PRIMARY KEY,
+          lead_id TEXT,
+          channel TEXT NOT NULL,
+          identifier TEXT NOT NULL,
+          reason TEXT,
+          campaign_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
       `);
     } catch (migrErr: any) {
-      // Columns may already exist
+      console.warn('[Neon Sync] Migration warning:', migrErr.message);
     }
 
     // 1. Sync Deleted Records (Tombstones) First - Prevents resurrecting any deleted records
@@ -1311,11 +1383,12 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           budget, scholarship_required, lead_source, campaign, ad_set, ad, facebook_lead_id,
           lead_created_date, assigned_counselor_id, assigned_counselor_name, lead_status,
           lead_temperature, priority, last_contact_date, next_follow_up_date, remarks,
+          email_opt_out, email_opt_out_date, whatsapp_opt_out, whatsapp_opt_out_date, last_campaign_id, last_campaign_name,
           created_by, updated_by, is_converted_to_student, is_deleted, is_demo, created_at, updated_at
         )
         VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         ON CONFLICT (id) DO UPDATE SET
           student_name = excluded.student_name,
@@ -1326,6 +1399,12 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           priority = excluded.priority,
           assigned_counselor_id = excluded.assigned_counselor_id,
           assigned_counselor_name = excluded.assigned_counselor_name,
+          email_opt_out = excluded.email_opt_out,
+          email_opt_out_date = excluded.email_opt_out_date,
+          whatsapp_opt_out = excluded.whatsapp_opt_out,
+          whatsapp_opt_out_date = excluded.whatsapp_opt_out_date,
+          last_campaign_id = excluded.last_campaign_id,
+          last_campaign_name = excluded.last_campaign_name,
           updated_at = excluded.updated_at
       `);
       for (const l of leads) {
@@ -1342,6 +1421,9 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
           String(l.lead_created_date), l.assigned_counselor_id, l.assigned_counselor_name, l.lead_status,
           l.lead_temperature, l.priority, l.last_contact_date ? String(l.last_contact_date) : null,
           l.next_follow_up_date ? String(l.next_follow_up_date) : null, l.remarks,
+          Number(l.email_opt_out) || 0, l.email_opt_out_date ? String(l.email_opt_out_date) : null,
+          Number(l.whatsapp_opt_out) || 0, l.whatsapp_opt_out_date ? String(l.whatsapp_opt_out_date) : null,
+          l.last_campaign_id || null, l.last_campaign_name || null,
           l.created_by, l.updated_by, l.is_converted_to_student, l.is_deleted, l.is_demo,
           String(l.created_at), String(l.updated_at)
         );
@@ -1542,8 +1624,164 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
       }
     } catch (invSyncErr: any) {}
 
+    // 10. Sync Broadcast Campaigns
+    try {
+      const broadcasts = await sql.query('SELECT * FROM broadcast_campaigns');
+      if (broadcasts && broadcasts.length > 0) {
+        const upsertBc = db.prepare(`
+          INSERT INTO broadcast_campaigns (
+            id, name, channel, status, approval_status, rejection_reason,
+            submitted_by, submitted_at, approved_by, approved_at, scheduled_at, executed_at,
+            template_id, subject, content, preview_text, sender_name, sender_email, sender_phone,
+            filter_criteria, total_targeted, sent_count, delivered_count, opened_count, replied_count,
+            bounced_count, opt_out_count, conversions_count, conversions_revenue, created_by, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            channel = excluded.channel,
+            status = excluded.status,
+            approval_status = excluded.approval_status,
+            rejection_reason = excluded.rejection_reason,
+            submitted_by = excluded.submitted_by,
+            submitted_at = excluded.submitted_at,
+            approved_by = excluded.approved_by,
+            approved_at = excluded.approved_at,
+            scheduled_at = excluded.scheduled_at,
+            executed_at = excluded.executed_at,
+            subject = excluded.subject,
+            content = excluded.content,
+            total_targeted = excluded.total_targeted,
+            sent_count = excluded.sent_count,
+            delivered_count = excluded.delivered_count,
+            opened_count = excluded.opened_count,
+            replied_count = excluded.replied_count,
+            opt_out_count = excluded.opt_out_count,
+            conversions_count = excluded.conversions_count,
+            conversions_revenue = excluded.conversions_revenue,
+            updated_at = excluded.updated_at
+        `);
+        for (const bc of broadcasts) {
+          upsertBc.run(
+            bc.id, bc.name, bc.channel || 'Email', bc.status || 'DRAFT', bc.approval_status || 'DRAFT', bc.rejection_reason,
+            bc.submitted_by, bc.submitted_at ? String(bc.submitted_at) : null,
+            bc.approved_by, bc.approved_at ? String(bc.approved_at) : null,
+            bc.scheduled_at ? String(bc.scheduled_at) : null,
+            bc.executed_at ? String(bc.executed_at) : null,
+            bc.template_id, bc.subject, bc.content, bc.preview_text, bc.sender_name, bc.sender_email, bc.sender_phone,
+            typeof bc.filter_criteria === 'string' ? bc.filter_criteria : JSON.stringify(bc.filter_criteria || {}),
+            Number(bc.total_targeted) || 0, Number(bc.sent_count) || 0, Number(bc.delivered_count) || 0,
+            Number(bc.opened_count) || 0, Number(bc.replied_count) || 0, Number(bc.bounced_count) || 0,
+            Number(bc.opt_out_count) || 0, Number(bc.conversions_count) || 0, Number(bc.conversions_revenue) || 0.0,
+            bc.created_by || 'Super Admin', String(bc.created_at), String(bc.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${broadcasts.length} broadcast campaigns from Neon.`);
+      }
+    } catch (bcSyncErr: any) {}
+
+    // 11. Sync Lead Opt-Outs
+    try {
+      const optOuts = await sql.query('SELECT * FROM lead_opt_outs');
+      if (optOuts && optOuts.length > 0) {
+        const upsertOpt = db.prepare(`
+          INSERT INTO lead_opt_outs (id, lead_id, channel, identifier, reason, campaign_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO NOTHING
+        `);
+        for (const opt of optOuts) {
+          upsertOpt.run(opt.id, opt.lead_id, opt.channel, opt.identifier, opt.reason, opt.campaign_id, String(opt.created_at));
+        }
+        console.log(`[Neon Sync] Synced ${optOuts.length} lead opt-outs from Neon.`);
+      }
+    } catch (optSyncErr: any) {}
+
     console.log('✅ [Neon Sync] Synchronization complete!');
   } catch (err: any) {
     console.error('[Neon Sync] Background sync failed:', err.message);
+  }
+}
+
+/**
+ * Persist broadcast campaign to Neon PostgreSQL
+ */
+export async function persistBroadcastToNeon(bc: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    const filterJson = typeof bc.filter_criteria === 'string' ? bc.filter_criteria : JSON.stringify(bc.filter_criteria || {});
+    await sql.query(`
+      INSERT INTO broadcast_campaigns (
+        id, name, channel, status, approval_status, rejection_reason,
+        submitted_by, submitted_at, approved_by, approved_at, scheduled_at, executed_at,
+        template_id, subject, content, preview_text, sender_name, sender_email, sender_phone,
+        filter_criteria, total_targeted, sent_count, delivered_count, opened_count, replied_count,
+        bounced_count, opt_out_count, conversions_count, conversions_revenue, created_by, created_at, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        channel = EXCLUDED.channel,
+        status = EXCLUDED.status,
+        approval_status = EXCLUDED.approval_status,
+        rejection_reason = EXCLUDED.rejection_reason,
+        submitted_by = EXCLUDED.submitted_by,
+        submitted_at = EXCLUDED.submitted_at,
+        approved_by = EXCLUDED.approved_by,
+        approved_at = EXCLUDED.approved_at,
+        scheduled_at = EXCLUDED.scheduled_at,
+        executed_at = EXCLUDED.executed_at,
+        subject = EXCLUDED.subject,
+        content = EXCLUDED.content,
+        filter_criteria = EXCLUDED.filter_criteria,
+        total_targeted = EXCLUDED.total_targeted,
+        sent_count = EXCLUDED.sent_count,
+        delivered_count = EXCLUDED.delivered_count,
+        opened_count = EXCLUDED.opened_count,
+        replied_count = EXCLUDED.replied_count,
+        opt_out_count = EXCLUDED.opt_out_count,
+        conversions_count = EXCLUDED.conversions_count,
+        conversions_revenue = EXCLUDED.conversions_revenue,
+        updated_at = NOW()
+    `, [
+      bc.id, bc.name, bc.channel || 'Email', bc.status || 'DRAFT', bc.approval_status || 'DRAFT', bc.rejection_reason || null,
+      bc.submitted_by || null, bc.submitted_at ? new Date(bc.submitted_at) : null,
+      bc.approved_by || null, bc.approved_at ? new Date(bc.approved_at) : null,
+      bc.scheduled_at ? new Date(bc.scheduled_at) : null,
+      bc.executed_at ? new Date(bc.executed_at) : null,
+      bc.template_id || null, bc.subject || null, bc.content || '', bc.preview_text || null,
+      bc.sender_name || 'Gems Group Services Admissions', bc.sender_email || 'admissions@gemsgroupservices.com', bc.sender_phone || '+977 9801234567',
+      filterJson,
+      Number(bc.total_targeted) || 0, Number(bc.sent_count) || 0, Number(bc.delivered_count) || 0,
+      Number(bc.opened_count) || 0, Number(bc.replied_count) || 0, Number(bc.bounced_count) || 0,
+      Number(bc.opt_out_count) || 0, Number(bc.conversions_count) || 0, Number(bc.conversions_revenue) || 0.0,
+      bc.created_by || 'Super Admin'
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Broadcast Persist] Error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Persist lead opt-out to Neon PostgreSQL
+ */
+export async function persistLeadOptOutToNeon(opt: any): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO lead_opt_outs (id, lead_id, channel, identifier, reason, campaign_id, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      opt.id, opt.lead_id || null, opt.channel, opt.identifier, opt.reason || null, opt.campaign_id || null
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Opt-Out Persist] Error:', err.message);
+    return false;
   }
 }

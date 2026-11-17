@@ -218,6 +218,12 @@ CREATE TABLE IF NOT EXISTS leads (
   created_by TEXT DEFAULT 'System',
   updated_by TEXT DEFAULT 'System',
   is_converted_to_student INTEGER NOT NULL DEFAULT 0,
+  email_opt_out INTEGER NOT NULL DEFAULT 0,
+  email_opt_out_date TEXT,
+  whatsapp_opt_out INTEGER NOT NULL DEFAULT 0,
+  whatsapp_opt_out_date TEXT,
+  last_campaign_id TEXT,
+  last_campaign_name TEXT,
   is_deleted INTEGER NOT NULL DEFAULT 0,
   is_demo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -438,6 +444,75 @@ CREATE TABLE IF NOT EXISTS bulk_email_campaigns (
   status TEXT NOT NULL DEFAULT 'COMPLETED', -- 'QUEUED', 'SENDING', 'COMPLETED', 'FAILED'
   channel TEXT NOT NULL DEFAULT 'Email', -- 'Email', 'WhatsApp'
   sent_by TEXT NOT NULL DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 19c. Broadcast Campaigns (Multi-channel: Email & WhatsApp with Approval Workflow & Tracking)
+CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'Email', -- 'Email', 'WhatsApp', 'Both'
+  status TEXT NOT NULL DEFAULT 'DRAFT',  -- 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'SCHEDULED', 'SENDING', 'COMPLETED', 'FAILED', 'CANCELLED'
+  approval_status TEXT NOT NULL DEFAULT 'DRAFT', -- 'DRAFT', 'PENDING', 'APPROVED', 'REJECTED'
+  rejection_reason TEXT,
+  submitted_by TEXT,
+  submitted_at TEXT,
+  approved_by TEXT,
+  approved_at TEXT,
+  scheduled_at TEXT,
+  executed_at TEXT,
+  template_id TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
+  subject TEXT,
+  content TEXT NOT NULL,
+  preview_text TEXT,
+  sender_name TEXT DEFAULT 'Gems Group Services Admissions',
+  sender_email TEXT DEFAULT 'admissions@gemsgroupservices.com',
+  sender_phone TEXT DEFAULT '+977 9801234567',
+  filter_criteria TEXT NOT NULL DEFAULT '{}', -- JSON filter payload
+  total_targeted INTEGER NOT NULL DEFAULT 0,
+  sent_count INTEGER NOT NULL DEFAULT 0,
+  delivered_count INTEGER NOT NULL DEFAULT 0,
+  opened_count INTEGER NOT NULL DEFAULT 0,
+  replied_count INTEGER NOT NULL DEFAULT 0,
+  bounced_count INTEGER NOT NULL DEFAULT 0,
+  opt_out_count INTEGER NOT NULL DEFAULT 0,
+  conversions_count INTEGER NOT NULL DEFAULT 0,
+  conversions_revenue REAL NOT NULL DEFAULT 0.0,
+  created_by TEXT NOT NULL DEFAULT 'Super Admin',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 19d. Broadcast Recipients Drilldown & Activity Log
+CREATE TABLE IF NOT EXISTS broadcast_recipients (
+  id TEXT PRIMARY KEY,
+  broadcast_id TEXT NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+  lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  recipient_name TEXT NOT NULL,
+  channel TEXT NOT NULL, -- 'Email', 'WhatsApp'
+  address TEXT NOT NULL, -- Email address or WhatsApp phone
+  status TEXT NOT NULL DEFAULT 'QUEUED', -- 'QUEUED', 'SENT', 'DELIVERED', 'OPENED', 'REPLIED', 'FAILED', 'OPTED_OUT'
+  open_token TEXT UNIQUE NOT NULL,
+  error_message TEXT,
+  sent_at TEXT,
+  delivered_at TEXT,
+  opened_at TEXT,
+  replied_at TEXT,
+  opted_out_at TEXT,
+  is_converted INTEGER NOT NULL DEFAULT 0,
+  converted_at TEXT,
+  conversion_revenue REAL NOT NULL DEFAULT 0.0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 19e. Lead Opt-Outs & Unsubscribe Compliance
+CREATE TABLE IF NOT EXISTS lead_opt_outs (
+  id TEXT PRIMARY KEY,
+  lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
+  channel TEXT NOT NULL, -- 'Email', 'WhatsApp'
+  identifier TEXT NOT NULL, -- Email or Phone number
+  reason TEXT,
+  campaign_id TEXT REFERENCES broadcast_campaigns(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1747,8 +1822,81 @@ async function syncFromNeonToSQLite(db2) {
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS daily_lead_quota INTEGER DEFAULT 25;
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS leads_assigned_today INTEGER DEFAULT 0;
         ALTER TABLE counselors ADD COLUMN IF NOT EXISTS last_assigned_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_opt_out INTEGER DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_opt_out_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_opt_out INTEGER DEFAULT 0;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS whatsapp_opt_out_date TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_campaign_id TEXT;
+        ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_campaign_name TEXT;
+
+        CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          channel TEXT NOT NULL DEFAULT 'Email',
+          status TEXT NOT NULL DEFAULT 'DRAFT',
+          approval_status TEXT NOT NULL DEFAULT 'DRAFT',
+          rejection_reason TEXT,
+          submitted_by TEXT,
+          submitted_at TEXT,
+          approved_by TEXT,
+          approved_at TEXT,
+          scheduled_at TEXT,
+          executed_at TEXT,
+          template_id TEXT,
+          subject TEXT,
+          content TEXT NOT NULL,
+          preview_text TEXT,
+          sender_name TEXT DEFAULT 'Gems Group Services Admissions',
+          sender_email TEXT DEFAULT 'admissions@gemsgroupservices.com',
+          sender_phone TEXT DEFAULT '+977 9801234567',
+          filter_criteria TEXT NOT NULL DEFAULT '{}',
+          total_targeted INTEGER NOT NULL DEFAULT 0,
+          sent_count INTEGER NOT NULL DEFAULT 0,
+          delivered_count INTEGER NOT NULL DEFAULT 0,
+          opened_count INTEGER NOT NULL DEFAULT 0,
+          replied_count INTEGER NOT NULL DEFAULT 0,
+          bounced_count INTEGER NOT NULL DEFAULT 0,
+          opt_out_count INTEGER NOT NULL DEFAULT 0,
+          conversions_count INTEGER NOT NULL DEFAULT 0,
+          conversions_revenue REAL NOT NULL DEFAULT 0.0,
+          created_by TEXT NOT NULL DEFAULT 'Super Admin',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS broadcast_recipients (
+          id TEXT PRIMARY KEY,
+          broadcast_id TEXT NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+          lead_id TEXT NOT NULL,
+          recipient_name TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          address TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'QUEUED',
+          open_token TEXT UNIQUE NOT NULL,
+          error_message TEXT,
+          sent_at TEXT,
+          delivered_at TEXT,
+          opened_at TEXT,
+          replied_at TEXT,
+          opted_out_at TEXT,
+          is_converted INTEGER NOT NULL DEFAULT 0,
+          converted_at TEXT,
+          conversion_revenue REAL NOT NULL DEFAULT 0.0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS lead_opt_outs (
+          id TEXT PRIMARY KEY,
+          lead_id TEXT,
+          channel TEXT NOT NULL,
+          identifier TEXT NOT NULL,
+          reason TEXT,
+          campaign_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
       `);
     } catch (migrErr) {
+      console.warn("[Neon Sync] Migration warning:", migrErr.message);
     }
     const tombstones = await sql.query("SELECT * FROM deleted_records");
     const tombstoneEntities = /* @__PURE__ */ new Set();
@@ -1872,11 +2020,12 @@ async function syncFromNeonToSQLite(db2) {
           budget, scholarship_required, lead_source, campaign, ad_set, ad, facebook_lead_id,
           lead_created_date, assigned_counselor_id, assigned_counselor_name, lead_status,
           lead_temperature, priority, last_contact_date, next_follow_up_date, remarks,
+          email_opt_out, email_opt_out_date, whatsapp_opt_out, whatsapp_opt_out_date, last_campaign_id, last_campaign_name,
           created_by, updated_by, is_converted_to_student, is_deleted, is_demo, created_at, updated_at
         )
         VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         ON CONFLICT (id) DO UPDATE SET
           student_name = excluded.student_name,
@@ -1887,6 +2036,12 @@ async function syncFromNeonToSQLite(db2) {
           priority = excluded.priority,
           assigned_counselor_id = excluded.assigned_counselor_id,
           assigned_counselor_name = excluded.assigned_counselor_name,
+          email_opt_out = excluded.email_opt_out,
+          email_opt_out_date = excluded.email_opt_out_date,
+          whatsapp_opt_out = excluded.whatsapp_opt_out,
+          whatsapp_opt_out_date = excluded.whatsapp_opt_out_date,
+          last_campaign_id = excluded.last_campaign_id,
+          last_campaign_name = excluded.last_campaign_name,
           updated_at = excluded.updated_at
       `);
       for (const l of leads) {
@@ -1937,6 +2092,12 @@ async function syncFromNeonToSQLite(db2) {
           l.last_contact_date ? String(l.last_contact_date) : null,
           l.next_follow_up_date ? String(l.next_follow_up_date) : null,
           l.remarks,
+          Number(l.email_opt_out) || 0,
+          l.email_opt_out_date ? String(l.email_opt_out_date) : null,
+          Number(l.whatsapp_opt_out) || 0,
+          l.whatsapp_opt_out_date ? String(l.whatsapp_opt_out_date) : null,
+          l.last_campaign_id || null,
+          l.last_campaign_name || null,
           l.created_by,
           l.updated_by,
           l.is_converted_to_student,
@@ -2206,9 +2367,199 @@ async function syncFromNeonToSQLite(db2) {
       }
     } catch (invSyncErr) {
     }
+    try {
+      const broadcasts = await sql.query("SELECT * FROM broadcast_campaigns");
+      if (broadcasts && broadcasts.length > 0) {
+        const upsertBc = db2.prepare(`
+          INSERT INTO broadcast_campaigns (
+            id, name, channel, status, approval_status, rejection_reason,
+            submitted_by, submitted_at, approved_by, approved_at, scheduled_at, executed_at,
+            template_id, subject, content, preview_text, sender_name, sender_email, sender_phone,
+            filter_criteria, total_targeted, sent_count, delivered_count, opened_count, replied_count,
+            bounced_count, opt_out_count, conversions_count, conversions_revenue, created_by, created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            channel = excluded.channel,
+            status = excluded.status,
+            approval_status = excluded.approval_status,
+            rejection_reason = excluded.rejection_reason,
+            submitted_by = excluded.submitted_by,
+            submitted_at = excluded.submitted_at,
+            approved_by = excluded.approved_by,
+            approved_at = excluded.approved_at,
+            scheduled_at = excluded.scheduled_at,
+            executed_at = excluded.executed_at,
+            subject = excluded.subject,
+            content = excluded.content,
+            total_targeted = excluded.total_targeted,
+            sent_count = excluded.sent_count,
+            delivered_count = excluded.delivered_count,
+            opened_count = excluded.opened_count,
+            replied_count = excluded.replied_count,
+            opt_out_count = excluded.opt_out_count,
+            conversions_count = excluded.conversions_count,
+            conversions_revenue = excluded.conversions_revenue,
+            updated_at = excluded.updated_at
+        `);
+        for (const bc of broadcasts) {
+          upsertBc.run(
+            bc.id,
+            bc.name,
+            bc.channel || "Email",
+            bc.status || "DRAFT",
+            bc.approval_status || "DRAFT",
+            bc.rejection_reason,
+            bc.submitted_by,
+            bc.submitted_at ? String(bc.submitted_at) : null,
+            bc.approved_by,
+            bc.approved_at ? String(bc.approved_at) : null,
+            bc.scheduled_at ? String(bc.scheduled_at) : null,
+            bc.executed_at ? String(bc.executed_at) : null,
+            bc.template_id,
+            bc.subject,
+            bc.content,
+            bc.preview_text,
+            bc.sender_name,
+            bc.sender_email,
+            bc.sender_phone,
+            typeof bc.filter_criteria === "string" ? bc.filter_criteria : JSON.stringify(bc.filter_criteria || {}),
+            Number(bc.total_targeted) || 0,
+            Number(bc.sent_count) || 0,
+            Number(bc.delivered_count) || 0,
+            Number(bc.opened_count) || 0,
+            Number(bc.replied_count) || 0,
+            Number(bc.bounced_count) || 0,
+            Number(bc.opt_out_count) || 0,
+            Number(bc.conversions_count) || 0,
+            Number(bc.conversions_revenue) || 0,
+            bc.created_by || "Super Admin",
+            String(bc.created_at),
+            String(bc.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${broadcasts.length} broadcast campaigns from Neon.`);
+      }
+    } catch (bcSyncErr) {
+    }
+    try {
+      const optOuts = await sql.query("SELECT * FROM lead_opt_outs");
+      if (optOuts && optOuts.length > 0) {
+        const upsertOpt = db2.prepare(`
+          INSERT INTO lead_opt_outs (id, lead_id, channel, identifier, reason, campaign_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO NOTHING
+        `);
+        for (const opt of optOuts) {
+          upsertOpt.run(opt.id, opt.lead_id, opt.channel, opt.identifier, opt.reason, opt.campaign_id, String(opt.created_at));
+        }
+        console.log(`[Neon Sync] Synced ${optOuts.length} lead opt-outs from Neon.`);
+      }
+    } catch (optSyncErr) {
+    }
     console.log("\u2705 [Neon Sync] Synchronization complete!");
   } catch (err) {
     console.error("[Neon Sync] Background sync failed:", err.message);
+  }
+}
+async function persistBroadcastToNeon(bc) {
+  if (!sql) return false;
+  try {
+    const filterJson = typeof bc.filter_criteria === "string" ? bc.filter_criteria : JSON.stringify(bc.filter_criteria || {});
+    await sql.query(`
+      INSERT INTO broadcast_campaigns (
+        id, name, channel, status, approval_status, rejection_reason,
+        submitted_by, submitted_at, approved_by, approved_at, scheduled_at, executed_at,
+        template_id, subject, content, preview_text, sender_name, sender_email, sender_phone,
+        filter_criteria, total_targeted, sent_count, delivered_count, opened_count, replied_count,
+        bounced_count, opt_out_count, conversions_count, conversions_revenue, created_by, created_at, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+        $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        channel = EXCLUDED.channel,
+        status = EXCLUDED.status,
+        approval_status = EXCLUDED.approval_status,
+        rejection_reason = EXCLUDED.rejection_reason,
+        submitted_by = EXCLUDED.submitted_by,
+        submitted_at = EXCLUDED.submitted_at,
+        approved_by = EXCLUDED.approved_by,
+        approved_at = EXCLUDED.approved_at,
+        scheduled_at = EXCLUDED.scheduled_at,
+        executed_at = EXCLUDED.executed_at,
+        subject = EXCLUDED.subject,
+        content = EXCLUDED.content,
+        filter_criteria = EXCLUDED.filter_criteria,
+        total_targeted = EXCLUDED.total_targeted,
+        sent_count = EXCLUDED.sent_count,
+        delivered_count = EXCLUDED.delivered_count,
+        opened_count = EXCLUDED.opened_count,
+        replied_count = EXCLUDED.replied_count,
+        opt_out_count = EXCLUDED.opt_out_count,
+        conversions_count = EXCLUDED.conversions_count,
+        conversions_revenue = EXCLUDED.conversions_revenue,
+        updated_at = NOW()
+    `, [
+      bc.id,
+      bc.name,
+      bc.channel || "Email",
+      bc.status || "DRAFT",
+      bc.approval_status || "DRAFT",
+      bc.rejection_reason || null,
+      bc.submitted_by || null,
+      bc.submitted_at ? new Date(bc.submitted_at) : null,
+      bc.approved_by || null,
+      bc.approved_at ? new Date(bc.approved_at) : null,
+      bc.scheduled_at ? new Date(bc.scheduled_at) : null,
+      bc.executed_at ? new Date(bc.executed_at) : null,
+      bc.template_id || null,
+      bc.subject || null,
+      bc.content || "",
+      bc.preview_text || null,
+      bc.sender_name || "Gems Group Services Admissions",
+      bc.sender_email || "admissions@gemsgroupservices.com",
+      bc.sender_phone || "+977 9801234567",
+      filterJson,
+      Number(bc.total_targeted) || 0,
+      Number(bc.sent_count) || 0,
+      Number(bc.delivered_count) || 0,
+      Number(bc.opened_count) || 0,
+      Number(bc.replied_count) || 0,
+      Number(bc.bounced_count) || 0,
+      Number(bc.opt_out_count) || 0,
+      Number(bc.conversions_count) || 0,
+      Number(bc.conversions_revenue) || 0,
+      bc.created_by || "Super Admin"
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Broadcast Persist] Error:", err.message);
+    return false;
+  }
+}
+async function persistLeadOptOutToNeon(opt) {
+  if (!sql) return false;
+  try {
+    await sql.query(`
+      INSERT INTO lead_opt_outs (id, lead_id, channel, identifier, reason, campaign_id, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO NOTHING
+    `, [
+      opt.id,
+      opt.lead_id || null,
+      opt.channel,
+      opt.identifier,
+      opt.reason || null,
+      opt.campaign_id || null
+    ]);
+    return true;
+  } catch (err) {
+    console.error("[Neon Opt-Out Persist] Error:", err.message);
+    return false;
   }
 }
 var connectionString, isNeonEnabled, sql;
@@ -2320,6 +2671,12 @@ function runSafeMigrations() {
   addColumnIfNotExists("leads", "school_college", "TEXT");
   addColumnIfNotExists("leads", "passing_year", "TEXT");
   addColumnIfNotExists("leads", "priority", "TEXT NOT NULL DEFAULT 'MEDIUM'");
+  addColumnIfNotExists("leads", "email_opt_out", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfNotExists("leads", "email_opt_out_date", "TEXT");
+  addColumnIfNotExists("leads", "whatsapp_opt_out", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfNotExists("leads", "whatsapp_opt_out_date", "TEXT");
+  addColumnIfNotExists("leads", "last_campaign_id", "TEXT");
+  addColumnIfNotExists("leads", "last_campaign_name", "TEXT");
   addColumnIfNotExists("google_sheets_connections", "column_mapping", "TEXT");
   addColumnIfNotExists("university_courses", "tuition_fee_per_year", "REAL DEFAULT 0.0");
   addColumnIfNotExists("university_courses", "hostel_fee_per_year", "REAL DEFAULT 0.0");
@@ -2374,6 +2731,89 @@ function runSafeMigrations() {
     console.warn("[Migration Notice] bulk_email_campaigns table:", e.message);
   }
   addColumnIfNotExists("bulk_email_campaigns", "channel", "TEXT NOT NULL DEFAULT 'Email'");
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'Email',
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        approval_status TEXT NOT NULL DEFAULT 'DRAFT',
+        rejection_reason TEXT,
+        submitted_by TEXT,
+        submitted_at TEXT,
+        approved_by TEXT,
+        approved_at TEXT,
+        scheduled_at TEXT,
+        executed_at TEXT,
+        template_id TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
+        subject TEXT,
+        content TEXT NOT NULL,
+        preview_text TEXT,
+        sender_name TEXT DEFAULT 'Gems Group Services Admissions',
+        sender_email TEXT DEFAULT 'admissions@gemsgroupservices.com',
+        sender_phone TEXT DEFAULT '+977 9801234567',
+        filter_criteria TEXT NOT NULL DEFAULT '{}',
+        total_targeted INTEGER NOT NULL DEFAULT 0,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        delivered_count INTEGER NOT NULL DEFAULT 0,
+        opened_count INTEGER NOT NULL DEFAULT 0,
+        replied_count INTEGER NOT NULL DEFAULT 0,
+        bounced_count INTEGER NOT NULL DEFAULT 0,
+        opt_out_count INTEGER NOT NULL DEFAULT 0,
+        conversions_count INTEGER NOT NULL DEFAULT 0,
+        conversions_revenue REAL NOT NULL DEFAULT 0.0,
+        created_by TEXT NOT NULL DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS broadcast_recipients (
+        id TEXT PRIMARY KEY,
+        broadcast_id TEXT NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+        lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        recipient_name TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        address TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'QUEUED',
+        open_token TEXT UNIQUE NOT NULL,
+        error_message TEXT,
+        sent_at TEXT,
+        delivered_at TEXT,
+        opened_at TEXT,
+        replied_at TEXT,
+        opted_out_at TEXT,
+        is_converted INTEGER NOT NULL DEFAULT 0,
+        converted_at TEXT,
+        conversion_revenue REAL NOT NULL DEFAULT 0.0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS lead_opt_outs (
+        id TEXT PRIMARY KEY,
+        lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
+        channel TEXT NOT NULL,
+        identifier TEXT NOT NULL,
+        reason TEXT,
+        campaign_id TEXT REFERENCES broadcast_campaigns(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bc_status ON broadcast_campaigns(status);
+      CREATE INDEX IF NOT EXISTS idx_bc_sched ON broadcast_campaigns(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_bc_channel ON broadcast_campaigns(channel);
+      CREATE INDEX IF NOT EXISTS idx_br_broadcast ON broadcast_recipients(broadcast_id);
+      CREATE INDEX IF NOT EXISTS idx_br_lead ON broadcast_recipients(lead_id);
+      CREATE INDEX IF NOT EXISTS idx_br_token ON broadcast_recipients(open_token);
+      CREATE INDEX IF NOT EXISTS idx_br_status ON broadcast_recipients(status);
+      CREATE INDEX IF NOT EXISTS idx_opt_outs_ident ON lead_opt_outs(identifier);
+      CREATE INDEX IF NOT EXISTS idx_opt_outs_lead ON lead_opt_outs(lead_id);
+      CREATE INDEX IF NOT EXISTS idx_leads_email_opt_out ON leads(email_opt_out);
+      CREATE INDEX IF NOT EXISTS idx_leads_wa_opt_out ON leads(whatsapp_opt_out);
+    `);
+  } catch (e) {
+    console.warn("[Migration Notice] broadcast tables:", e.message);
+  }
 }
 function initDatabase() {
   try {
@@ -5311,6 +5751,1013 @@ var init_aiSalesService = __esm({
   }
 });
 
+// server/services/broadcastService.ts
+var broadcastService_exports = {};
+__export(broadcastService_exports, {
+  approveBroadcastCampaign: () => approveBroadcastCampaign,
+  attributeLeadConversion: () => attributeLeadConversion,
+  checkAndRunScheduledBroadcasts: () => checkAndRunScheduledBroadcasts,
+  createBroadcastCampaign: () => createBroadcastCampaign,
+  deleteBroadcastCampaign: () => deleteBroadcastCampaign,
+  dispatchBroadcastCampaign: () => dispatchBroadcastCampaign,
+  getBroadcastCampaignById: () => getBroadcastCampaignById,
+  getBroadcastCampaigns: () => getBroadcastCampaigns,
+  getBroadcastRecipients: () => getBroadcastRecipients,
+  getLeadBroadcastHistory: () => getLeadBroadcastHistory,
+  getOptOutList: () => getOptOutList,
+  handleLeadOptOut: () => handleLeadOptOut,
+  interpolateMergeTags: () => interpolateMergeTags,
+  previewBroadcastAudience: () => previewBroadcastAudience,
+  rejectBroadcastCampaign: () => rejectBroadcastCampaign,
+  resubscribeLead: () => resubscribeLead,
+  simulateRecipientAction: () => simulateRecipientAction,
+  submitBroadcastForApproval: () => submitBroadcastForApproval,
+  trackClickOrReplyEvent: () => trackClickOrReplyEvent,
+  trackOpenEvent: () => trackOpenEvent,
+  updateBroadcastCampaign: () => updateBroadcastCampaign
+});
+import crypto from "crypto";
+function interpolateMergeTags(text, vars) {
+  if (!text) return "";
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    return vars[key] !== void 0 && vars[key] !== null ? String(vars[key]) : `{{${key}}}`;
+  });
+}
+function buildAudienceQuery(filter, channel) {
+  let where = "WHERE l.is_deleted = 0";
+  const params = [];
+  if (channel === "Email") {
+    where += " AND (l.email IS NOT NULL AND trim(l.email) != '' AND l.email LIKE '%@%')";
+    where += " AND (l.email_opt_out = 0 OR l.email_opt_out IS NULL)";
+  } else if (channel === "WhatsApp") {
+    where += " AND ((l.whatsapp_number IS NOT NULL AND trim(l.whatsapp_number) != '') OR (l.phone IS NOT NULL AND trim(l.phone) != ''))";
+    where += " AND (l.whatsapp_opt_out = 0 OR l.whatsapp_opt_out IS NULL)";
+  } else {
+    where += ` AND (
+      ((l.email IS NOT NULL AND trim(l.email) != '' AND l.email LIKE '%@%') AND (l.email_opt_out = 0 OR l.email_opt_out IS NULL))
+      OR
+      (((l.whatsapp_number IS NOT NULL AND trim(l.whatsapp_number) != '') OR (l.phone IS NOT NULL AND trim(l.phone) != '')) AND (l.whatsapp_opt_out = 0 OR l.whatsapp_opt_out IS NULL))
+    )`;
+  }
+  if (filter.course && filter.course.trim()) {
+    const rawCourse = filter.course.trim().toLowerCase();
+    const compactCourse = rawCourse.replace(/[^a-z0-9]/g, "");
+    where += ` AND (
+      LOWER(COALESCE(l.preferred_course, '')) LIKE ? OR 
+      REPLACE(REPLACE(LOWER(COALESCE(l.preferred_course, '')), '.', ''), ' ', '') LIKE ?
+    )`;
+    params.push(`%${rawCourse}%`, `%${compactCourse || rawCourse}%`);
+  }
+  if (filter.university && filter.university.trim()) {
+    const rawUni = filter.university.trim().toLowerCase();
+    const cleanUni = rawUni.replace(/university|college|institute|campus/g, "").trim();
+    where += ` AND (
+      LOWER(COALESCE(l.preferred_university, '')) LIKE ? OR 
+      LOWER(COALESCE(l.preferred_university, '')) LIKE ?
+    )`;
+    params.push(`%${rawUni}%`, `%${cleanUni || rawUni}%`);
+  }
+  if (filter.status && filter.status.trim()) {
+    const statusVal = filter.status.trim().toLowerCase();
+    where += ` AND (
+      LOWER(COALESCE(l.lead_status, '')) = ? OR 
+      REPLACE(LOWER(COALESCE(l.lead_status, '')), '_', ' ') = ? OR
+      LOWER(COALESCE(l.lead_status, '')) LIKE ?
+    )`;
+    params.push(statusVal, statusVal, `%${statusVal}%`);
+  }
+  if (filter.temperature && filter.temperature.trim()) {
+    const tempVal = filter.temperature.split(" ")[0].trim().toLowerCase();
+    where += ` AND LOWER(COALESCE(l.lead_temperature, '')) = ?`;
+    params.push(tempVal);
+  }
+  if (filter.city && filter.city.trim()) {
+    where += ` AND LOWER(COALESCE(l.city, '')) LIKE ?`;
+    params.push(`%${filter.city.trim().toLowerCase()}%`);
+  }
+  if (filter.country && filter.country.trim()) {
+    where += ` AND LOWER(COALESCE(l.country, '')) LIKE ?`;
+    params.push(`%${filter.country.trim().toLowerCase()}%`);
+  }
+  if (filter.source && filter.source.trim()) {
+    where += ` AND LOWER(COALESCE(l.lead_source, '')) LIKE ?`;
+    params.push(`%${filter.source.trim().toLowerCase()}%`);
+  }
+  if (filter.counselor_id && filter.counselor_id.trim()) {
+    where += ` AND l.assigned_counselor_id = ?`;
+    params.push(filter.counselor_id.trim());
+  }
+  if (filter.from_date && filter.from_date.trim()) {
+    where += ` AND date(l.created_at) >= date(?)`;
+    params.push(filter.from_date.trim());
+  }
+  if (filter.to_date && filter.to_date.trim()) {
+    where += ` AND date(l.created_at) <= date(?)`;
+    params.push(filter.to_date.trim());
+  }
+  return { where, params };
+}
+function previewBroadcastAudience(filter = {}, channel = "Email") {
+  let baseWhere = "WHERE l.is_deleted = 0";
+  const baseParams = [];
+  if (filter.course && filter.course.trim()) {
+    baseWhere += ` AND LOWER(COALESCE(l.preferred_course, '')) LIKE ?`;
+    baseParams.push(`%${filter.course.trim().toLowerCase()}%`);
+  }
+  if (filter.university && filter.university.trim()) {
+    baseWhere += ` AND LOWER(COALESCE(l.preferred_university, '')) LIKE ?`;
+    baseParams.push(`%${filter.university.trim().toLowerCase()}%`);
+  }
+  if (filter.status && filter.status.trim()) {
+    baseWhere += ` AND LOWER(COALESCE(l.lead_status, '')) LIKE ?`;
+    baseParams.push(`%${filter.status.trim().toLowerCase()}%`);
+  }
+  if (filter.temperature && filter.temperature.trim()) {
+    baseWhere += ` AND LOWER(COALESCE(l.lead_temperature, '')) = ?`;
+    baseParams.push(filter.temperature.split(" ")[0].trim().toLowerCase());
+  }
+  if (filter.city && filter.city.trim()) {
+    baseWhere += ` AND LOWER(COALESCE(l.city, '')) LIKE ?`;
+    baseParams.push(`%${filter.city.trim().toLowerCase()}%`);
+  }
+  if (filter.counselor_id && filter.counselor_id.trim()) {
+    baseWhere += ` AND l.assigned_counselor_id = ?`;
+    baseParams.push(filter.counselor_id.trim());
+  }
+  const totalMatching = db.prepare(`SELECT count(*) as count FROM leads l ${baseWhere}`).get(...baseParams).count;
+  const { where, params } = buildAudienceQuery(filter, channel);
+  const totalDeliverable = db.prepare(`SELECT count(*) as count FROM leads l ${where}`).get(...params).count;
+  let optOutWhere = baseWhere;
+  const optOutParams = [...baseParams];
+  if (channel === "Email") {
+    optOutWhere += " AND l.email_opt_out = 1";
+  } else if (channel === "WhatsApp") {
+    optOutWhere += " AND l.whatsapp_opt_out = 1";
+  } else {
+    optOutWhere += " AND (l.email_opt_out = 1 OR l.whatsapp_opt_out = 1)";
+  }
+  const totalOptedOut = db.prepare(`SELECT count(*) as count FROM leads l ${optOutWhere}`).get(...optOutParams).count;
+  const query = `
+    SELECT 
+      l.id, l.student_name, l.first_name, l.last_name, l.email, l.phone, l.whatsapp_number,
+      l.preferred_course, l.preferred_university, l.city, l.lead_status, l.lead_temperature,
+      l.email_opt_out, l.whatsapp_opt_out,
+      c.name as counselor_name, c.phone as counselor_phone
+    FROM leads l
+    LEFT JOIN counselors c ON l.assigned_counselor_id = c.id
+    ${where}
+    ORDER BY l.created_at DESC
+    LIMIT 10
+  `;
+  const sampleLeads = db.prepare(query).all(...params);
+  return {
+    total_matching: totalMatching,
+    total_deliverable: totalDeliverable,
+    total_opted_out: totalOptedOut,
+    sample_leads: sampleLeads
+  };
+}
+function getBroadcastCampaigns(statusFilter) {
+  let query = "SELECT * FROM broadcast_campaigns";
+  const params = [];
+  if (statusFilter && statusFilter !== "ALL") {
+    query += " WHERE status = ?";
+    params.push(statusFilter);
+  }
+  query += " ORDER BY created_at DESC";
+  const rows = db.prepare(query).all(...params);
+  return rows.map((r) => {
+    let filterCriteria = {};
+    try {
+      filterCriteria = typeof r.filter_criteria === "string" ? JSON.parse(r.filter_criteria) : r.filter_criteria || {};
+    } catch {
+      filterCriteria = {};
+    }
+    const sent = Number(r.sent_count) || 0;
+    const delivered = Number(r.delivered_count) || 0;
+    const opened = Number(r.opened_count) || 0;
+    const replied = Number(r.replied_count) || 0;
+    const optOut = Number(r.opt_out_count) || 0;
+    const conversions = Number(r.conversions_count) || 0;
+    const deliveryRate = sent > 0 ? Math.round(delivered / sent * 100) : 0;
+    const openRate = delivered > 0 ? Math.round(opened / delivered * 100) : 0;
+    const replyRate = delivered > 0 ? Math.round(replied / delivered * 100) : 0;
+    const optOutRate = delivered > 0 ? Math.round(optOut / delivered * 100) : 0;
+    return {
+      ...r,
+      filter_criteria: filterCriteria,
+      delivery_rate: deliveryRate,
+      open_rate: openRate,
+      reply_rate: replyRate,
+      opt_out_rate: optOutRate,
+      conversions_count: conversions,
+      conversions_revenue: Number(r.conversions_revenue) || 0
+    };
+  });
+}
+function getBroadcastCampaignById(id) {
+  const r = db.prepare("SELECT * FROM broadcast_campaigns WHERE id = ?").get(id);
+  if (!r) return null;
+  let filterCriteria = {};
+  try {
+    filterCriteria = typeof r.filter_criteria === "string" ? JSON.parse(r.filter_criteria) : r.filter_criteria || {};
+  } catch {
+    filterCriteria = {};
+  }
+  const sent = Number(r.sent_count) || 0;
+  const delivered = Number(r.delivered_count) || 0;
+  const opened = Number(r.opened_count) || 0;
+  const replied = Number(r.replied_count) || 0;
+  const optOut = Number(r.opt_out_count) || 0;
+  const conversions = Number(r.conversions_count) || 0;
+  return {
+    ...r,
+    filter_criteria: filterCriteria,
+    delivery_rate: sent > 0 ? Math.round(delivered / sent * 100) : 0,
+    open_rate: delivered > 0 ? Math.round(opened / delivered * 100) : 0,
+    reply_rate: delivered > 0 ? Math.round(replied / delivered * 100) : 0,
+    opt_out_rate: delivered > 0 ? Math.round(optOut / delivered * 100) : 0,
+    conversions_count: conversions,
+    conversions_revenue: Number(r.conversions_revenue) || 0
+  };
+}
+function createBroadcastCampaign(payload, user = { name: "Super Admin", role: "Super Admin" }) {
+  const userName = user?.name || "Super Admin";
+  const id = payload.id || `bc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const filterJson = JSON.stringify(payload.filter_criteria || {});
+  const audience = previewBroadcastAudience(payload.filter_criteria || {}, payload.channel);
+  const isSubmit = Boolean(payload.submit_for_approval);
+  const status = isSubmit ? "PENDING_APPROVAL" : "DRAFT";
+  const approvalStatus = isSubmit ? "PENDING" : "DRAFT";
+  const broadcastRecord = {
+    id,
+    name: payload.name,
+    channel: payload.channel,
+    status,
+    approval_status: approvalStatus,
+    rejection_reason: null,
+    submitted_by: isSubmit ? userName : null,
+    submitted_at: isSubmit ? now : null,
+    approved_by: null,
+    approved_at: null,
+    scheduled_at: payload.scheduled_at || null,
+    executed_at: null,
+    template_id: payload.template_id || null,
+    subject: payload.subject || null,
+    content: payload.content,
+    preview_text: payload.preview_text || null,
+    sender_name: payload.sender_name || "Gems Group Services Admissions",
+    sender_email: payload.sender_email || "admissions@gemsgroupservices.com",
+    sender_phone: payload.sender_phone || "+977 9801234567",
+    filter_criteria: filterJson,
+    total_targeted: audience.total_deliverable,
+    sent_count: 0,
+    delivered_count: 0,
+    opened_count: 0,
+    replied_count: 0,
+    bounced_count: 0,
+    opt_out_count: 0,
+    conversions_count: 0,
+    conversions_revenue: 0,
+    created_by: userName,
+    created_at: now,
+    updated_at: now
+  };
+  db.prepare(`
+    INSERT INTO broadcast_campaigns (
+      id, name, channel, status, approval_status, rejection_reason,
+      submitted_by, submitted_at, approved_by, approved_at, scheduled_at, executed_at,
+      template_id, subject, content, preview_text, sender_name, sender_email, sender_phone,
+      filter_criteria, total_targeted, sent_count, delivered_count, opened_count, replied_count,
+      bounced_count, opt_out_count, conversions_count, conversions_revenue, created_by, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    broadcastRecord.id,
+    broadcastRecord.name,
+    broadcastRecord.channel,
+    broadcastRecord.status,
+    broadcastRecord.approval_status,
+    broadcastRecord.rejection_reason,
+    broadcastRecord.submitted_by,
+    broadcastRecord.submitted_at,
+    broadcastRecord.approved_by,
+    broadcastRecord.approved_at,
+    broadcastRecord.scheduled_at,
+    broadcastRecord.executed_at,
+    broadcastRecord.template_id,
+    broadcastRecord.subject,
+    broadcastRecord.content,
+    broadcastRecord.preview_text,
+    broadcastRecord.sender_name,
+    broadcastRecord.sender_email,
+    broadcastRecord.sender_phone,
+    broadcastRecord.filter_criteria,
+    broadcastRecord.total_targeted,
+    broadcastRecord.sent_count,
+    broadcastRecord.delivered_count,
+    broadcastRecord.opened_count,
+    broadcastRecord.replied_count,
+    broadcastRecord.bounced_count,
+    broadcastRecord.opt_out_count,
+    broadcastRecord.conversions_count,
+    broadcastRecord.conversions_revenue,
+    broadcastRecord.created_by,
+    broadcastRecord.created_at,
+    broadcastRecord.updated_at
+  );
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(broadcastRecord).catch((e) => console.warn("[Neon Sync] Broadcast persist error:", e.message));
+  }
+  logAudit({
+    userName,
+    action: isSubmit ? "BROADCAST_SUBMITTED" : "BROADCAST_CREATED",
+    entity: "broadcast_campaign",
+    entityId: id,
+    newValue: { name: payload.name, channel: payload.channel, targeted: audience.total_deliverable }
+  });
+  return getBroadcastCampaignById(id);
+}
+function updateBroadcastCampaign(id, payload, user = { name: "Super Admin" }) {
+  const userName = user?.name || "Super Admin";
+  const existing = getBroadcastCampaignById(id);
+  if (!existing) {
+    throw new Error("Broadcast campaign not found");
+  }
+  if (existing.status !== "DRAFT" && existing.status !== "REJECTED" && existing.status !== "SCHEDULED") {
+    throw new Error(`Cannot modify campaign in status '${existing.status}'`);
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const filterCriteria = payload.filter_criteria !== void 0 ? payload.filter_criteria : existing.filter_criteria;
+  const channel = payload.channel || existing.channel;
+  const audience = previewBroadcastAudience(filterCriteria, channel);
+  db.prepare(`
+    UPDATE broadcast_campaigns
+    SET name = COALESCE(?, name),
+        channel = COALESCE(?, channel),
+        template_id = COALESCE(?, template_id),
+        subject = COALESCE(?, subject),
+        content = COALESCE(?, content),
+        preview_text = COALESCE(?, preview_text),
+        sender_name = COALESCE(?, sender_name),
+        sender_email = COALESCE(?, sender_email),
+        sender_phone = COALESCE(?, sender_phone),
+        filter_criteria = ?,
+        scheduled_at = ?,
+        total_targeted = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    payload.name || null,
+    payload.channel || null,
+    payload.template_id || null,
+    payload.subject || null,
+    payload.content || null,
+    payload.preview_text || null,
+    payload.sender_name || null,
+    payload.sender_email || null,
+    payload.sender_phone || null,
+    JSON.stringify(filterCriteria),
+    payload.scheduled_at !== void 0 ? payload.scheduled_at : existing.scheduled_at,
+    audience.total_deliverable,
+    now,
+    id
+  );
+  const updated = getBroadcastCampaignById(id);
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(updated).catch((e) => console.warn("[Neon Sync] Broadcast persist error:", e.message));
+  }
+  return updated;
+}
+function deleteBroadcastCampaign(id, user) {
+  db.prepare("DELETE FROM broadcast_recipients WHERE broadcast_id = ?").run(id);
+  db.prepare("DELETE FROM broadcast_campaigns WHERE id = ?").run(id);
+  if (isNeonEnabled() && sql) {
+    sql.query("DELETE FROM broadcast_recipients WHERE broadcast_id = $1", [id]).catch(() => {
+    });
+    sql.query("DELETE FROM broadcast_campaigns WHERE id = $1", [id]).catch(() => {
+    });
+  }
+  logAudit({
+    userName: user.name,
+    action: "BROADCAST_DELETED",
+    entity: "broadcast_campaign",
+    entityId: id
+  });
+  return true;
+}
+function submitBroadcastForApproval(id, user) {
+  const existing = getBroadcastCampaignById(id);
+  if (!existing) throw new Error("Broadcast campaign not found");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(`
+    UPDATE broadcast_campaigns
+    SET status = 'PENDING_APPROVAL',
+        approval_status = 'PENDING',
+        rejection_reason = NULL,
+        submitted_by = ?,
+        submitted_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(user.name, now, now, id);
+  try {
+    const notifId = `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    db.prepare(`
+      INSERT INTO notifications (id, title, message, type, entity_type, entity_id, created_at)
+      VALUES (?, ?, ?, 'BROADCAST_APPROVAL', 'broadcast_campaign', ?, ?)
+    `).run(
+      notifId,
+      "Broadcast Campaign Pending Approval",
+      `${user.name} submitted campaign "${existing.name}" (${existing.total_targeted} leads) for review and approval.`,
+      id,
+      now
+    );
+  } catch {
+  }
+  const updated = getBroadcastCampaignById(id);
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(updated).catch(() => {
+    });
+  }
+  return updated;
+}
+function approveBroadcastCampaign(id, user) {
+  const existing = getBroadcastCampaignById(id);
+  if (!existing) throw new Error("Broadcast campaign not found");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const isScheduledForFuture = existing.scheduled_at && new Date(existing.scheduled_at) > /* @__PURE__ */ new Date();
+  const nextStatus = isScheduledForFuture ? "SCHEDULED" : "APPROVED";
+  db.prepare(`
+    UPDATE broadcast_campaigns
+    SET status = ?,
+        approval_status = 'APPROVED',
+        rejection_reason = NULL,
+        approved_by = ?,
+        approved_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(nextStatus, user.name, now, now, id);
+  logAudit({
+    userName: user.name,
+    action: "BROADCAST_APPROVED",
+    entity: "broadcast_campaign",
+    entityId: id,
+    newValue: { status: nextStatus, scheduled_at: existing.scheduled_at }
+  });
+  const updated = getBroadcastCampaignById(id);
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(updated).catch(() => {
+    });
+  }
+  return updated;
+}
+function rejectBroadcastCampaign(id, user, reason) {
+  if (!reason || !reason.trim()) {
+    throw new Error("A rejection reason is required");
+  }
+  const existing = getBroadcastCampaignById(id);
+  if (!existing) throw new Error("Broadcast campaign not found");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  db.prepare(`
+    UPDATE broadcast_campaigns
+    SET status = 'REJECTED',
+        approval_status = 'REJECTED',
+        rejection_reason = ?,
+        approved_by = ?,
+        approved_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(reason.trim(), user.name, now, now, id);
+  logAudit({
+    userName: user.name,
+    action: "BROADCAST_REJECTED",
+    entity: "broadcast_campaign",
+    entityId: id,
+    newValue: { reason: reason.trim() }
+  });
+  const updated = getBroadcastCampaignById(id);
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(updated).catch(() => {
+    });
+  }
+  return updated;
+}
+function dispatchBroadcastCampaign(id, performedBy = "Super Admin") {
+  const broadcast = getBroadcastCampaignById(id);
+  if (!broadcast) throw new Error("Broadcast campaign not found");
+  if (broadcast.status === "COMPLETED") {
+    throw new Error("This broadcast campaign has already been completed");
+  }
+  db.prepare("UPDATE broadcast_campaigns SET status = 'SENDING', updated_at = ? WHERE id = ?").run(
+    (/* @__PURE__ */ new Date()).toISOString(),
+    id
+  );
+  const filter = broadcast.filter_criteria || {};
+  const channel = broadcast.channel;
+  const { where, params } = buildAudienceQuery(filter, channel);
+  const targetLeadsQuery = `
+    SELECT 
+      l.*,
+      c.name as counselor_name, c.email as counselor_email, c.phone as counselor_phone
+    FROM leads l
+    LEFT JOIN counselors c ON l.assigned_counselor_id = c.id
+    ${where}
+    ORDER BY l.created_at DESC
+  `;
+  const targetLeads = db.prepare(targetLeadsQuery).all(...params);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let sentCount = 0;
+  let deliveredCount = 0;
+  let failedCount = 0;
+  const samplePreviews = [];
+  const insertRecipient = db.prepare(`
+    INSERT INTO broadcast_recipients (
+      id, broadcast_id, lead_id, recipient_name, channel, address, status,
+      open_token, sent_at, delivered_at, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'DELIVERED', ?, ?, ?, ?)
+  `);
+  const insertMessage = db.prepare(`
+    INSERT INTO messages (
+      id, lead_id, channel, recipient, sender, template_id, content, status, metadata, sent_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'Sent', ?, ?)
+  `);
+  const insertLeadActivity = db.prepare(`
+    INSERT INTO lead_activities (
+      id, lead_id, activity_type, title, description, performed_by, metadata, created_at
+    )
+    VALUES (?, ?, 'BROADCAST_SENT', ?, ?, ?, ?, ?)
+  `);
+  const updateLeadAttribution = db.prepare(`
+    UPDATE leads
+    SET last_campaign_id = ?,
+        last_campaign_name = ?,
+        updated_at = ?
+    WHERE id = ?
+  `);
+  const baseUrl = process.env.PUBLIC_APP_URL || "https://education-sansar-crm.vercel.app";
+  const runDispatchTransaction = db.transaction(() => {
+    for (const lead of targetLeads) {
+      try {
+        const studentName = lead.student_name || lead.first_name || "Student";
+        const firstName = lead.first_name || studentName.split(" ")[0];
+        const deliverEmail = (channel === "Email" || channel === "Both") && lead.email && lead.email.includes("@") && !lead.email_opt_out;
+        const deliverWA = (channel === "WhatsApp" || channel === "Both") && (lead.whatsapp_number || lead.phone) && !lead.whatsapp_opt_out;
+        const channelsToSend = [];
+        if (deliverEmail) channelsToSend.push("Email");
+        if (deliverWA) channelsToSend.push("WhatsApp");
+        if (channelsToSend.length === 0) {
+          if (lead.email && !lead.email_opt_out) channelsToSend.push("Email");
+          else if ((lead.whatsapp_number || lead.phone) && !lead.whatsapp_opt_out) channelsToSend.push("WhatsApp");
+        }
+        for (const destChannel of channelsToSend) {
+          const recipientAddress = destChannel === "WhatsApp" ? lead.whatsapp_number || lead.phone : lead.email;
+          const openToken = "tok_" + crypto.randomUUID().replace(/-/g, "");
+          const unsubscribeLink = `${baseUrl}/api/broadcasts/unsubscribe?token=${openToken}`;
+          const openTrackingPixel = `<img src="${baseUrl}/api/broadcasts/track/open/${openToken}" width="1" height="1" style="display:none" alt="" />`;
+          const mergeVars = {
+            student_name: studentName,
+            first_name: firstName,
+            preferred_course: lead.preferred_course || "Chosen Course",
+            preferred_university: lead.preferred_university || "Partner University",
+            city: lead.city || "Nepal",
+            phone: lead.phone,
+            email: lead.email,
+            counselor_name: lead.counselor_name || "Gems Group Services Admissions",
+            counselor_phone: lead.counselor_phone || "+977 9801234567",
+            counselor_email: lead.counselor_email || "admissions@gemsgroupservices.com",
+            application_id: "APP-" + lead.id.substring(0, 8).toUpperCase(),
+            deadline: "30th November 2026",
+            portal_url: baseUrl,
+            unsubscribe_link: unsubscribeLink,
+            opt_out_instruction: "Reply STOP to unsubscribe from WhatsApp broadcast alerts."
+          };
+          const rawSubject = broadcast.subject || (destChannel === "WhatsApp" ? broadcast.name : "Admissions Notice");
+          const resolvedSubject2 = interpolateMergeTags(rawSubject, mergeVars);
+          let resolvedBody = interpolateMergeTags(broadcast.content, mergeVars);
+          if (destChannel === "Email") {
+            resolvedBody += `
+
+---
+To unsubscribe from future broadcast emails, click here: ${unsubscribeLink}
+${openTrackingPixel}`;
+          } else {
+            resolvedBody += `
+
+Reply STOP to unsubscribe from WhatsApp broadcast alerts.`;
+          }
+          const recipientId = `rec-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          insertRecipient.run(
+            recipientId,
+            id,
+            lead.id,
+            studentName,
+            destChannel,
+            recipientAddress,
+            openToken,
+            now,
+            now,
+            now
+          );
+          const msgId = `msg-bc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          insertMessage.run(
+            msgId,
+            lead.id,
+            destChannel,
+            recipientAddress,
+            broadcast.sender_name || "Gems Group Services Admissions",
+            broadcast.template_id || null,
+            resolvedBody,
+            JSON.stringify({
+              broadcast_id: id,
+              broadcast_name: broadcast.name,
+              subject: resolvedSubject2,
+              open_token: openToken
+            }),
+            now
+          );
+          sentCount++;
+          deliveredCount++;
+          if (samplePreviews.length < 5) {
+            samplePreviews.push({
+              recipient_name: studentName,
+              address: recipientAddress,
+              channel: destChannel,
+              subject: resolvedSubject2,
+              snippet: resolvedBody.substring(0, 160) + "..."
+            });
+          }
+        }
+        const actId = `act-bc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        insertLeadActivity.run(
+          actId,
+          lead.id,
+          `Broadcast: ${broadcast.name} (${channelsToSend.join(" & ")})`,
+          `Received broadcast message regarding ${lead.preferred_course} at ${lead.preferred_university}`,
+          performedBy,
+          JSON.stringify({ broadcast_id: id, broadcast_name: broadcast.name, channels: channelsToSend }),
+          now
+        );
+        updateLeadAttribution.run(id, broadcast.name, now, lead.id);
+      } catch (err) {
+        failedCount++;
+      }
+    }
+    db.prepare(`
+      UPDATE broadcast_campaigns
+      SET status = 'COMPLETED',
+          executed_at = ?,
+          total_targeted = ?,
+          sent_count = ?,
+          delivered_count = ?,
+          bounced_count = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(
+      now,
+      targetLeads.length,
+      sentCount,
+      deliveredCount,
+      failedCount,
+      now,
+      id
+    );
+  });
+  runDispatchTransaction();
+  logAudit({
+    userName: performedBy,
+    action: "BROADCAST_DISPATCHED",
+    entity: "broadcast_campaign",
+    entityId: id,
+    newValue: {
+      targeted: targetLeads.length,
+      sent: sentCount,
+      delivered: deliveredCount,
+      failed: failedCount
+    }
+  });
+  const updatedCampaign = getBroadcastCampaignById(id);
+  if (isNeonEnabled()) {
+    persistBroadcastToNeon(updatedCampaign).catch(() => {
+    });
+  }
+  return {
+    ...updatedCampaign || {},
+    broadcast_id: id,
+    id,
+    total_targeted: targetLeads.length,
+    sent_count: sentCount,
+    delivered_count: deliveredCount,
+    failed_count: failedCount,
+    sample_previews: samplePreviews
+  };
+}
+function checkAndRunScheduledBroadcasts() {
+  try {
+    const scheduled = db.prepare(`
+      SELECT id, name, scheduled_at 
+      FROM broadcast_campaigns 
+      WHERE status = 'SCHEDULED' 
+        AND scheduled_at IS NOT NULL 
+        AND scheduled_at <= datetime('now')
+    `).all();
+    if (scheduled && scheduled.length > 0) {
+      console.log(`[Broadcast Scheduler] Found ${scheduled.length} scheduled broadcast(s) ready to execute.`);
+      for (const bc of scheduled) {
+        try {
+          console.log(`[Broadcast Scheduler] Dispatching broadcast "${bc.name}" (${bc.id})...`);
+          dispatchBroadcastCampaign(bc.id, "Automated Scheduler");
+        } catch (dispatchErr) {
+          console.error(`[Broadcast Scheduler] Failed to dispatch ${bc.id}:`, dispatchErr.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[Broadcast Scheduler] Error during scheduled check:", err.message);
+  }
+}
+function trackOpenEvent(token) {
+  if (!token) return false;
+  try {
+    const recipient = db.prepare("SELECT * FROM broadcast_recipients WHERE open_token = ?").get(token);
+    if (!recipient) return false;
+    if (!recipient.opened_at) {
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      db.prepare(`
+        UPDATE broadcast_recipients
+        SET opened_at = ?,
+            status = 'OPENED'
+        WHERE open_token = ?
+      `).run(now, token);
+      db.prepare(`
+        UPDATE broadcast_campaigns
+        SET opened_count = opened_count + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, recipient.broadcast_id);
+      if (isNeonEnabled() && sql) {
+        sql.query(`UPDATE broadcast_campaigns SET opened_count = opened_count + 1 WHERE id = $1`, [recipient.broadcast_id]).catch(() => {
+        });
+      }
+    }
+    return true;
+  } catch (e) {
+    console.warn("[Track Open Error]", e.message);
+    return false;
+  }
+}
+function trackClickOrReplyEvent(token) {
+  if (!token) return { success: false };
+  try {
+    const recipient = db.prepare("SELECT * FROM broadcast_recipients WHERE open_token = ?").get(token);
+    if (!recipient) return { success: false };
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (!recipient.replied_at) {
+      db.prepare(`
+        UPDATE broadcast_recipients
+        SET replied_at = ?,
+            status = 'REPLIED'
+        WHERE open_token = ?
+      `).run(now, token);
+      db.prepare(`
+        UPDATE broadcast_campaigns
+        SET replied_count = replied_count + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, recipient.broadcast_id);
+      if (isNeonEnabled() && sql) {
+        sql.query(`UPDATE broadcast_campaigns SET replied_count = replied_count + 1 WHERE id = $1`, [recipient.broadcast_id]).catch(() => {
+        });
+      }
+    }
+    return { success: true, broadcast_id: recipient.broadcast_id };
+  } catch (e) {
+    return { success: false };
+  }
+}
+function handleLeadOptOut(params) {
+  try {
+    let leadId = params.leadId;
+    let identifier = params.identifier;
+    let campaignId = params.campaignId;
+    if (params.token) {
+      const rec = db.prepare("SELECT * FROM broadcast_recipients WHERE open_token = ?").get(params.token);
+      if (rec) {
+        leadId = rec.lead_id;
+        identifier = rec.address;
+        campaignId = rec.broadcast_id;
+      }
+    }
+    if (!leadId && identifier) {
+      const found = db.prepare(`
+        SELECT id, email, phone, whatsapp_number 
+        FROM leads 
+        WHERE LOWER(email) = LOWER(?) OR phone = ? OR whatsapp_number = ?
+        LIMIT 1
+      `).get(identifier, identifier, identifier);
+      if (found) {
+        leadId = found.id;
+      }
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const optId = `opt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    if (leadId) {
+      if (params.channel === "Email") {
+        db.prepare("UPDATE leads SET email_opt_out = 1, email_opt_out_date = ?, updated_at = ? WHERE id = ?").run(now, now, leadId);
+      } else {
+        db.prepare("UPDATE leads SET whatsapp_opt_out = 1, whatsapp_opt_out_date = ?, updated_at = ? WHERE id = ?").run(now, now, leadId);
+      }
+      const actId = `act-opt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      db.prepare(`
+        INSERT INTO lead_activities (id, lead_id, activity_type, title, description, performed_by, created_at)
+        VALUES (?, ?, 'OPT_OUT', ?, ?, 'Student Self-Service', ?)
+      `).run(
+        actId,
+        leadId,
+        `Opted out of ${params.channel} Broadcasts`,
+        params.reason || `Student requested to unsubscribe from ${params.channel} updates`,
+        now
+      );
+    }
+    db.prepare(`
+      INSERT INTO lead_opt_outs (id, lead_id, channel, identifier, reason, campaign_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      optId,
+      leadId || null,
+      params.channel,
+      identifier || (leadId ? `lead:${leadId}` : "unknown"),
+      params.reason || "User clicked unsubscribe",
+      campaignId || null,
+      now
+    );
+    if (campaignId) {
+      if (leadId) {
+        db.prepare(`
+          UPDATE broadcast_recipients
+          SET status = 'OPTED_OUT',
+              opted_out_at = ?
+          WHERE broadcast_id = ? AND lead_id = ?
+        `).run(now, campaignId, leadId);
+      }
+      db.prepare(`
+        UPDATE broadcast_campaigns
+        SET opt_out_count = opt_out_count + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, campaignId);
+    }
+    if (isNeonEnabled()) {
+      persistLeadOptOutToNeon({
+        id: optId,
+        lead_id: leadId,
+        channel: params.channel,
+        identifier: identifier || "",
+        reason: params.reason,
+        campaign_id: campaignId
+      }).catch(() => {
+      });
+    }
+    return { success: true, message: `Successfully opted out from ${params.channel} communications.` };
+  } catch (err) {
+    console.error("[Opt Out Error]", err.message);
+    return { success: false, message: err.message };
+  }
+}
+function resubscribeLead(leadId, channel) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (channel === "Email") {
+    db.prepare("UPDATE leads SET email_opt_out = 0, email_opt_out_date = NULL, updated_at = ? WHERE id = ?").run(now, leadId);
+  } else {
+    db.prepare("UPDATE leads SET whatsapp_opt_out = 0, whatsapp_opt_out_date = NULL, updated_at = ? WHERE id = ?").run(now, leadId);
+  }
+  db.prepare("DELETE FROM lead_opt_outs WHERE lead_id = ? AND channel = ?").run(leadId, channel);
+  const actId = `act-resub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  db.prepare(`
+    INSERT INTO lead_activities (id, lead_id, activity_type, title, description, performed_by, created_at)
+    VALUES (?, ?, 'RESUBSCRIBED', ?, ?, 'Admin', ?)
+  `).run(
+    actId,
+    leadId,
+    `Resubscribed to ${channel}`,
+    `Lead preferences updated: Resubscribed to ${channel} communications`,
+    now
+  );
+  return true;
+}
+function getOptOutList() {
+  return db.prepare(`
+    SELECT 
+      o.*,
+      l.student_name, l.phone, l.email, l.city, l.preferred_course, l.preferred_university,
+      b.name as campaign_name
+    FROM lead_opt_outs o
+    LEFT JOIN leads l ON o.lead_id = l.id
+    LEFT JOIN broadcast_campaigns b ON o.campaign_id = b.id
+    ORDER BY o.created_at DESC
+  `).all();
+}
+function getBroadcastRecipients(broadcastId, options) {
+  let query = "SELECT * FROM broadcast_recipients WHERE broadcast_id = ?";
+  const params = [broadcastId];
+  if (options?.status && options.status !== "ALL") {
+    query += " AND status = ?";
+    params.push(options.status);
+  }
+  if (options?.search && options.search.trim()) {
+    query += " AND (recipient_name LIKE ? OR address LIKE ?)";
+    const term = `%${options.search.trim()}%`;
+    params.push(term, term);
+  }
+  const countQuery = `SELECT count(*) as count FROM (${query})`;
+  const total = db.prepare(countQuery).get(...params).count;
+  query += " ORDER BY created_at DESC";
+  if (options?.limit) {
+    query += " LIMIT ? OFFSET ?";
+    params.push(options.limit, options.offset || 0);
+  }
+  const recipients = db.prepare(query).all(...params);
+  return { recipients, total };
+}
+function attributeLeadConversion(leadId, feeAmount) {
+  try {
+    const lead = db.prepare("SELECT id, last_campaign_id FROM leads WHERE id = ?").get(leadId);
+    if (!lead || !lead.last_campaign_id) return false;
+    const campaignId = lead.last_campaign_id;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    db.prepare(`
+      UPDATE broadcast_recipients
+      SET is_converted = 1,
+          converted_at = ?,
+          conversion_revenue = ?
+      WHERE broadcast_id = ? AND lead_id = ?
+    `).run(now, feeAmount, campaignId, leadId);
+    db.prepare(`
+      UPDATE broadcast_campaigns
+      SET conversions_count = conversions_count + 1,
+          conversions_revenue = conversions_revenue + ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(feeAmount, now, campaignId);
+    if (isNeonEnabled() && sql) {
+      sql.query(`
+        UPDATE broadcast_campaigns 
+        SET conversions_count = conversions_count + 1, 
+            conversions_revenue = conversions_revenue + $1 
+        WHERE id = $2
+      `, [feeAmount, campaignId]).catch(() => {
+      });
+    }
+    return true;
+  } catch (err) {
+    console.warn("[Attribution Error]", err.message);
+    return false;
+  }
+}
+function getLeadBroadcastHistory(leadId) {
+  return db.prepare(`
+    SELECT 
+      r.*,
+      b.name as campaign_name,
+      b.subject as campaign_subject,
+      b.created_by as campaign_creator
+    FROM broadcast_recipients r
+    JOIN broadcast_campaigns b ON r.broadcast_id = b.id
+    WHERE r.lead_id = ?
+    ORDER BY r.created_at DESC
+  `).all(leadId);
+}
+function simulateRecipientAction(broadcastId, recipientId, action) {
+  const rec = db.prepare("SELECT * FROM broadcast_recipients WHERE id = ? AND broadcast_id = ?").get(recipientId, broadcastId);
+  if (!rec) throw new Error("Recipient not found");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  if (action === "open") {
+    db.prepare("UPDATE broadcast_recipients SET status = 'OPENED', opened_at = ? WHERE id = ?").run(now, recipientId);
+    db.prepare("UPDATE broadcast_campaigns SET opened_count = opened_count + 1, updated_at = ? WHERE id = ?").run(now, broadcastId);
+  } else if (action === "reply") {
+    db.prepare("UPDATE broadcast_recipients SET status = 'REPLIED', replied_at = ? WHERE id = ?").run(now, recipientId);
+    db.prepare("UPDATE broadcast_campaigns SET replied_count = replied_count + 1, updated_at = ? WHERE id = ?").run(now, broadcastId);
+  } else if (action === "opt_out") {
+    handleLeadOptOut({
+      leadId: rec.lead_id,
+      identifier: rec.address,
+      channel: rec.channel,
+      campaignId: broadcastId,
+      reason: "User simulated opt-out"
+    });
+  }
+  return getBroadcastCampaignById(broadcastId);
+}
+var init_broadcastService = __esm({
+  "server/services/broadcastService.ts"() {
+    "use strict";
+    init_database();
+    init_neon();
+  }
+});
+
 // server/services/leadDistributionEngine.ts
 function parseKeywords(val) {
   if (!val) return [];
@@ -6153,6 +7600,10 @@ function convertLeadToStudent(leadId, performedBy = "System") {
     lead.is_demo
   );
   db.prepare("UPDATE leads SET is_converted_to_student = 1, updated_at = datetime('now') WHERE id = ?").run(leadId);
+  try {
+    attributeLeadConversion(leadId, 5e4);
+  } catch (attrErr) {
+  }
   if (lead.assigned_counselor_id) {
     db.prepare(`
       UPDATE counselors 
@@ -6224,6 +7675,7 @@ var init_leadService = __esm({
     init_database();
     init_neon();
     init_aiSalesService();
+    init_broadcastService();
     init_leadDistributionEngine();
   }
 });
@@ -8794,6 +10246,7 @@ function getUniversityCommissionsSummary() {
 
 // server/routes/api.ts
 init_emailService();
+init_broadcastService();
 init_aiSalesService();
 var apiRouter = Router();
 var cachedBuildInfo = null;
@@ -12521,6 +13974,262 @@ apiRouter.get("/email/campaigns", (req, res) => {
     res.status(500).json({ error: err.message || "Failed to fetch bulk email campaigns" });
   }
 });
+apiRouter.post("/broadcasts/audience/preview", (req, res) => {
+  try {
+    const { filter_criteria, channel = "Email" } = req.body;
+    const preview = previewBroadcastAudience(filter_criteria || {}, channel);
+    res.json(preview);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to compute broadcast audience" });
+  }
+});
+apiRouter.get("/broadcasts", (req, res) => {
+  try {
+    try {
+      checkAndRunScheduledBroadcasts();
+    } catch {
+    }
+    const status = req.query.status || void 0;
+    const broadcasts = getBroadcastCampaigns(status);
+    res.json(broadcasts);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch broadcast campaigns" });
+  }
+});
+apiRouter.get("/broadcasts/:id", (req, res) => {
+  try {
+    const campaign = getBroadcastCampaignById(req.params.id);
+    if (!campaign) {
+      return res.status(404).json({ error: "Broadcast campaign not found" });
+    }
+    res.json(campaign);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch broadcast campaign" });
+  }
+});
+apiRouter.post("/broadcasts", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Super Admin";
+    const userRole = req.headers["x-user-role"] || "Super Admin";
+    const { name, channel, content } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: "Campaign name is required" });
+    }
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: "Message content is required" });
+    }
+    const campaign = createBroadcastCampaign(req.body, { name: userName, role: userRole });
+    res.status(201).json(campaign);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to create broadcast campaign" });
+  }
+});
+apiRouter.put("/broadcasts/:id", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Super Admin";
+    const updated = updateBroadcastCampaign(req.params.id, req.body, { name: userName });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to update broadcast campaign" });
+  }
+});
+apiRouter.delete("/broadcasts/:id", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || "Super Admin";
+    deleteBroadcastCampaign(req.params.id, { name: userName });
+    res.json({ success: true, message: "Broadcast campaign deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to delete broadcast campaign" });
+  }
+});
+apiRouter.post("/broadcasts/:id/submit", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Counselor";
+    const submitted = submitBroadcastForApproval(req.params.id, { name: userName });
+    res.json(submitted);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to submit campaign for approval" });
+  }
+});
+apiRouter.post("/broadcasts/:id/approve", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Super Admin";
+    const userRole = req.headers["x-user-role"] || "Super Admin";
+    const approved = approveBroadcastCampaign(req.params.id, { name: userName, role: userRole });
+    res.json(approved);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to approve campaign" });
+  }
+});
+apiRouter.post("/broadcasts/:id/reject", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Super Admin";
+    const userRole = req.headers["x-user-role"] || "Super Admin";
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: "Rejection reason is required" });
+    }
+    const rejected = rejectBroadcastCampaign(req.params.id, { name: userName, role: userRole }, reason);
+    res.json(rejected);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to reject campaign" });
+  }
+});
+apiRouter.post("/broadcasts/:id/dispatch", (req, res) => {
+  try {
+    const userName = req.headers["x-user-name"] || req.body.performedBy || "Super Admin";
+    const result = dispatchBroadcastCampaign(req.params.id, userName);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to dispatch broadcast campaign" });
+  }
+});
+apiRouter.get("/broadcasts/:id/recipients", (req, res) => {
+  try {
+    const { status, search, limit, offset } = req.query;
+    const recipientsData = getBroadcastRecipients(req.params.id, {
+      status,
+      search,
+      limit: limit ? parseInt(limit, 10) : 50,
+      offset: offset ? parseInt(offset, 10) : 0
+    });
+    res.json(recipientsData);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch broadcast recipients" });
+  }
+});
+apiRouter.post("/broadcasts/:id/simulate", (req, res) => {
+  try {
+    const { recipientId, action } = req.body;
+    if (!recipientId || !action) {
+      return res.status(400).json({ error: "recipientId and action are required" });
+    }
+    const updated = simulateRecipientAction(req.params.id, recipientId, action);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to simulate recipient action" });
+  }
+});
+apiRouter.get("/broadcasts/track/open/:token", (req, res) => {
+  try {
+    trackOpenEvent(req.params.token);
+  } catch {
+  }
+  const pixel = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  res.writeHead(200, {
+    "Content-Type": "image/gif",
+    "Content-Length": pixel.length,
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+  });
+  res.end(pixel);
+});
+apiRouter.get("/broadcasts/track/click/:token", (req, res) => {
+  const { url } = req.query;
+  try {
+    trackClickOrReplyEvent(req.params.token);
+  } catch {
+  }
+  if (url && typeof url === "string") {
+    return res.redirect(url);
+  }
+  res.send("<html><body><h3>Thank you! Your response has been recorded.</h3></body></html>");
+});
+apiRouter.get("/broadcasts/unsubscribe", (req, res) => {
+  const token = req.query.token;
+  const channel = req.query.channel === "WhatsApp" ? "WhatsApp" : "Email";
+  const email = req.query.email;
+  let success = false;
+  let message = "Unsubscribed successfully";
+  try {
+    const result = handleLeadOptOut({
+      token,
+      identifier: email,
+      channel,
+      reason: "Student clicked unsubscribe link in email"
+    });
+    success = result.success;
+    message = result.message;
+  } catch (err) {
+    message = err.message;
+  }
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Unsubscribe Confirmation | Gems Group Services</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: white; border-radius: 16px; padding: 40px; max-width: 480px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01); text-align: center; border: 1px solid #e2e8f0; }
+        .icon { width: 56px; height: 56px; border-radius: 50%; background-color: #ecfdf5; color: #059669; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; }
+        h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin: 0 0 12px; }
+        p { color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
+        .badge { display: inline-block; background-color: #f1f5f9; padding: 6px 14px; border-radius: 9999px; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 24px; }
+        .footer { font-size: 13px; color: #94a3b8; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="icon">\u2713</div>
+        <h1>Preferences Updated</h1>
+        <div class="badge">${channel} Broadcasts</div>
+        <p>${success ? `You have been successfully unsubscribed from ${channel} broadcast announcements. You will no longer receive mass marketing messages from our admissions desk.` : message}</p>
+        <div class="footer">
+          Gems Group Services Admissions Directorate<br>
+          If this was done in error, please contact your education counselor to resubscribe.
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+apiRouter.post("/broadcasts/opt-out", (req, res) => {
+  try {
+    const { leadId, identifier, channel, reason, campaignId } = req.body;
+    if (!channel || !leadId && !identifier) {
+      return res.status(400).json({ error: "channel and (leadId or identifier) are required" });
+    }
+    const result = handleLeadOptOut({
+      leadId,
+      identifier,
+      channel,
+      reason,
+      campaignId
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to record opt-out" });
+  }
+});
+apiRouter.post("/broadcasts/resubscribe", (req, res) => {
+  try {
+    const { leadId, channel } = req.body;
+    if (!leadId || !channel) {
+      return res.status(400).json({ error: "leadId and channel are required" });
+    }
+    const success = resubscribeLead(leadId, channel);
+    res.json({ success, message: `Successfully resubscribed lead to ${channel}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to resubscribe lead" });
+  }
+});
+apiRouter.get("/broadcasts/opt-outs", (req, res) => {
+  try {
+    const optOuts = getOptOutList();
+    res.json(optOuts);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch opt-outs" });
+  }
+});
+apiRouter.get("/leads/:id/broadcast-history", (req, res) => {
+  try {
+    const history = getLeadBroadcastHistory(req.params.id);
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to fetch lead broadcast history" });
+  }
+});
 apiRouter.get("/ai/settings", (req, res) => {
   try {
     const settings = getAISettings();
@@ -12921,6 +14630,14 @@ if (!isVercel2) {
     startStudyInIndiaBackgroundSync2(60);
   } catch (err) {
     console.warn("Study in India background sync init note:", err.message);
+  }
+  try {
+    const { checkAndRunScheduledBroadcasts: checkAndRunScheduledBroadcasts2 } = await Promise.resolve().then(() => (init_broadcastService(), broadcastService_exports));
+    setInterval(() => {
+      checkAndRunScheduledBroadcasts2();
+    }, 30 * 1e3);
+  } catch (err) {
+    console.warn("Broadcast scheduler init note:", err.message);
   }
   const server = app.listen(Number(PORT), "0.0.0.0", () => {
     console.log(`\u{1F680} Gems Group Services CRM Server is LIVE on port ${PORT}:`);

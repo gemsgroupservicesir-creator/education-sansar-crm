@@ -111,6 +111,16 @@ if (!isVercel) {
     console.warn('Study in India background sync init note:', err.message);
   }
 
+  // Periodic Background Broadcast Scheduler Runner (Every 30 seconds)
+  try {
+    const { checkAndRunScheduledBroadcasts } = await import('./services/broadcastService.ts');
+    setInterval(() => {
+      checkAndRunScheduledBroadcasts();
+    }, 30 * 1000);
+  } catch (err: any) {
+    console.warn('Broadcast scheduler init note:', err.message);
+  }
+
   const server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 Gems Group Services CRM Server is LIVE on port ${PORT}:`);
     console.log(`   ➜ Local:   http://localhost:${PORT} / http://127.0.0.1:${PORT}`);

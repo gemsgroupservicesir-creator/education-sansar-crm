@@ -30,7 +30,10 @@ import {
   MapPin,
   ExternalLink,
   Search,
-  X
+  X,
+  ShieldAlert,
+  Smartphone,
+  Send
 } from 'lucide-react';
 import { api } from '../services/api';
 import { Lead, Application, DocumentItem, FollowUp, LeadActivityItem, LeadStatus, UniversityCourse } from '../types';
@@ -51,10 +54,12 @@ export const LeadDetailPage: React.FC = () => {
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [assignmentHistory, setAssignmentHistory] = useState<any[]>([]);
   const [counselors, setCounselors] = useState<any[]>([]);
+  const [broadcastHistory, setBroadcastHistory] = useState<any[]>([]);
+  const [loadingBroadcastHistory, setLoadingBroadcastHistory] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Active tab
-  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'finder' | 'ai-sales' | 'applications' | 'documents' | 'timeline' | 'followups'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'academic' | 'preferences' | 'finder' | 'ai-sales' | 'applications' | 'documents' | 'timeline' | 'followups' | 'broadcasts'>('profile');
 
   // AI Sales Copilot states
   const [aiScoreData, setAiScoreData] = useState<any>(null);
@@ -130,10 +135,40 @@ export const LeadDetailPage: React.FC = () => {
       if (!finderSearch && res.lead?.preferred_course) {
         setFinderSearch(res.lead.preferred_course);
       }
+
+      // Load broadcast history
+      try {
+        const historyData = await api.getLeadBroadcastHistory(id);
+        setBroadcastHistory(Array.isArray(historyData) ? historyData : []);
+      } catch (bhErr) {
+        console.warn('Failed to load lead broadcast history:', bhErr);
+      }
     } catch (err: any) {
       showToast('Error loading student profile: ' + err.message, 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleOptOut = async (channel: 'Email' | 'WhatsApp', currentlyOptedOut: boolean) => {
+    if (!lead) return;
+    try {
+      if (currentlyOptedOut) {
+        await api.resubscribeLead(lead.id, channel);
+        showToast(`Lead successfully resubscribed to ${channel} broadcasts`, 'success');
+      } else {
+        const reason = window.prompt(`Enter reason for opting out of ${channel} broadcasts:`, 'Requested by student via counselor call');
+        if (reason === null) return;
+        await api.optOutLead({
+          leadId: lead.id,
+          channel,
+          reason: reason || 'Counselor marked opt-out'
+        });
+        showToast(`Lead opted out of ${channel} broadcasts`, 'info');
+      }
+      loadLeadDetails();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update opt-out status', 'error');
     }
   };
 
@@ -476,6 +511,26 @@ export const LeadDetailPage: React.FC = () => {
                 <span>·</span>
                 <span>🏛️ {lead.preferred_university}</span>
               </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                {Boolean(lead.email_opt_out) && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3 text-rose-500" />
+                    <span>Email Opt-Out</span>
+                  </span>
+                )}
+                {Boolean(lead.whatsapp_opt_out) && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3 text-rose-500" />
+                    <span>WhatsApp Opt-Out</span>
+                  </span>
+                )}
+                {Boolean(lead.last_campaign_name) && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-indigo-500" />
+                    <span>Campaign: {lead.last_campaign_name}</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -623,6 +678,7 @@ export const LeadDetailPage: React.FC = () => {
           { key: 'documents', label: `Documents (${documents.length})` },
           { key: 'timeline', label: `Communication Timeline (${activities.length})` },
           { key: 'followups', label: `Follow-ups (${followups.length})` },
+          { key: 'broadcasts', label: `📢 Campaigns (${broadcastHistory.length})` },
         ].map(t => (
           <button
             key={t.key}
@@ -1522,6 +1578,261 @@ export const LeadDetailPage: React.FC = () => {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Broadcast Campaigns, Channel Opt-Outs & Attribution */}
+      {activeTab === 'broadcasts' && (
+        <div className="space-y-6">
+          {/* Top Cards: Channel Compliance & Opt-Outs + Attribution */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Email Opt-Out Card */}
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-blue-50 text-blue-700">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">Email Broadcasts</h4>
+                      <p className="text-[11px] text-slate-500">{lead.email || 'No email registered'}</p>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    lead.email_opt_out
+                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    {lead.email_opt_out ? 'Opted Out' : 'Subscribed'}
+                  </span>
+                </div>
+                {lead.email_opt_out ? (
+                  <p className="text-[11px] text-rose-600 bg-rose-50/70 p-2.5 rounded-xl border border-rose-100">
+                    Lead unsubscribed from bulk emails on {lead.email_opt_out_date ? new Date(lead.email_opt_out_date).toLocaleDateString() : 'earlier date'}.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    Lead is active and eligible to receive targeted email campaigns and scholarship announcements.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handleToggleOptOut('Email', Boolean(lead.email_opt_out))}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  lead.email_opt_out
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                    : 'bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700'
+                }`}
+              >
+                {lead.email_opt_out ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Resubscribe to Email Campaigns</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>Mark Email Opt-Out</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* WhatsApp Opt-Out Card */}
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700">
+                      <Smartphone className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">WhatsApp Broadcasts</h4>
+                      <p className="text-[11px] text-slate-500">{lead.whatsapp_number || lead.phone}</p>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    lead.whatsapp_opt_out
+                      ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    {lead.whatsapp_opt_out ? 'Opted Out' : 'Subscribed'}
+                  </span>
+                </div>
+                {lead.whatsapp_opt_out ? (
+                  <p className="text-[11px] text-rose-600 bg-rose-50/70 p-2.5 rounded-xl border border-rose-100">
+                    Lead sent STOP / opted out on {lead.whatsapp_opt_out_date ? new Date(lead.whatsapp_opt_out_date).toLocaleDateString() : 'earlier date'}.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    Lead is active and will receive high-conversion WhatsApp broadcast updates and deadline alerts.
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => handleToggleOptOut('WhatsApp', Boolean(lead.whatsapp_opt_out))}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  lead.whatsapp_opt_out
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                    : 'bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700'
+                }`}
+              >
+                {lead.whatsapp_opt_out ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Resubscribe to WhatsApp Broadcasts</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>Mark WhatsApp Opt-Out</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Campaign Attribution Card */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-50/60 to-purple-50/40 border border-indigo-100 shadow-xs flex flex-col justify-between space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-indigo-100 text-indigo-700">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">Campaign Attribution</h4>
+                    <p className="text-[11px] text-indigo-700 font-semibold">Lead Source &amp; Touchpoint Tracking</p>
+                  </div>
+                </div>
+                <div className="p-3 bg-white/80 rounded-xl border border-indigo-100 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Attributed Campaign</div>
+                  <div className="text-xs font-black text-slate-900 truncate" title={lead.last_campaign_name || 'Direct / Organic'}>
+                    {lead.last_campaign_name || 'None (Direct Ingestion)'}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  When this lead confirms admission and enrolls, conversion revenue is credited to their most recent broadcast touchpoint.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Broadcast Touchpoints History Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs space-y-3 p-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Send className="w-4 h-4 text-indigo-600" />
+                  <span>Broadcast Campaign Touchpoints ({broadcastHistory.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Detailed timeline of every broadcast email and WhatsApp message dispatched to this lead
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadLeadDetails}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                title="Refresh history"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {loadingBroadcastHistory ? (
+              <div className="py-12 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-blue-600" />
+                <span>Loading campaign history...</span>
+              </div>
+            ) : broadcastHistory.length === 0 ? (
+              <div className="py-12 text-center text-xs text-slate-400 space-y-1">
+                <p className="font-semibold text-slate-600">No broadcast campaigns received yet</p>
+                <p className="text-[11px]">When targeted in a broadcast campaign, the delivery, open, and reply details will appear here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
+                    <tr>
+                      <th className="py-2.5 px-3">Campaign</th>
+                      <th className="py-2.5 px-3">Channel</th>
+                      <th className="py-2.5 px-3">Dispatched At</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3 text-center">Opened</th>
+                      <th className="py-2.5 px-3 text-center">Replied</th>
+                      <th className="py-2.5 px-3 text-center">Conversion</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {broadcastHistory.map((item, idx) => (
+                      <tr key={item.id || idx} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-slate-900">{item.campaign_name || 'Broadcast Campaign'}</div>
+                          {item.campaign_id && (
+                            <div className="text-[10px] font-mono text-slate-400">{item.campaign_id}</div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit ${
+                            item.channel === 'WhatsApp'
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-blue-50 text-blue-800 border border-blue-200'
+                          }`}>
+                            {item.channel === 'WhatsApp' ? <Smartphone className="w-3 h-3" /> : <Mail className="w-3 h-3" />}
+                            <span>{item.channel || 'Email'}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-slate-500 text-[11px]">
+                          {item.sent_at ? new Date(item.sent_at).toLocaleString() : 'N/A'}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            item.status === 'REPLIED' ? 'bg-purple-100 text-purple-800' :
+                            item.status === 'OPENED' ? 'bg-emerald-100 text-emerald-800' :
+                            item.status === 'DELIVERED' || item.status === 'SENT' ? 'bg-blue-100 text-blue-800' :
+                            item.status === 'FAILED' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {item.opened_at ? (
+                            <span className="text-emerald-700 font-bold flex items-center justify-center gap-1 text-[11px]" title={`Opened: ${item.opened_at}`}>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Yes</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">-</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {item.replied_at ? (
+                            <span className="text-purple-700 font-bold flex items-center justify-center gap-1 text-[11px]" title={`Replied: ${item.replied_at}`}>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Yes</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">-</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {item.is_converted ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Converted 🎉
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">In Funnel</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

@@ -153,6 +153,12 @@ function runSafeMigrations() {
   addColumnIfNotExists('leads', 'school_college', 'TEXT');
   addColumnIfNotExists('leads', 'passing_year', 'TEXT');
   addColumnIfNotExists('leads', 'priority', "TEXT NOT NULL DEFAULT 'MEDIUM'");
+  addColumnIfNotExists('leads', 'email_opt_out', "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfNotExists('leads', 'email_opt_out_date', "TEXT");
+  addColumnIfNotExists('leads', 'whatsapp_opt_out', "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfNotExists('leads', 'whatsapp_opt_out_date', "TEXT");
+  addColumnIfNotExists('leads', 'last_campaign_id', "TEXT");
+  addColumnIfNotExists('leads', 'last_campaign_name', "TEXT");
 
   // Google Sheets connections
   addColumnIfNotExists('google_sheets_connections', 'column_mapping', 'TEXT');
@@ -221,6 +227,91 @@ function runSafeMigrations() {
     console.warn('[Migration Notice] bulk_email_campaigns table:', e.message);
   }
   addColumnIfNotExists('bulk_email_campaigns', 'channel', "TEXT NOT NULL DEFAULT 'Email'");
+
+  // Broadcast Campaigns & Tracking Tables
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS broadcast_campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'Email',
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        approval_status TEXT NOT NULL DEFAULT 'DRAFT',
+        rejection_reason TEXT,
+        submitted_by TEXT,
+        submitted_at TEXT,
+        approved_by TEXT,
+        approved_at TEXT,
+        scheduled_at TEXT,
+        executed_at TEXT,
+        template_id TEXT REFERENCES message_templates(id) ON DELETE SET NULL,
+        subject TEXT,
+        content TEXT NOT NULL,
+        preview_text TEXT,
+        sender_name TEXT DEFAULT 'Gems Group Services Admissions',
+        sender_email TEXT DEFAULT 'admissions@gemsgroupservices.com',
+        sender_phone TEXT DEFAULT '+977 9801234567',
+        filter_criteria TEXT NOT NULL DEFAULT '{}',
+        total_targeted INTEGER NOT NULL DEFAULT 0,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        delivered_count INTEGER NOT NULL DEFAULT 0,
+        opened_count INTEGER NOT NULL DEFAULT 0,
+        replied_count INTEGER NOT NULL DEFAULT 0,
+        bounced_count INTEGER NOT NULL DEFAULT 0,
+        opt_out_count INTEGER NOT NULL DEFAULT 0,
+        conversions_count INTEGER NOT NULL DEFAULT 0,
+        conversions_revenue REAL NOT NULL DEFAULT 0.0,
+        created_by TEXT NOT NULL DEFAULT 'Super Admin',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS broadcast_recipients (
+        id TEXT PRIMARY KEY,
+        broadcast_id TEXT NOT NULL REFERENCES broadcast_campaigns(id) ON DELETE CASCADE,
+        lead_id TEXT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        recipient_name TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        address TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'QUEUED',
+        open_token TEXT UNIQUE NOT NULL,
+        error_message TEXT,
+        sent_at TEXT,
+        delivered_at TEXT,
+        opened_at TEXT,
+        replied_at TEXT,
+        opted_out_at TEXT,
+        is_converted INTEGER NOT NULL DEFAULT 0,
+        converted_at TEXT,
+        conversion_revenue REAL NOT NULL DEFAULT 0.0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS lead_opt_outs (
+        id TEXT PRIMARY KEY,
+        lead_id TEXT REFERENCES leads(id) ON DELETE SET NULL,
+        channel TEXT NOT NULL,
+        identifier TEXT NOT NULL,
+        reason TEXT,
+        campaign_id TEXT REFERENCES broadcast_campaigns(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bc_status ON broadcast_campaigns(status);
+      CREATE INDEX IF NOT EXISTS idx_bc_sched ON broadcast_campaigns(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_bc_channel ON broadcast_campaigns(channel);
+      CREATE INDEX IF NOT EXISTS idx_br_broadcast ON broadcast_recipients(broadcast_id);
+      CREATE INDEX IF NOT EXISTS idx_br_lead ON broadcast_recipients(lead_id);
+      CREATE INDEX IF NOT EXISTS idx_br_token ON broadcast_recipients(open_token);
+      CREATE INDEX IF NOT EXISTS idx_br_status ON broadcast_recipients(status);
+      CREATE INDEX IF NOT EXISTS idx_opt_outs_ident ON lead_opt_outs(identifier);
+      CREATE INDEX IF NOT EXISTS idx_opt_outs_lead ON lead_opt_outs(lead_id);
+      CREATE INDEX IF NOT EXISTS idx_leads_email_opt_out ON leads(email_opt_out);
+      CREATE INDEX IF NOT EXISTS idx_leads_wa_opt_out ON leads(whatsapp_opt_out);
+    `);
+  } catch (e: any) {
+    console.warn('[Migration Notice] broadcast tables:', e.message);
+  }
 }
 
 import { syncFromNeonToSQLite, isNeonEnabled } from './neon.ts';

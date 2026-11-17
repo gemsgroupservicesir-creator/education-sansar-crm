@@ -2,6 +2,7 @@ import { db, logAudit, logLeadActivity, createNotification } from '../db/databas
 import { isNeonEnabled, persistLeadToNeon } from '../db/neon.ts';
 import type { Lead, Counselor, LeadStatus, LeadTemperature, LeadSource } from '../types/index.ts';
 import { autoDispatchWelcomeOutreach } from './aiSalesService.ts';
+import { attributeLeadConversion } from './broadcastService.ts';
 
 export function normalizePhoneNumber(phone?: string): string {
   if (!phone) return '';
@@ -502,6 +503,11 @@ export function convertLeadToStudent(leadId: string, performedBy: string = 'Syst
 
   // Update lead converted flag
   db.prepare("UPDATE leads SET is_converted_to_student = 1, updated_at = datetime('now') WHERE id = ?").run(leadId);
+
+  // Link attribution back to broadcast campaign if lead received one
+  try {
+    attributeLeadConversion(leadId, 50000.0);
+  } catch (attrErr) {}
 
   // Update counselor total admissions
   if (lead.assigned_counselor_id) {

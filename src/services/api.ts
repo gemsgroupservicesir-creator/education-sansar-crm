@@ -1,3 +1,5 @@
+import { BroadcastCampaign, BroadcastRecipient, LeadOptOut, AudiencePreviewResult } from '../types';
+
 const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:';
 const API_BASE = isFileProtocol 
   ? ((import.meta as any).env?.VITE_API_URL || 'https://education-sansar-crm.vercel.app/api')
@@ -647,6 +649,78 @@ export const api = {
       totalLeadsWithWhatsApp?: number;
       totalTargetLeads?: number;
     }>(`/email/filter-options?channel=${channel}`),
+
+  // Broadcast Campaigns & Multi-Channel Outreach
+  previewBroadcastAudience: (data: { filter_criteria?: any; channel?: string }) =>
+    fetchJson<AudiencePreviewResult>('/broadcasts/audience/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getBroadcastCampaigns: (status?: string) =>
+    fetchJson<BroadcastCampaign[]>(`/broadcasts${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  getBroadcastCampaign: (id: string) =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${id}`),
+  createBroadcastCampaign: (data: any) =>
+    fetchJson<BroadcastCampaign>('/broadcasts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateBroadcastCampaign: (id: string, data: any) =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteBroadcastCampaign: (id: string) =>
+    fetchJson<{ success: boolean; message: string }>(`/broadcasts/${id}`, {
+      method: 'DELETE',
+    }),
+  submitBroadcastForApproval: (id: string, performedBy?: string) =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${id}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
+  approveBroadcastCampaign: (id: string, performedBy?: string) =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
+  rejectBroadcastCampaign: (id: string, reason: string, performedBy?: string) =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, performedBy }),
+    }),
+  dispatchBroadcastCampaign: (id: string, performedBy?: string) =>
+    fetchJson<any>(`/broadcasts/${id}/dispatch`, {
+      method: 'POST',
+      body: JSON.stringify({ performedBy }),
+    }),
+  getBroadcastRecipients: (id: string, params: { status?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.status) q.append('status', params.status);
+    if (params.search) q.append('search', params.search);
+    if (params.limit) q.append('limit', String(params.limit));
+    if (params.offset) q.append('offset', String(params.offset));
+    return fetchJson<{ recipients: BroadcastRecipient[]; total: number }>(`/broadcasts/${id}/recipients?${q.toString()}`);
+  },
+  simulateBroadcastRecipientAction: (broadcastId: string, recipientId: string, action: 'open' | 'reply' | 'opt_out') =>
+    fetchJson<BroadcastCampaign>(`/broadcasts/${broadcastId}/simulate`, {
+      method: 'POST',
+      body: JSON.stringify({ recipientId, action }),
+    }),
+  optOutLead: (data: { leadId?: string; identifier?: string; channel: 'Email' | 'WhatsApp'; reason?: string; campaignId?: string }) =>
+    fetchJson<{ success: boolean; message: string }>('/broadcasts/opt-out', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  resubscribeLead: (leadId: string, channel: 'Email' | 'WhatsApp') =>
+    fetchJson<{ success: boolean; message: string }>('/broadcasts/resubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ leadId, channel }),
+    }),
+  getOptOuts: () =>
+    fetchJson<LeadOptOut[]>('/broadcasts/opt-outs'),
+  getLeadBroadcastHistory: (leadId: string) =>
+    fetchJson<any[]>(`/leads/${leadId}/broadcast-history`),
 
   // AI Sales Copilot & Auto-Outreach
   getAISettings: () => fetchJson<any>('/ai/settings'),

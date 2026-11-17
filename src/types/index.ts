@@ -172,6 +172,12 @@ export interface Lead {
   created_by?: string;
   updated_by?: string;
   is_converted_to_student: number;
+  email_opt_out?: number;
+  email_opt_out_date?: string | null;
+  whatsapp_opt_out?: number;
+  whatsapp_opt_out_date?: string | null;
+  last_campaign_id?: string | null;
+  last_campaign_name?: string | null;
   is_deleted: number;
   is_demo: number;
   created_at: string;
@@ -760,5 +766,114 @@ export interface UniversityCommissionSummary {
   received_amount: number;
   pending_amount: number;
   settlement_status: 'SETTLED' | 'PARTIAL' | 'PENDING';
+}
+
+export type BroadcastChannel = 'Email' | 'WhatsApp' | 'Both';
+export type BroadcastStatus = 
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'SCHEDULED'
+  | 'SENDING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface BroadcastAudienceFilter {
+  course?: string;
+  university?: string;
+  status?: string;
+  temperature?: string;
+  city?: string;
+  country?: string;
+  source?: string;
+  counselor_id?: string;
+  from_date?: string;
+  to_date?: string;
+}
+
+export interface BroadcastCampaign {
+  id: string;
+  name: string;
+  channel: BroadcastChannel;
+  status: BroadcastStatus;
+  approval_status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejection_reason?: string | null;
+  submitted_by?: string | null;
+  submitted_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  scheduled_at?: string | null;
+  executed_at?: string | null;
+  template_id?: string | null;
+  subject?: string | null;
+  content: string;
+  preview_text?: string | null;
+  sender_name?: string;
+  sender_email?: string;
+  sender_phone?: string;
+  filter_criteria: BroadcastAudienceFilter;
+  total_targeted: number;
+  sent_count: number;
+  delivered_count: number;
+  opened_count: number;
+  replied_count: number;
+  bounced_count: number;
+  opt_out_count: number;
+  conversions_count: number;
+  conversions_revenue: number;
+  delivery_rate?: number;
+  open_rate?: number;
+  reply_rate?: number;
+  opt_out_rate?: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BroadcastRecipient {
+  id: string;
+  broadcast_id: string;
+  lead_id: string;
+  recipient_name: string;
+  channel: 'Email' | 'WhatsApp';
+  address: string;
+  status: 'QUEUED' | 'SENT' | 'DELIVERED' | 'OPENED' | 'REPLIED' | 'FAILED' | 'OPTED_OUT';
+  open_token: string;
+  error_message?: string | null;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  opened_at?: string | null;
+  replied_at?: string | null;
+  opted_out_at?: string | null;
+  is_converted: number;
+  converted_at?: string | null;
+  conversion_revenue: number;
+  created_at: string;
+}
+
+export interface LeadOptOut {
+  id: string;
+  lead_id?: string | null;
+  channel: 'Email' | 'WhatsApp';
+  identifier: string;
+  reason?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  student_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  city?: string | null;
+  preferred_course?: string | null;
+  preferred_university?: string | null;
+  created_at: string;
+}
+
+export interface AudiencePreviewResult {
+  total_matching: number;
+  total_deliverable: number;
+  total_opted_out: number;
+  sample_leads: any[];
 }
 
