@@ -544,7 +544,7 @@ export const WhatsAppWebPage: React.FC = () => {
           </div>
 
           <a
-            href="/education-sansar-extension.zip"
+            href="/api/whatsapp-web/extension.zip"
             download="education-sansar-extension.zip"
             className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-105 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-600/20 transition-all shrink-0 cursor-pointer"
             title="Download Karya AI-Style Chrome Extension (.zip) for WhatsApp Web"
@@ -691,7 +691,7 @@ export const WhatsAppWebPage: React.FC = () => {
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <a
-                  href="/education-sansar-extension.zip"
+                  href="/api/whatsapp-web/extension.zip"
                   download="education-sansar-extension.zip"
                   className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/30 transition-all flex items-center gap-2 transform active:scale-95 cursor-pointer"
                 >

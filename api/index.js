@@ -16715,6 +16715,26 @@ apiRouter.get("/chatbot/lead-qualification/:leadId", (req, res) => {
     res.status(500).json({ error: err.message || "Failed to fetch lead qualification" });
   }
 });
+apiRouter.get("/whatsapp-web/extension.zip", (req, res) => {
+  try {
+    const candidatePaths = [
+      path3.join(process.cwd(), "dist", "education-sansar-extension.zip"),
+      path3.join(process.cwd(), "public", "education-sansar-extension.zip"),
+      path3.join(__dirname, "..", "..", "public", "education-sansar-extension.zip"),
+      path3.join(__dirname, "..", "public", "education-sansar-extension.zip")
+    ];
+    for (const p of candidatePaths) {
+      if (fs3.existsSync(p)) {
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader("Content-Disposition", 'attachment; filename="education-sansar-extension.zip"');
+        return fs3.createReadStream(p).pipe(res);
+      }
+    }
+    res.status(404).json({ error: "Chrome extension zip file not found" });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Failed to download extension" });
+  }
+});
 apiRouter.get("/whatsapp-web/session", (req, res) => {
   try {
     const counselorId = req.query.counselorId;
@@ -17055,7 +17075,7 @@ if (process.argv[1]?.endsWith("seed.ts") || process.argv[1]?.endsWith("seed.js")
 init_emailService();
 dotenv2.config();
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path4.dirname(__filename);
+var __dirname2 = path4.dirname(__filename);
 var app = express();
 var PORT = process.env.PORT || 5e3;
 initDatabase();

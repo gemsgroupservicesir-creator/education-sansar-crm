@@ -4956,6 +4956,28 @@ apiRouter.get('/chatbot/lead-qualification/:leadId', (req: Request, res: Respons
 // 35. COUNSELOR WHATSAPP WEB HUB ENDPOINTS
 // ==========================================
 
+// Download Karya AI-style WhatsApp Web Chrome Extension (.zip)
+apiRouter.get('/whatsapp-web/extension.zip', (req: Request, res: Response) => {
+  try {
+    const candidatePaths = [
+      path.join(process.cwd(), 'dist', 'education-sansar-extension.zip'),
+      path.join(process.cwd(), 'public', 'education-sansar-extension.zip'),
+      path.join(__dirname, '..', '..', 'public', 'education-sansar-extension.zip'),
+      path.join(__dirname, '..', 'public', 'education-sansar-extension.zip')
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename="education-sansar-extension.zip"');
+        return fs.createReadStream(p).pipe(res);
+      }
+    }
+    res.status(404).json({ error: 'Chrome extension zip file not found' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to download extension' });
+  }
+});
+
 // Get counselor active WhatsApp session
 apiRouter.get('/whatsapp-web/session', (req: Request, res: Response) => {
   try {

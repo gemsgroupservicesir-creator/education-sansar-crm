@@ -1,10 +1,10 @@
 {
   "version": 2,
-  "buildCommand": "npm run build:client",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/db/**"
+      "includeFiles": "{server/db/**,public/education-sansar-extension.zip,dist/education-sansar-extension.zip}"
     }
   },
   "crons": [
@@ -48,7 +48,7 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|zip|json|woff2?|ttf|eot)).*)",
       "destination": "/index.html"
     }
   ]
