@@ -35,7 +35,10 @@ import {
   Laptop,
   Split,
   FileText,
-  PlusCircle
+  PlusCircle,
+  Download,
+  Puzzle,
+  Zap
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -80,7 +83,7 @@ export const WhatsAppWebPage: React.FC = () => {
   const [requestingPairingCode, setRequestingPairingCode] = useState(false);
 
   // Official WhatsApp Web Integration & Mode Switcher
-  const [activeTabMode, setActiveTabMode] = useState<'official_web' | 'crm_inbox'>('official_web');
+  const [activeTabMode, setActiveTabMode] = useState<'chrome_extension' | 'official_web' | 'crm_inbox'>('chrome_extension');
   const [kbItems, setKbItems] = useState<any[]>([]);
   const [kbLoading, setKbLoading] = useState(false);
   const [kbSearch, setKbSearch] = useState('');
@@ -540,6 +543,16 @@ export const WhatsAppWebPage: React.FC = () => {
             </select>
           </div>
 
+          <a
+            href="/education-sansar-extension.zip"
+            download="education-sansar-extension.zip"
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-105 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-600/20 transition-all shrink-0 cursor-pointer"
+            title="Download Karya AI-Style Chrome Extension (.zip) for WhatsApp Web"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Download Extension (.zip)</span>
+          </a>
+
           <button
             onClick={() => openOfficialWhatsAppWeb('dock')}
             className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:brightness-105 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition-all shrink-0 cursor-pointer"
@@ -591,9 +604,23 @@ export const WhatsAppWebPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Mode Switcher: Official WhatsApp Web (web.whatsapp.com) vs CRM Live Chat Hub */}
+      {/* Mode Switcher: Chrome Extension (Karya AI Style) vs Official WhatsApp Web vs CRM Live Chat Hub */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs">
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+          <button
+            onClick={() => setActiveTabMode('chrome_extension')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTabMode === 'chrome_extension'
+                ? 'bg-amber-500 text-slate-950 shadow-sm shadow-amber-500/25'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Zap className="w-4 h-4 text-amber-700" />
+            <span>⚡ Chrome Extension (Karya AI Style)</span>
+            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
+              NEW
+            </span>
+          </button>
           <button
             onClick={() => setActiveTabMode('official_web')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
@@ -603,7 +630,7 @@ export const WhatsAppWebPage: React.FC = () => {
             }`}
           >
             <Globe className="w-4 h-4" />
-            <span>🌐 Official WhatsApp Web (web.whatsapp.com)</span>
+            <span>🌐 Official WhatsApp Web Portal</span>
           </button>
           <button
             onClick={() => setActiveTabMode('crm_inbox')}
@@ -635,6 +662,320 @@ export const WhatsAppWebPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* SECTION 0: CHROME EXTENSION (KARYA AI STYLE FOR WHATSAPP WEB) */}
+      {activeTabMode === 'chrome_extension' && (
+        <div className="space-y-6">
+          {/* Main Hero Banner */}
+          <div className="bg-gradient-to-br from-slate-900 via-emerald-950 to-teal-950 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-emerald-500/30">
+            {/* Watermark Zap & MessageCircle */}
+            <div className="absolute right-[-20px] bottom-[-20px] text-emerald-500/5 pointer-events-none">
+              <Zap className="w-80 h-80" />
+            </div>
+
+            <div className="relative z-10 max-w-3xl space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-bold">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Karya AI Style Integration for web.whatsapp.com</span>
+                <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-extrabold">Manifest V3</span>
+              </div>
+
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+                Education Sansar WhatsApp Web Copilot (Chrome Extension)
+              </h2>
+
+              <p className="text-xs sm:text-sm text-emerald-100/90 leading-relaxed max-w-2xl">
+                Supercharge WhatsApp Web with an embedded AI Counselor modeled after <strong className="text-white">Karya AI, Cooby, and Wati</strong>. Injects a smart copilot drawer directly into <code className="px-1.5 py-0.5 rounded bg-black/30 font-mono text-emerald-300">web.whatsapp.com</code> to detect active chats, qualify leads, insert knowledge base fee answers into WhatsApp with 1 click, and sync students directly to the CRM Leads tab.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <a
+                  href="/education-sansar-extension.zip"
+                  download="education-sansar-extension.zip"
+                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-amber-500/30 transition-all flex items-center gap-2 transform active:scale-95 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-slate-950" />
+                  <span>Download Chrome Extension (.zip)</span>
+                </a>
+
+                <button
+                  onClick={() => openOfficialWhatsAppWeb('tab')}
+                  className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm backdrop-blur-sm border border-white/15 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4 text-emerald-300" />
+                  <span>Open WhatsApp Web</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText('chrome://extensions');
+                    showToast('📋 Copied chrome://extensions to clipboard! Paste into browser address bar.', 'info');
+                  }}
+                  className="px-4 py-3 rounded-xl bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/50 text-xs sm:text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy chrome://extensions URL</span>
+                </button>
+              </div>
+
+              {/* Key Features Badges */}
+              <div className="pt-2 flex flex-wrap items-center gap-4 text-[11px] text-emerald-200/80 border-t border-white/10">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                  Runs directly inside web.whatsapp.com
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                  1-Click Knowledge Base text insertion
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                  Automatic lead qualification &amp; sync
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 30-Second Quick Installation Guide */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="space-y-0.5">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <Puzzle className="w-4 h-4 text-amber-600" />
+                  <span>How to Install in Google Chrome in 30 Seconds</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Follow these 4 simple steps to activate the Karya AI-style Copilot in your browser:
+                </p>
+              </div>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                100% Free &amp; Offline Ready
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 font-extrabold text-xs flex items-center justify-center shadow-xs">
+                  1
+                </div>
+                <h4 className="font-bold text-xs text-slate-900">Download &amp; Unzip</h4>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Click the <strong>Download (.zip)</strong> button above and extract the zip file to a folder on your computer.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 font-extrabold text-xs flex items-center justify-center shadow-xs">
+                  2
+                </div>
+                <h4 className="font-bold text-xs text-slate-900">Open chrome://extensions</h4>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  In Chrome, go to <code className="px-1 py-0.5 bg-slate-200 rounded font-mono text-[10px]">chrome://extensions</code> and toggle on <strong>Developer mode</strong> in the top-right.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500 text-slate-950 font-extrabold text-xs flex items-center justify-center shadow-xs">
+                  3
+                </div>
+                <h4 className="font-bold text-xs text-slate-900">Click Load Unpacked</h4>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Click the <strong>Load unpacked</strong> button in the top-left and select the extracted <code className="font-mono text-[10px]">education-sansar-extension</code> folder.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white font-extrabold text-xs flex items-center justify-center shadow-xs">
+                  4
+                </div>
+                <h4 className="font-bold text-xs text-slate-900">Open WhatsApp Web</h4>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  Open <code className="px-1 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono text-[10px]">web.whatsapp.com</code> — the <strong>⚡ CRM Copilot</strong> launcher will appear docked on WhatsApp!
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Live Mockup: How it Looks on WhatsApp Web */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="space-y-0.5">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-600" />
+                  <span>Live Interactive Preview: Copilot Docked on web.whatsapp.com</span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  This simulates how the extension embeds the Education Sansar Copilot drawer right beside your WhatsApp chats:
+                </p>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                Interactive Preview
+              </span>
+            </div>
+
+            {/* Browser Mockup Window */}
+            <div className="rounded-2xl border-2 border-slate-300 shadow-md overflow-hidden bg-slate-900">
+              {/* Chrome Browser Header bar */}
+              <div className="bg-slate-800 px-4 py-2.5 flex items-center justify-between text-xs text-slate-300 border-b border-slate-700">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-rose-500 inline-block" />
+                  <span className="w-3 h-3 rounded-full bg-amber-500 inline-block" />
+                  <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
+                  <span className="ml-2 font-mono text-[11px] text-slate-400">Google Chrome</span>
+                </div>
+                <div className="px-4 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 font-mono text-[11px] flex items-center gap-1.5 w-72 justify-center">
+                  <Globe className="w-3 h-3 text-emerald-400" />
+                  <span>https://web.whatsapp.com</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                    Extension Active
+                  </span>
+                </div>
+              </div>
+
+              {/* Inside Browser: Split Screen WhatsApp Web + Education Sansar Copilot */}
+              <div className="grid grid-cols-1 md:grid-cols-12 min-h-[460px]">
+                {/* Left 7 cols: Simulated WhatsApp Web Chat */}
+                <div className="md:col-span-7 bg-[#efeae2] p-4 flex flex-col justify-between border-r border-slate-300/80 relative">
+                  {/* WhatsApp chat header */}
+                  <div className="bg-white p-3 rounded-xl shadow-xs flex items-center justify-between mb-4 border border-slate-200">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
+                        A
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-slate-900">Aryan Thapa</div>
+                        <div className="text-[10px] text-slate-500 font-mono">+977 9801234567 &bull; Online</div>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      WhatsApp Web Chat
+                    </span>
+                  </div>
+
+                  {/* WhatsApp messages */}
+                  <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                    <div className="flex items-start">
+                      <div className="max-w-[85%] bg-white rounded-2xl rounded-tl-none p-3 shadow-2xs border border-slate-200 text-xs space-y-1">
+                        <span className="font-bold text-[10px] text-blue-600">Aryan Thapa</span>
+                        <p className="text-[11px] text-slate-800">
+                          Namaste sir! I scored 84% in 12th PCB and want to apply for MBBS in Bangladesh. My budget is 35 to 45 Lakhs. Which college is best?
+                        </p>
+                        <span className="text-[9px] text-slate-400 block text-right">10:42 AM</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-end justify-end">
+                      <div className="max-w-[85%] bg-[#d9fdd3] rounded-2xl rounded-tr-none p-3 shadow-2xs border border-emerald-200 text-xs space-y-1">
+                        <span className="font-bold text-[10px] text-emerald-700">Prakash Yadav (GGS Counselor)</span>
+                        <p className="text-[11px] text-slate-800">
+                          Namaste Aryan! For 84% PCB and 35-45 Lakh budget, Kumudini Women's Medical College and Dhaka National Medical College are top choices with 5-year full package around $42,000 USD inclusive of hostel &amp; food.
+                        </p>
+                        <div className="flex items-center justify-end gap-1 text-[9px] text-slate-400">
+                          <span>10:43 AM</span>
+                          <CheckCheck className="w-3 h-3 text-blue-500" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* WhatsApp message input box */}
+                  <div className="mt-4 bg-white p-2.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value="Type a message or click 'Insert into WhatsApp' from Copilot drawer..."
+                      className="flex-1 text-xs text-slate-400 bg-transparent outline-none cursor-not-allowed"
+                    />
+                    <button
+                      onClick={() => showToast('💬 This message box is updated when you click "Insert" in the Copilot drawer!', 'info')}
+                      className="p-2 rounded-lg bg-emerald-600 text-white"
+                      title="Send message"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right 5 cols: Simulated Injected Education Sansar Copilot Drawer */}
+                <div className="md:col-span-5 bg-white p-4 flex flex-col justify-between border-l-2 border-emerald-500 shadow-xl space-y-3">
+                  <div className="space-y-3">
+                    {/* Copilot Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-md bg-emerald-600 text-white font-extrabold text-[10px] flex items-center justify-center">
+                          ES
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-xs text-slate-900 leading-tight">GGS WhatsApp Copilot</h4>
+                          <span className="text-[9px] text-emerald-600 font-medium">Injected inside WhatsApp Web</span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                        🎯 85% Score
+                      </span>
+                    </div>
+
+                    {/* Detected Lead Dossier */}
+                    <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-[11px]">Aryan Thapa</span>
+                        <span className="text-[9px] font-extrabold text-rose-700 bg-rose-100 px-1.5 py-0.2 rounded">HOT LEAD</span>
+                      </div>
+                      <div className="text-[10px] text-slate-600 grid grid-cols-2 gap-1 pt-1">
+                        <div>Course: <strong>MBBS</strong></div>
+                        <div>Budget: <strong>35-45 Lakh</strong></div>
+                        <div>Uni: <strong>Kumudini, BD</strong></div>
+                        <div>Marks: <strong>84% PCB</strong></div>
+                      </div>
+                      <button
+                        onClick={() => showToast('🎯 Lead Aryan Thapa promoted to Leads tab as Qualified (85%)!', 'success')}
+                        className="w-full mt-1 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold shadow-xs transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <UserCheck className="w-3 h-3" />
+                        <span>Promote to CRM Leads Tab</span>
+                      </button>
+                    </div>
+
+                    {/* Knowledge Base 1-Click Fast Inserter */}
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+                          <BookOpen className="w-3 h-3 text-emerald-600" />
+                          <span>Knowledge Base Fast Answer</span>
+                        </span>
+                        <span className="text-[9px] text-slate-400">1-Click Insert</span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white border border-slate-200 space-y-1">
+                        <div className="font-bold text-[10px] text-slate-900">🇧🇩 Kumudini Medical College Package</div>
+                        <p className="text-[10px] text-slate-600 line-clamp-2">
+                          Total 5-year MBBS package is $45,000 USD inclusive of college tuition, hostel room, and Indian/Nepali food mess.
+                        </p>
+                        <button
+                          onClick={() => showToast('💬 Inserted: Kumudini Medical College package inserted into WhatsApp message box!', 'success')}
+                          className="w-full mt-1 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Send className="w-2.5 h-2.5" />
+                          <span>Insert into WhatsApp Input</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom Counselor Tag */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                    <span>Counselor: <strong>Prakash Yadav</strong></span>
+                    <span className="text-emerald-600 font-bold">&bull; Auto-Sync Active</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SECTION A: OFFICIAL WHATSAPP WEB INTEGRATION (web.whatsapp.com) */}
       {activeTabMode === 'official_web' && (

@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Education Sansar CRM - WhatsApp Web Copilot",
+  "short_name": "GGS Copilot",
+  "version": "1.0.0",
+  "description": "Karya AI-style WhatsApp Web Copilot: Real-time Lead Qualification, Knowledge Base quick answers, and CRM auto-sync directly inside web.whatsapp.com.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Education Sansar CRM Copilot",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://education-sansar-crm.vercel.app/*",
+    "http://localhost:3000/*",
+    "http://localhost:5173/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

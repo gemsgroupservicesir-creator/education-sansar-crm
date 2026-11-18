@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Education Sansar CRM Copilot</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      width: 340px;
+      padding: 16px;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 14px;
+    }
+    .logo-badge {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #059669, #0d9488);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);
+    }
+    .title-box h1 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.2;
+    }
+    .title-box p {
+      font-size: 11px;
+      color: #64748b;
+    }
+    .status-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      display: inline-block;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.9); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      background: #ecfdf5;
+      color: #047857;
+      border-radius: 9999px;
+      border: 1px solid #a7f3d0;
+    }
+    .form-group {
+      margin-bottom: 12px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 4px;
+    }
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 7px 10px;
+      font-size: 11px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #0f172a;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-group input:focus, .form-group select:focus {
+      border-color: #059669;
+      box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 8px 12px;
+      background: linear-gradient(135deg, #059669, #047857);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity 0.15s;
+      box-shadow: 0 2px 4px rgba(5, 150, 105, 0.25);
+    }
+    .btn-primary:hover {
+      opacity: 0.95;
+    }
+    .actions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .btn-secondary {
+      padding: 7px 10px;
+      background: #ffffff;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.15s;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .btn-secondary:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .toast-msg {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      text-align: center;
+      display: none;
+    }
+    .toast-success {
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-badge">ES</div>
+    <div class="title-box">
+      <h1>Education Sansar CRM</h1>
+      <p>WhatsApp Web Copilot (Karya AI Style)</p>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-indicator">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Connected to CRM</span>
+    </div>
+    <span class="badge" id="badge-version">v1.0.0</span>
+  </div>
+
+  <div class="form-group">
+    <label for="crmUrl">CRM API Endpoint</label>
+    <input type="text" id="crmUrl" placeholder="https://education-sansar-crm.vercel.app">
+  </div>
+
+  <div class="form-group">
+    <label for="counselorName">Counselor Name</label>
+    <input type="text" id="counselorName" placeholder="Prakash Yadav">
+  </div>
+
+  <div class="form-group">
+    <label for="counselorId">Counselor ID</label>
+    <input type="text" id="counselorId" placeholder="c-prakash">
+  </div>
+
+  <button class="btn-primary" id="save-btn">
+    <span>Save Settings</span>
+  </button>
+
+  <div id="toast" class="toast-msg"></div>
+
+  <div class="actions-grid">
+    <a href="https://web.whatsapp.com" target="_blank" class="btn-secondary" id="open-wa-btn">
+      <span>🌐 WhatsApp Web</span>
+    </a>
+    <a href="https://education-sansar-crm.vercel.app/whatsapp-web" target="_blank" class="btn-secondary" id="open-crm-btn">
+      <span>🚀 Open CRM Hub</span>
+    </a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
