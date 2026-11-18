@@ -29,7 +29,13 @@ import {
   UserCheck,
   Sliders,
   X,
-  Loader2
+  Loader2,
+  Copy,
+  Globe,
+  Laptop,
+  Split,
+  FileText,
+  PlusCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -73,7 +79,110 @@ export const WhatsAppWebPage: React.FC = () => {
   const [simulatingInbound, setSimulatingInbound] = useState(false);
   const [requestingPairingCode, setRequestingPairingCode] = useState(false);
 
+  // Official WhatsApp Web Integration & Mode Switcher
+  const [activeTabMode, setActiveTabMode] = useState<'official_web' | 'crm_inbox'>('official_web');
+  const [kbItems, setKbItems] = useState<any[]>([]);
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbSearch, setKbSearch] = useState('');
+  const [copiedKbId, setCopiedKbId] = useState<string | null>(null);
+
+  // Quick Lead Capture & Direct Chat state
+  const [quickLeadName, setQuickLeadName] = useState('');
+  const [quickLeadPhone, setQuickLeadPhone] = useState('');
+  const [quickLeadCourse, setQuickLeadCourse] = useState('MBBS / Medical');
+  const [quickLeadUniversity, setQuickLeadUniversity] = useState('Kumudini Women\'s Medical College, Bangladesh');
+  const [quickLeadBudget, setQuickLeadBudget] = useState('35-45 Lakh');
+  const [quickLeadMarks, setQuickLeadMarks] = useState('80% PCB');
+  const [savingQuickLead, setSavingQuickLead] = useState(false);
+  const [directChatPhone, setDirectChatPhone] = useState('+977 9801234567');
+  const [directChatMessage, setDirectChatMessage] = useState('Namaste! Greetings from Gems Group Services. How can we help you with your university admissions?');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const openOfficialWhatsAppWeb = (mode: 'dock' | 'tab' | 'split' = 'dock') => {
+    if (mode === 'dock') {
+      const width = 1180;
+      const height = 820;
+      const left = Math.max(0, (window.screen.availWidth - width) / 2);
+      const top = Math.max(0, (window.screen.availHeight - height) / 2);
+      window.open(
+        'https://web.whatsapp.com',
+        'OfficialWhatsAppWeb',
+        `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,status=no,location=yes,scrollbars=yes,resizable=yes`
+      );
+    } else if (mode === 'split') {
+      const halfWidth = Math.floor(window.screen.availWidth * 0.55);
+      window.open(
+        'https://web.whatsapp.com',
+        'OfficialWhatsAppWeb_Split',
+        `width=${halfWidth},height=${window.screen.availHeight},left=${window.screen.availWidth - halfWidth},top=0,menubar=no,toolbar=no,status=no,location=yes,scrollbars=yes,resizable=yes`
+      );
+    } else {
+      window.open('https://web.whatsapp.com', '_blank');
+    }
+  };
+
+  const openStudentInOfficialWhatsApp = (phone: string, prefillMessage?: string) => {
+    const clean = phone.replace(/[^0-9]/g, '');
+    const url = `https://web.whatsapp.com/send?phone=${clean}${prefillMessage ? `&text=${encodeURIComponent(prefillMessage)}` : ''}`;
+    window.open(url, 'OfficialWhatsAppWeb');
+  };
+
+  const loadKnowledgeBase = async (query = '') => {
+    setKbLoading(true);
+    try {
+      const res = await api.getKnowledgeBase({ search: query, limit: 12 });
+      setKbItems(res.items || []);
+    } catch (e: any) {
+      console.warn('Failed to load KB:', e);
+    } finally {
+      setKbLoading(false);
+    }
+  };
+
+  const handleCopyKbAnswer = (item: any) => {
+    const textToCopy = `${item.title}\n\n${item.answer}`;
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedKbId(item.id);
+    showToast('📋 Copied answer to clipboard! You can paste directly into WhatsApp Web.', 'success');
+    setTimeout(() => setCopiedKbId(null), 2500);
+  };
+
+  const handleSaveQuickLead = async () => {
+    if (!quickLeadPhone.trim()) {
+      showToast('Please enter student phone number', 'warning');
+      return;
+    }
+    setSavingQuickLead(true);
+    try {
+      const counselor = counselors.find(c => c.id === selectedCounselorId);
+      await api.createLead({
+        student_name: quickLeadName.trim() || 'WhatsApp Student',
+        first_name: (quickLeadName.trim() || 'WhatsApp').split(' ')[0],
+        last_name: (quickLeadName.trim() || 'Student').split(' ').slice(1).join(' ') || 'Inquiry',
+        phone: quickLeadPhone.trim(),
+        whatsapp_number: quickLeadPhone.trim(),
+        preferred_course: quickLeadCourse,
+        preferred_university: quickLeadUniversity,
+        budget: quickLeadBudget,
+        percentage_12th: parseFloat(quickLeadMarks) || 80,
+        lead_source: 'WhatsApp Web',
+        lead_status: 'Qualified',
+        lead_temperature: 'HOT',
+        assigned_counselor_id: selectedCounselorId,
+        assigned_counselor_name: counselor?.name || 'Counselor',
+        remarks: `Captured from Official WhatsApp Web session by ${counselor?.name || 'Counselor'}`
+      });
+      showToast(`🎯 Lead ${quickLeadName || quickLeadPhone} added directly to Leads tab as Qualified!`, 'success');
+      setQuickLeadName('');
+      setQuickLeadPhone('');
+      await loadChats();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save lead', 'error');
+    } finally {
+      setSavingQuickLead(false);
+    }
+  };
 
   // Load Session and Counselors
   const loadSession = async () => {
@@ -145,10 +254,12 @@ export const WhatsAppWebPage: React.FC = () => {
   }, [selectedCounselorId]);
 
   useEffect(() => {
-    if (session?.status === 'CONNECTED') {
-      loadChats();
-    }
+    loadChats();
   }, [session?.status, chatFilter, searchQuery, selectedCounselorId]);
+
+  useEffect(() => {
+    loadKnowledgeBase(kbSearch);
+  }, [kbSearch]);
 
   useEffect(() => {
     if (selectedPhone) {
@@ -430,6 +541,15 @@ export const WhatsAppWebPage: React.FC = () => {
           </div>
 
           <button
+            onClick={() => openOfficialWhatsAppWeb('dock')}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:brightness-105 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-700/20 transition-all shrink-0 cursor-pointer"
+            title="Launch Official WhatsApp Web (web.whatsapp.com) in companion window"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>Launch Official WhatsApp Web</span>
+          </button>
+
+          <button
             onClick={() => setShowInboundTestModal(true)}
             className="px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs"
             title="Simulate incoming student WhatsApp message to test AI auto-counselor and CRM lead capture"
@@ -471,8 +591,366 @@ export const WhatsAppWebPage: React.FC = () => {
         </div>
       </div>
 
-      {/* VIEW 1: DISCONNECTED / QR SCAN SCREEN */}
-      {session?.status !== 'CONNECTED' && (
+      {/* Mode Switcher: Official WhatsApp Web (web.whatsapp.com) vs CRM Live Chat Hub */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+          <button
+            onClick={() => setActiveTabMode('official_web')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTabMode === 'official_web'
+                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-700/20'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Globe className="w-4 h-4" />
+            <span>🌐 Official WhatsApp Web (web.whatsapp.com)</span>
+          </button>
+          <button
+            onClick={() => setActiveTabMode('crm_inbox')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTabMode === 'crm_inbox'
+                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-700/20'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Bot className="w-4 h-4" />
+            <span>💬 CRM Live Chat &amp; AI Auto-Counselor</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openOfficialWhatsAppWeb('dock')}
+            className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Laptop className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Companion Window</span>
+          </button>
+          <button
+            onClick={() => openOfficialWhatsAppWeb('split')}
+            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Split className="w-3.5 h-3.5 text-slate-500" />
+            <span>Split Screen</span>
+          </button>
+        </div>
+      </div>
+
+      {/* SECTION A: OFFICIAL WHATSAPP WEB INTEGRATION (web.whatsapp.com) */}
+      {activeTabMode === 'official_web' && (
+        <div className="space-y-6">
+          {/* Main Launcher Hero Banner */}
+          <div className="bg-gradient-to-br from-emerald-950 via-teal-900 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-emerald-500/20">
+            {/* Background WhatsApp icon watermark */}
+            <div className="absolute right-[-20px] bottom-[-20px] text-white/5 pointer-events-none">
+              <MessageCircle className="w-80 h-80" />
+            </div>
+
+            <div className="relative z-10 max-w-3xl space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
+                <Globe className="w-3.5 h-3.5" />
+                <span>Original Meta WhatsApp Web Client Integration</span>
+              </div>
+
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+                Official WhatsApp Web (web.whatsapp.com)
+              </h2>
+
+              <p className="text-xs sm:text-sm text-emerald-100/80 leading-relaxed max-w-2xl">
+                Open genuine WhatsApp Web in a dedicated companion window or split-screen dock. Scan the QR code directly using your phone camera with <strong className="text-white">zero invalid QR errors</strong>, send voice notes, make audio/video calls, and sync student leads with Education Sansar CRM.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  onClick={() => openOfficialWhatsAppWeb('dock')}
+                  className="px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2 transform active:scale-95 cursor-pointer"
+                >
+                  <Laptop className="w-4 h-4" />
+                  <span>Launch Official WhatsApp Web (Companion Window)</span>
+                </button>
+
+                <button
+                  onClick={() => openOfficialWhatsAppWeb('split')}
+                  className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm backdrop-blur-sm border border-white/15 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Split className="w-4 h-4" />
+                  <span>Open Split-Screen Dock (50% Screen)</span>
+                </button>
+
+                <button
+                  onClick={() => openOfficialWhatsAppWeb('tab')}
+                  className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs sm:text-sm backdrop-blur-sm border border-white/15 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Open in New Tab</span>
+                </button>
+              </div>
+
+              {/* Quick Status Pill */}
+              <div className="pt-2 flex flex-wrap items-center gap-4 text-[11px] text-emerald-200/70 border-t border-white/10">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Genuine Meta WebSocket &amp; Signal Protocol
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Zero 'Invalid QR' errors on phone scan
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Full voice notes &amp; document sharing
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 2-Column Grid: Quick Student WhatsApp Chat Launcher + Counselor Knowledge Base Assistant */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Column 1 (7 cols): Student Quick Chat Launcher */}
+            <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="space-y-0.5">
+                  <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
+                    <span>Direct Student WhatsApp Web Launcher</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Click any student to open official WhatsApp Web directly to their chat with a pre-filled admission message.
+                  </p>
+                </div>
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {chats.length} Students Available
+                </span>
+              </div>
+
+              {/* Custom Direct Phone Chat Box */}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>Start WhatsApp Chat with Any Phone Number:</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <input
+                    type="text"
+                    value={directChatPhone}
+                    onChange={e => setDirectChatPhone(e.target.value)}
+                    placeholder="+977 9801234567"
+                    className="sm:col-span-5 px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono font-bold bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <input
+                    type="text"
+                    value={directChatMessage}
+                    onChange={e => setDirectChatMessage(e.target.value)}
+                    placeholder="Enter pre-filled greeting message..."
+                    className="sm:col-span-7 px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-1.5 overflow-x-auto text-[10px]">
+                    <span className="text-slate-400 font-medium">Quick Template:</span>
+                    {quickTemplates.slice(0, 2).map((t, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setDirectChatMessage(t.text)}
+                        className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-slate-600 hover:text-emerald-700 truncate max-w-[140px] cursor-pointer"
+                        title={t.text}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => openStudentInOfficialWhatsApp(directChatPhone, directChatMessage)}
+                    className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in WhatsApp Web</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Student Leads Table */}
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>Recent Inquiries &amp; Leads:</span>
+                  <span className="text-[11px] text-slate-400 font-normal">Click to launch in WhatsApp Web</span>
+                </div>
+
+                <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1">
+                  {chats.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      No student chats loaded yet.
+                    </div>
+                  ) : (
+                    chats.map(chat => (
+                      <div
+                        key={chat.phone}
+                        className="p-3 rounded-xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30 transition-all flex items-center justify-between gap-3 group"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
+                            {chat.lead_name.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-xs text-slate-900 truncate flex items-center gap-2">
+                              <span>{chat.lead_name}</span>
+                              {chat.is_qualified && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-purple-100 text-purple-800">
+                                  Qualified
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-mono truncate">
+                              {chat.phone} &bull; <span className="text-slate-700 font-medium">{chat.course || 'Admissions Inquiry'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => openStudentInOfficialWhatsApp(chat.phone, `Namaste ${chat.lead_name}! Regarding your interest in ${chat.course || 'higher studies'}, we have updated scholarship and seat availability.`)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 hover:border-emerald-600 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                            title="Open direct WhatsApp Web chat with this student"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>WhatsApp Web</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Column 2 (5 cols): Knowledge Base Copilot + Quick Lead Capture */}
+            <div className="lg:col-span-5 space-y-6">
+              {/* Quick Lead Capture Card */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h3 className="font-bold text-slate-900 text-xs flex items-center gap-2">
+                    <UserCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Capture Lead from WhatsApp Web</span>
+                  </h3>
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    Direct to Leads Tab
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Chatting with a new student on WhatsApp Web? Add them to the CRM Leads tab immediately:
+                </p>
+
+                <div className="space-y-2 text-xs">
+                  <input
+                    type="text"
+                    value={quickLeadName}
+                    onChange={e => setQuickLeadName(e.target.value)}
+                    placeholder="Student Name (e.g. Bipin Adhikari)"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <input
+                    type="text"
+                    value={quickLeadPhone}
+                    onChange={e => setQuickLeadPhone(e.target.value)}
+                    placeholder="WhatsApp Phone (e.g. +977 9812345678)"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={quickLeadCourse}
+                      onChange={e => setQuickLeadCourse(e.target.value)}
+                      placeholder="Course (MBBS / B.Tech / MBA)"
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                    />
+                    <input
+                      type="text"
+                      value={quickLeadBudget}
+                      onChange={e => setQuickLeadBudget(e.target.value)}
+                      placeholder="Budget (e.g. 35 Lakh)"
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSaveQuickLead}
+                    disabled={savingQuickLead}
+                    className="w-full py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-700/20 hover:brightness-105 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {savingQuickLead ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <PlusCircle className="w-3.5 h-3.5" />}
+                    <span>Save to CRM Leads Tab as Qualified</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Knowledge Base Fast-Copy Copilot */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h3 className="font-bold text-slate-900 text-xs flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-emerald-600" />
+                    <span>Knowledge Base Quick-Copy Copilot</span>
+                  </h3>
+                  <span className="text-[10px] text-slate-400">Search &amp; Paste</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Search verified admission packages, fees &amp; eligibility to paste into WhatsApp Web:
+                </p>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={kbSearch}
+                    onChange={e => setKbSearch(e.target.value)}
+                    placeholder="Search fees, MBBS, SRM, scholarships..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div className="max-h-[280px] overflow-y-auto space-y-2 pr-1">
+                  {kbLoading ? (
+                    <div className="py-6 text-center text-xs text-slate-400">Loading knowledge base...</div>
+                  ) : kbItems.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">No knowledge items match search.</div>
+                  ) : (
+                    kbItems.map(item => (
+                      <div
+                        key={item.id}
+                        className="p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-emerald-300 transition-all space-y-1.5 text-xs"
+                      >
+                        <div className="flex items-center justify-between font-bold text-slate-800 text-[11px]">
+                          <span className="truncate pr-2">{item.title}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 shrink-0">
+                            {item.category}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">
+                          {item.answer}
+                        </p>
+                        <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-200/50">
+                          <button
+                            onClick={() => handleCopyKbAnswer(item)}
+                            className="px-2 py-1 rounded-md bg-white border border-slate-200 hover:border-emerald-500 text-slate-700 hover:text-emerald-700 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                          >
+                            {copiedKbId === item.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedKbId === item.id ? 'Copied!' : 'Copy Answer'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION B: CRM LIVE CHAT & AI AUTO-COUNSELOR (When activeTabMode === 'crm_inbox') */}
+      {activeTabMode === 'crm_inbox' && (
+        <>
+          {/* VIEW 1: DISCONNECTED / QR SCAN SCREEN */}
+          {session?.status !== 'CONNECTED' && (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 sm:p-10 max-w-4xl mx-auto space-y-6">
           <div className="text-center space-y-2 max-w-2xl mx-auto">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
@@ -881,6 +1359,15 @@ export const WhatsAppWebPage: React.FC = () => {
 
                     <div className="flex items-center gap-2">
                       <button
+                        onClick={() => openStudentInOfficialWhatsApp(selectedPhone, inputMessage)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                        title="Open this student conversation directly in official WhatsApp Web (web.whatsapp.com)"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open in WhatsApp Web</span>
+                      </button>
+
+                      <button
                         onClick={handlePromoteLead}
                         className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
                         title="Ensure lead is active in the CRM Leads Tab with captured details"
@@ -1163,6 +1650,9 @@ export const WhatsAppWebPage: React.FC = () => {
           </div>
         </div>
       )}
+        </>
+      )}
+
       {/* Test Inbound Student Message Modal */}
       {showInboundTestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
