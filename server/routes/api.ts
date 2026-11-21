@@ -4959,17 +4959,20 @@ apiRouter.get('/chatbot/lead-qualification/:leadId', (req: Request, res: Respons
 // Download Karya AI-style WhatsApp Web Chrome Extension (.zip)
 apiRouter.get('/whatsapp-web/extension.zip', (req: Request, res: Response) => {
   try {
+    const cwd = process.cwd();
     const candidatePaths = [
-      path.join(process.cwd(), 'dist', 'education-sansar-extension.zip'),
-      path.join(process.cwd(), 'public', 'education-sansar-extension.zip'),
-      path.join(__dirname, '..', '..', 'public', 'education-sansar-extension.zip'),
-      path.join(__dirname, '..', 'public', 'education-sansar-extension.zip')
+      path.join(cwd, 'dist', 'education-sansar-extension.zip'),
+      path.join(cwd, 'public', 'education-sansar-extension.zip'),
+      path.resolve('dist', 'education-sansar-extension.zip'),
+      path.resolve('public', 'education-sansar-extension.zip'),
+      path.resolve('education-sansar-extension.zip')
     ];
     for (const p of candidatePaths) {
       if (fs.existsSync(p)) {
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', 'attachment; filename="education-sansar-extension.zip"');
-        return fs.createReadStream(p).pipe(res);
+        const fileBuffer = fs.readFileSync(p);
+        return res.send(fileBuffer);
       }
     }
     res.status(404).json({ error: 'Chrome extension zip file not found' });
