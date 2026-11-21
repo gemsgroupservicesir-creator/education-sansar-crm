@@ -166,6 +166,7 @@ import {
   promoteLeadToActive,
   handleIncomingWhatsAppMessage
 } from '../services/whatsappWebService.ts';
+import { extensionZipBase64 } from '../services/extensionZipData.ts';
 
 export const apiRouter = Router();
 
@@ -4959,23 +4960,11 @@ apiRouter.get('/chatbot/lead-qualification/:leadId', (req: Request, res: Respons
 // Download Karya AI-style WhatsApp Web Chrome Extension (.zip)
 apiRouter.get('/whatsapp-web/extension.zip', (req: Request, res: Response) => {
   try {
-    const cwd = process.cwd();
-    const candidatePaths = [
-      path.join(cwd, 'dist', 'education-sansar-extension.zip'),
-      path.join(cwd, 'public', 'education-sansar-extension.zip'),
-      path.resolve('dist', 'education-sansar-extension.zip'),
-      path.resolve('public', 'education-sansar-extension.zip'),
-      path.resolve('education-sansar-extension.zip')
-    ];
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', 'attachment; filename="education-sansar-extension.zip"');
-        const fileBuffer = fs.readFileSync(p);
-        return res.send(fileBuffer);
-      }
-    }
-    res.status(404).json({ error: 'Chrome extension zip file not found' });
+    const buffer = Buffer.from(extensionZipBase64, 'base64');
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="education-sansar-extension.zip"');
+    res.setHeader('Content-Length', buffer.length.toString());
+    return res.send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to download extension' });
   }
