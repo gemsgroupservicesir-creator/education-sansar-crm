@@ -5509,6 +5509,7 @@ __export(integrationService_exports, {
   exportLeadToGoogleSheet: () => exportLeadToGoogleSheet,
   fetchLiveGoogleSheetData: () => fetchLiveGoogleSheetData,
   fetchMetaLeadGenData: () => fetchMetaLeadGenData,
+  formatMetaGraphError: () => formatMetaGraphError,
   getAllGoogleSheetConnections: () => getAllGoogleSheetConnections,
   getGoogleAppsScriptTemplate: () => getGoogleAppsScriptTemplate,
   getMetaConfig: () => getMetaConfig,
@@ -5519,6 +5520,7 @@ __export(integrationService_exports, {
   parseGoogleSheetUrl: () => parseGoogleSheetUrl,
   parseMetaFieldData: () => parseMetaFieldData,
   processInboundWhatsAppMessage: () => processInboundWhatsAppMessage,
+  sanitizeMetaToken: () => sanitizeMetaToken,
   sendWhatsAppMessage: () => sendWhatsAppMessage,
   syncAllActiveGoogleSheets: () => syncAllActiveGoogleSheets,
   syncLiveGoogleSheetLeads: () => syncLiveGoogleSheetLeads,
@@ -5597,20 +5599,80 @@ async function fetchMetaLeadGenData(leadgenId, accessToken) {
   }
   return data;
 }
+function sanitizeMetaToken(rawToken) {
+  if (!rawToken) return "";
+  let token = rawToken.trim();
+  if (token.toLowerCase().startsWith("bearer ")) {
+    token = token.slice(7).trim();
+  }
+  if (token.startsWith('"') && token.endsWith('"') || token.startsWith("'") && token.endsWith("'")) {
+    token = token.slice(1, -1).trim();
+  }
+  token = token.replace(/[\r\n\t\s\u00A0\u200B]/g, "");
+  return token;
+}
+function formatMetaGraphError(error) {
+  if (!error) return "Unknown error validating credentials with Meta Graph API";
+  const msg = typeof error === "string" ? error : error.message || JSON.stringify(error);
+  const code = error.code;
+  const subcode = error.error_subcode;
+  if (msg.toLowerCase().includes("bad signature") || code === 190 || subcode === 460) {
+    return 'Verification Check Failed: "Bad signature" (Error Code 190). Meta rejected the token cryptographic signature. Common causes: 1) The token was partially copied or truncated (Meta access tokens start with "EAA..." and are typically 150-250+ characters long); 2) You pasted an App Secret (32 hex characters) instead of an Access Token; 3) The 24-hour temporary test token expired; or 4) The App Secret was reset. Solution: Copy a fresh Permanent System User Access Token from Meta Business Suite > Business Settings > System Users with "whatsapp_business_messaging" and "whatsapp_business_management" permissions.';
+  }
+  if (code === 100) {
+    return `Meta Graph API Error: ${msg}. Please check that your Phone Number ID / Page ID is correct and belongs to this WhatsApp/Meta account.`;
+  }
+  return msg;
+}
 async function verifyMetaCredentials(params) {
   try {
-    const token = params.pageAccessToken;
-    if (!token) return { valid: false, error: "Page Access Token is required" };
-    const endpoint = params.pageId ? `https://graph.facebook.com/v21.0/${encodeURIComponent(params.pageId)}?fields=id,name&access_token=${encodeURIComponent(token)}` : `https://graph.facebook.com/v21.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`;
-    const res = await fetch(endpoint);
+    const rawToken = params.pageAccessToken;
+    if (!rawToken || !rawToken.trim()) return { valid: false, error: "Page Access Token is required" };
+    const token = sanitizeMetaToken(rawToken);
+    const startsProperly = token.startsWith("EAA");
+    const tokenLength = token.length;
+    const tokenPrefix = token.substring(0, 6) + "...";
+    if (!startsProperly && tokenLength === 32 && /^[a-f0-9]+$/i.test(token)) {
+      return {
+        valid: false,
+        error: 'Verification Check Failed: You have entered an App Secret (32 hex characters) instead of a Page Access Token! Please copy a Page Access Token starting with "EAA..." from Graph API Explorer or Meta Business Suite.',
+        details: { tokenLength, startsProperly: false, tokenPrefix }
+      };
+    }
+    if (tokenLength < 40) {
+      return {
+        valid: false,
+        error: `Verification Check Failed: The token is only ${tokenLength} characters long and appears truncated. Meta Page Access Tokens start with "EAA..." and are typically 150-250+ characters long.`,
+        details: { tokenLength, startsProperly, tokenPrefix }
+      };
+    }
+    const endpoint = params.pageId ? `https://graph.facebook.com/v21.0/${encodeURIComponent(params.pageId.trim())}?fields=id,name` : `https://graph.facebook.com/v21.0/me?fields=id,name`;
+    const res = await fetch(endpoint, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json"
+      }
+    });
     const data = await res.json();
     if (data.error) {
-      return { valid: false, error: data.error.message || "Token verification failed" };
+      return {
+        valid: false,
+        error: formatMetaGraphError(data.error),
+        details: { tokenLength, startsProperly, tokenPrefix }
+      };
     }
     const targetPageId = data.id;
     let forms = [];
     try {
-      const formsRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(targetPageId)}/leadgen_forms?fields=id,name,status,created_time&access_token=${encodeURIComponent(token)}`);
+      const formsRes = await fetch(
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(targetPageId)}/leadgen_forms?fields=id,name,status,created_time`,
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Accept": "application/json"
+          }
+        }
+      );
       const formsData = await formsRes.json();
       if (Array.isArray(formsData.data)) {
         forms = formsData.data;
@@ -5622,7 +5684,8 @@ async function verifyMetaCredentials(params) {
       pageName: data.name,
       pageId: data.id,
       leadgenFormsCount: forms.length,
-      forms: forms.slice(0, 10)
+      forms: forms.slice(0, 10),
+      details: { tokenLength, startsProperly, tokenPrefix }
     };
   } catch (err) {
     return { valid: false, error: err.message || "Failed to verify token with Meta Graph API" };
@@ -5793,23 +5856,54 @@ async function verifyWhatsAppCredentials(params) {
     if (!permanentAccessToken || !permanentAccessToken.trim()) {
       return { valid: false, error: "Permanent System User Access Token is required. Please paste your Meta Access Token." };
     }
-    const token = permanentAccessToken.trim();
-    const phoneId = phoneNumberId.trim();
+    const token = sanitizeMetaToken(permanentAccessToken);
+    const phoneId = phoneNumberId.trim().replace(/[^0-9]/g, "");
+    const startsProperly = token.startsWith("EAA");
+    const tokenLength = token.length;
+    const tokenPrefix = token.substring(0, 6) + "...";
+    if (!startsProperly && tokenLength === 32 && /^[a-f0-9]+$/i.test(token)) {
+      return {
+        valid: false,
+        error: 'Verification Check Failed: You have entered an App Secret (32 hex characters) instead of a WhatsApp Access Token! WhatsApp Cloud API requires a System User Access Token starting with "EAA..." generated from Meta Business Suite > System Users.',
+        details: { tokenLength, startsProperly: false, tokenPrefix }
+      };
+    }
+    if (tokenLength < 40) {
+      return {
+        valid: false,
+        error: `Verification Check Failed: The token is only ${tokenLength} characters long and appears truncated. Meta WhatsApp Access Tokens start with "EAA..." and are typically 150-250+ characters long.`,
+        details: { tokenLength, startsProperly, tokenPrefix }
+      };
+    }
     const phoneRes = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status&access_token=${encodeURIComponent(token)}`
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status`,
+      {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Accept": "application/json"
+        }
+      }
     );
     const phoneData = await phoneRes.json();
     if (phoneData.error) {
       return {
         valid: false,
-        error: phoneData.error.message || `Meta Graph API returned error code ${phoneData.error.code}`
+        error: formatMetaGraphError(phoneData.error),
+        details: { tokenLength, startsProperly, tokenPrefix }
       };
     }
     let wabaName;
     if (wabaId && wabaId.trim()) {
+      const cleanWaba = wabaId.trim().replace(/[^0-9]/g, "");
       try {
         const wabaRes = await fetch(
-          `https://graph.facebook.com/v21.0/${encodeURIComponent(wabaId.trim())}?fields=id,name&access_token=${encodeURIComponent(token)}`
+          `https://graph.facebook.com/v21.0/${encodeURIComponent(cleanWaba)}?fields=id,name`,
+          {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+              "Accept": "application/json"
+            }
+          }
         );
         const wabaData = await wabaRes.json();
         if (wabaData && wabaData.name) {
@@ -5824,7 +5918,8 @@ async function verifyWhatsAppCredentials(params) {
       displayPhoneNumber: phoneData.display_phone_number || phoneId,
       qualityRating: phoneData.quality_rating || "GREEN",
       codeVerificationStatus: phoneData.code_verification_status || "VERIFIED",
-      wabaName
+      wabaName,
+      details: { tokenLength, startsProperly, tokenPrefix }
     };
   } catch (err) {
     return {
@@ -5860,10 +5955,11 @@ async function sendWhatsAppMessage(params) {
   if (hasLiveCredentials) {
     try {
       const cleanPhone = params.recipientPhone.replace(/[^0-9]/g, "");
-      const waRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId.trim())}/messages`, {
+      const sanitizedWaToken = sanitizeMetaToken(cfg.permanentAccessToken);
+      const waRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId.trim().replace(/[^0-9]/g, ""))}/messages`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${cfg.permanentAccessToken.trim()}`,
+          "Authorization": `Bearer ${sanitizedWaToken}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({

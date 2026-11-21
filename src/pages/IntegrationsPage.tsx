@@ -2264,8 +2264,28 @@ export const IntegrationsPage: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <div className="text-[11px] text-rose-700 font-mono">
-                          {metaTokenTestResult.error}
+                        <div className="space-y-3 pt-1">
+                          <div className="text-[11px] text-rose-700 font-semibold leading-relaxed">
+                            {metaTokenTestResult.error}
+                          </div>
+
+                          {metaTokenTestResult.details && (
+                            <div className="p-2.5 rounded-lg bg-rose-100/70 border border-rose-200 text-[11px] space-y-1 font-mono">
+                              <div className="font-bold font-sans text-rose-900">Token Diagnostics:</div>
+                              <div>Length: <strong>{metaTokenTestResult.details.tokenLength} characters</strong> {metaTokenTestResult.details.tokenLength < 50 ? '(⚠️ Too short for Meta token)' : '(Normal length)'}</div>
+                              <div>Starts with "EAA": <strong>{metaTokenTestResult.details.startsProperly ? '✅ Yes' : '❌ No (Tokens must start with EAA...)'}</strong></div>
+                            </div>
+                          )}
+
+                          <div className="p-3 bg-white rounded-lg border border-rose-200 text-[11px] text-gray-700 space-y-1.5 font-sans">
+                            <div className="font-bold text-gray-900">
+                              💡 How to Fix "Bad signature" for Facebook Page Token:
+                            </div>
+                            <ul className="list-disc pl-4 space-y-1 text-gray-600">
+                              <li>Ensure you copied the entire <strong>Page Access Token</strong> (starting with <code className="font-mono bg-gray-100 px-1 rounded">EAA...</code>) without missing any characters.</li>
+                              <li>Do not paste the App Secret or User Token; generate a Page Access Token with <code className="font-mono bg-gray-100 px-1 rounded">pages_show_list</code> and <code className="font-mono bg-gray-100 px-1 rounded">leads_retrieval</code>.</li>
+                            </ul>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2920,9 +2940,44 @@ export const IntegrationsPage: React.FC = () => {
                       )}
                     </div>
                   ) : (
-                    <p className="text-xs text-red-700 font-medium">
-                      {waTokenTestResult.error}
-                    </p>
+                    <div className="space-y-3 pt-1">
+                      <p className="text-xs text-red-700 font-semibold leading-relaxed">
+                        {waTokenTestResult.error}
+                      </p>
+
+                      {waTokenTestResult.details && (
+                        <div className="p-3 rounded-xl bg-red-100/70 border border-red-200 text-[11px] space-y-1 font-mono">
+                          <div className="font-bold font-sans text-red-900">Token Diagnostics:</div>
+                          <div>Token Length: <strong>{waTokenTestResult.details.tokenLength} characters</strong> {waTokenTestResult.details.tokenLength < 50 ? '(⚠️ Too short — full token was likely not copied)' : '(Length looks normal)'}</div>
+                          <div>Starts with "EAA": <strong>{waTokenTestResult.details.startsProperly ? '✅ Yes' : '❌ No (Tokens must start with EAA...)'}</strong></div>
+                          <div>Token Prefix: <strong>{waTokenTestResult.details.tokenPrefix}</strong></div>
+                        </div>
+                      )}
+
+                      <div className="p-3.5 bg-white rounded-xl border border-red-200 text-[11px] text-gray-700 space-y-2 font-sans">
+                        <div className="font-bold text-gray-900 flex items-center gap-1.5">
+                          <span>💡 4 Quick Checks to Fix "Bad signature" from Meta Graph API:</span>
+                        </div>
+                        <ol className="list-decimal pl-4 space-y-1.5 text-gray-600">
+                          <li>
+                            <strong>Did you copy the App Secret instead of the Token?</strong><br />
+                            In Meta Developer Portal, the <em>App Secret</em> is 32 characters (e.g. <code className="bg-gray-100 px-1 py-0.2 rounded font-mono">3f8a...</code>). Meta WhatsApp requires an <strong>Access Token</strong> starting with <code className="bg-emerald-50 text-emerald-800 font-bold px-1 py-0.2 rounded font-mono">EAA...</code>.
+                          </li>
+                          <li>
+                            <strong>Was the token truncated during copy?</strong><br />
+                            Meta tokens are 150 to 250+ characters long. If you missed the first letter or last few letters when highlighting, Meta's cryptographic signature fails with "Bad signature". Ensure the whole token is copied.
+                          </li>
+                          <li>
+                            <strong>Expired 24-Hour Test Token?</strong><br />
+                            In Meta Developers &gt; WhatsApp &gt; API Setup, the temporary token expires in 23 hours. Click the <strong>Refresh Token</strong> button in Meta's portal to generate a new active token.
+                          </li>
+                          <li>
+                            <strong>Recommended: Generate a Permanent System User Token</strong><br />
+                            Go to <a href="https://business.facebook.com/settings/system-users" target="_blank" rel="noreferrer" className="text-emerald-700 font-bold underline">Meta Business Suite &gt; System Users</a> &gt; Click <em>Generate New Token</em> &gt; Select your WhatsApp App &gt; Check <code className="font-mono bg-gray-100 px-1 rounded">whatsapp_business_messaging</code> and <code className="font-mono bg-gray-100 px-1 rounded">whatsapp_business_management</code>.
+                          </li>
+                        </ol>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
