@@ -155,14 +155,6 @@ export function parseMetaFieldData(fieldData: Array<{ name: string; values: stri
 }
 
 export async function fetchMetaLeadGenData(leadgenId: string, accessToken?: string): Promise<any> {
-  const cfg = await getMetaConfigAsync();
-  const rawToken = accessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
-  if (!rawToken) {
-    throw new Error(`Meta leadgen_id ${leadgenId} received, but Page Access Token is not set. Go to Integrations > Meta Lead Ads to paste your Page Access Token.`);
-  }
-
-  const token = sanitizeMetaToken(rawToken);
-
   // If this is a Meta Webhook Testing Tool dummy lead ID (e.g. 444444444 or non-numeric/test)
   if (leadgenId === '444444444' || leadgenId === '0' || leadgenId.toLowerCase().includes('test')) {
     console.log(`[Meta Webhook] Test dummy leadgen_id ${leadgenId} detected from Meta Testing Tool. Returning mock test response.`);
@@ -183,6 +175,14 @@ export async function fetchMetaLeadGenData(leadgenId: string, accessToken?: stri
       ad_name: 'Test Instant Form Ad'
     };
   }
+
+  const cfg = await getMetaConfigAsync();
+  const rawToken = accessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
+  if (!rawToken) {
+    throw new Error(`Meta leadgen_id ${leadgenId} received, but Page Access Token is not set. Go to Integrations > Meta Lead Ads to paste your Page Access Token.`);
+  }
+
+  const token = sanitizeMetaToken(rawToken);
 
   const fields = 'id,created_time,field_data,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name';
   const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(leadgenId)}?fields=${fields}`, {
