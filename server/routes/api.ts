@@ -22,7 +22,8 @@ import {
   verifyMetaCredentials,
   verifyWhatsAppCredentials,
   handleInboundWhatsAppWebhook,
-  processInboundWhatsAppMessage
+  processInboundWhatsAppMessage,
+  processCoexistenceEcho
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -3316,6 +3317,23 @@ apiRouter.post('/integrations/whatsapp/simulate-inbound', async (req: Request, r
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Simulation failed' });
+  }
+});
+
+// WhatsApp Coexistence Mobile App Echo Simulator
+apiRouter.post('/integrations/whatsapp/simulate-coex-echo', async (req: Request, res: Response) => {
+  try {
+    const { studentPhone, counselorPhone, messageText, counselorName } = req.body;
+    const result = await processCoexistenceEcho({
+      studentPhone: studentPhone || '+977 9841234567',
+      counselorPhone: counselorPhone || '+977 9801234567',
+      messageText: messageText || 'Hello! I am following up on your application via the mobile WhatsApp Business app.',
+      counselorName: counselorName || 'Prakash Yadav',
+      performedBy: 'WhatsApp Coexistence Mobile Simulator'
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Coexistence simulation failed' });
   }
 });
 

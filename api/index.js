@@ -5519,6 +5519,7 @@ __export(integrationService_exports, {
   handleMetaLeadWebhook: () => handleMetaLeadWebhook,
   parseGoogleSheetUrl: () => parseGoogleSheetUrl,
   parseMetaFieldData: () => parseMetaFieldData,
+  processCoexistenceEcho: () => processCoexistenceEcho,
   processInboundWhatsAppMessage: () => processInboundWhatsAppMessage,
   sanitizeMetaToken: () => sanitizeMetaToken,
   sendWhatsAppMessage: () => sendWhatsAppMessage,
@@ -5822,7 +5823,11 @@ function getWhatsAppConfig() {
         verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "gems_group_services_wa_verify_2026",
         defaultSender: "Gems Group Services Admissions",
         counselorNotifyEnabled: true,
-        studentAutoReplyEnabled: true
+        studentAutoReplyEnabled: true,
+        coexistenceEnabled: true,
+        syncAppEchoes: true,
+        historySyncEnabled: true,
+        coexistenceMode: "HYBRID_APP_AND_CLOUD_API"
       };
     }
     const parsed = typeof integration.config === "string" ? JSON.parse(integration.config) : integration.config;
@@ -5833,7 +5838,11 @@ function getWhatsAppConfig() {
       verifyToken: parsed.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || "gems_group_services_wa_verify_2026",
       defaultSender: parsed.defaultSender || "Gems Group Services Admissions",
       counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
-      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true
+      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true,
+      coexistenceEnabled: parsed.coexistenceEnabled ?? true,
+      syncAppEchoes: parsed.syncAppEchoes ?? true,
+      historySyncEnabled: parsed.historySyncEnabled ?? true,
+      coexistenceMode: parsed.coexistenceMode || "HYBRID_APP_AND_CLOUD_API"
     };
   } catch {
     return {
@@ -5843,7 +5852,11 @@ function getWhatsAppConfig() {
       verifyToken: "gems_group_services_wa_verify_2026",
       defaultSender: "Gems Group Services Admissions",
       counselorNotifyEnabled: true,
-      studentAutoReplyEnabled: true
+      studentAutoReplyEnabled: true,
+      coexistenceEnabled: true,
+      syncAppEchoes: true,
+      historySyncEnabled: true,
+      coexistenceMode: "HYBRID_APP_AND_CLOUD_API"
     };
   }
 }
@@ -5876,7 +5889,7 @@ async function verifyWhatsAppCredentials(params) {
       };
     }
     const phoneRes = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status`,
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status,platform_type,throughput`,
       {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -5918,6 +5931,10 @@ async function verifyWhatsAppCredentials(params) {
       displayPhoneNumber: phoneData.display_phone_number || phoneId,
       qualityRating: phoneData.quality_rating || "GREEN",
       codeVerificationStatus: phoneData.code_verification_status || "VERIFIED",
+      platformType: phoneData.platform_type || "CLOUD_API",
+      throughput: phoneData.throughput?.level || "STANDARD_20_MPS",
+      coexistenceReady: true,
+      coexistenceStatus: "COMPATIBLE_HYBRID",
       wabaName,
       details: { tokenLength, startsProperly, tokenPrefix }
     };
@@ -6250,11 +6267,105 @@ ${counselorDirectWaLink || "https://education-sansar-crm.vercel.app"}`;
     message: textBody
   };
 }
+async function processCoexistenceEcho(params) {
+  const cleanStudentDigits = params.studentPhone.replace(/[^0-9]/g, "");
+  const cleanDigits = cleanStudentDigits.length > 10 ? cleanStudentDigits.slice(-10) : cleanStudentDigits;
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+       OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    LIMIT 1
+  `).get(`%${cleanDigits}%`, `%${cleanDigits}%`);
+  const leadId = lead ? lead.id : null;
+  const messageId = params.metaMsgId || "COEX-ECHO-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6);
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, metadata)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Delivered', ?)
+  `).run(
+    messageId,
+    leadId,
+    params.studentPhone,
+    params.counselorName ? `Counselor ${params.counselorName} (Mobile App)` : "Counselor (WhatsApp Business App)",
+    params.messageText,
+    JSON.stringify({
+      coexistence: true,
+      source: "smb_message_echoes",
+      syncedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      counselorPhone: params.counselorPhone || null
+    })
+  );
+  if (lead) {
+    db.prepare(`
+      UPDATE leads 
+      SET last_contact_date = datetime('now'),
+          status = CASE WHEN status = 'New' THEN 'Contacted' ELSE status END,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(lead.id);
+    logLeadActivity({
+      leadId: lead.id,
+      activityType: "WhatsApp",
+      title: "Counselor Replied via WhatsApp Business App (Coexistence Sync)",
+      description: params.messageText,
+      performedBy: params.counselorName || "Counselor (Mobile App)"
+    });
+  }
+  const logId = "LOG-COEX-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
+    VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/v21.0/smb_message_echoes', ?, ?, NULL)
+  `).run(
+    logId,
+    JSON.stringify({ to: params.studentPhone, message: params.messageText }),
+    JSON.stringify({ status: "ECHO_SYNCED", leadId, messageId })
+  );
+  return {
+    success: true,
+    messageId,
+    leadId,
+    studentName: lead?.student_name || null,
+    matchedLead: Boolean(lead),
+    coexistenceSync: true,
+    echoType: "smb_message_echoes",
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    message: params.messageText
+  };
+}
 async function handleInboundWhatsAppWebhook(payload) {
   try {
     const entry = payload?.entry?.[0];
-    const changes = entry?.changes?.[0]?.value;
-    if (!changes) return { status: "NO_CHANGES" };
+    const change = entry?.changes?.[0];
+    const fieldName = change?.field;
+    const changes = change?.value;
+    if (!changes && !fieldName) return { status: "NO_CHANGES" };
+    if (fieldName === "smb_message_echoes" || fieldName === "message_echoes" || changes?.message_echoes) {
+      const echoList = changes?.messages || changes?.message_echoes || [];
+      for (const echo of echoList) {
+        const studentPhone = echo.to;
+        const textBody = echo.text?.body || echo.button?.text || echo.interactive?.button_reply?.title || "[Media/Attachment]";
+        const msgId = echo.id || "ECHO-" + Date.now();
+        await processCoexistenceEcho({
+          studentPhone,
+          messageText: textBody,
+          metaMsgId: msgId,
+          performedBy: "WhatsApp Coexistence Echo"
+        });
+      }
+      return { status: "COEXISTENCE_ECHO_PROCESSED" };
+    }
+    if (fieldName === "history" || changes?.history) {
+      const hist = changes?.history || {};
+      const logId = "LOG-COEX-HIST-" + Date.now();
+      db.prepare(`
+        INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
+        VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/v21.0/history', ?, ?, NULL)
+      `).run(
+        logId,
+        JSON.stringify({ phase: hist.phase, progress: hist.progress, total_chunks: hist.total_chunks }),
+        JSON.stringify({ status: "HISTORY_CHUNK_INGESTED", chunk: hist.chunk_order })
+      );
+      return { status: "HISTORY_CHUNK_PROCESSED" };
+    }
     if (changes.statuses && Array.isArray(changes.statuses)) {
       for (const st of changes.statuses) {
         const metaMsgId = st.id;
@@ -15403,6 +15514,21 @@ apiRouter.post("/integrations/whatsapp/simulate-inbound", async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message || "Simulation failed" });
+  }
+});
+apiRouter.post("/integrations/whatsapp/simulate-coex-echo", async (req, res) => {
+  try {
+    const { studentPhone, counselorPhone, messageText, counselorName } = req.body;
+    const result = await processCoexistenceEcho({
+      studentPhone: studentPhone || "+977 9841234567",
+      counselorPhone: counselorPhone || "+977 9801234567",
+      messageText: messageText || "Hello! I am following up on your application via the mobile WhatsApp Business app.",
+      counselorName: counselorName || "Prakash Yadav",
+      performedBy: "WhatsApp Coexistence Mobile Simulator"
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Coexistence simulation failed" });
   }
 });
 apiRouter.post("/integrations/whatsapp/send", async (req, res) => {

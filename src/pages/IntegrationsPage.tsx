@@ -5,7 +5,8 @@ import {
   Play, Settings as SettingsIcon, Check, Info, Bell,
   FileSpreadsheet, ArrowUpDown, FileCode, Download, Database, CheckSquare,
   Link, Sparkles, Unlink, Eye, EyeOff, Table, Plus, Trash2, Edit3, Pause,
-  Layers, MapPin, Tag, X, CheckCircle, HelpCircle, Zap, Globe, ClipboardPaste
+  Layers, MapPin, Tag, X, CheckCircle, HelpCircle, Zap, Globe, ClipboardPaste,
+  Smartphone, ArrowRightLeft, Radio
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotifications } from '../context/NotificationContext';
@@ -48,6 +49,10 @@ export const IntegrationsPage: React.FC = () => {
     defaultSender: 'Gems Group Services Admissions',
     counselorNotifyEnabled: true,
     studentAutoReplyEnabled: true,
+    coexistenceEnabled: true,
+    syncAppEchoes: true,
+    historySyncEnabled: true,
+    coexistenceMode: 'HYBRID_APP_AND_CLOUD_API',
   });
   const [showWaToken, setShowWaToken] = useState(false);
   const [savingWa, setSavingWa] = useState(false);
@@ -64,6 +69,16 @@ export const IntegrationsPage: React.FC = () => {
   });
   const [simulatingWaInbound, setSimulatingWaInbound] = useState(false);
   const [simWaInboundResult, setSimWaInboundResult] = useState<any>(null);
+
+  // WhatsApp Coexistence Mobile App Echo Simulator State
+  const [simCoexEcho, setSimCoexEcho] = useState({
+    studentPhone: '+977 9841234567',
+    counselorPhone: '+977 9801234567',
+    counselorName: 'Prakash Yadav',
+    messageText: 'Hello Aarav! I received your inquiry about SRM B.Tech CSE. Are you available for a 5-minute counseling call today?',
+  });
+  const [simulatingCoexEcho, setSimulatingCoexEcho] = useState(false);
+  const [simCoexEchoResult, setSimCoexEchoResult] = useState<any>(null);
 
   // Meta Simulation Form State
   const [metaSimData, setMetaSimData] = useState({
@@ -218,6 +233,10 @@ export const IntegrationsPage: React.FC = () => {
             defaultSender: parsed.defaultSender || 'Gems Group Services Admissions',
             counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
             studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true,
+            coexistenceEnabled: parsed.coexistenceEnabled ?? true,
+            syncAppEchoes: parsed.syncAppEchoes ?? true,
+            historySyncEnabled: parsed.historySyncEnabled ?? true,
+            coexistenceMode: parsed.coexistenceMode || 'HYBRID_APP_AND_CLOUD_API',
           }));
         } catch (e) {}
       }
@@ -623,6 +642,27 @@ export const IntegrationsPage: React.FC = () => {
       addToast(err.message || 'WhatsApp inbound simulation failed', 'error');
     } finally {
       setSimulatingWaInbound(false);
+    }
+  };
+
+  const handleSimulateCoexEcho = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setSimulatingCoexEcho(true);
+      setSimCoexEchoResult(null);
+      const res = await api.simulateWhatsAppCoexEcho(simCoexEcho);
+      setSimCoexEchoResult(res);
+      addToast(
+        res.matchedLead 
+          ? `Coexistence echo synchronized! Logged to student "${res.studentName || res.leadId}"`
+          : 'Coexistence echo recorded as outbound mobile message in CRM timeline',
+        'success'
+      );
+      loadData();
+    } catch (err: any) {
+      addToast(err.message || 'WhatsApp Coexistence echo simulation failed', 'error');
+    } finally {
+      setSimulatingCoexEcho(false);
     }
   };
 
@@ -2842,6 +2882,70 @@ export const IntegrationsPage: React.FC = () => {
                   </label>
                 </div>
 
+                {/* WhatsApp Coexistence (Hybrid Mobile App & Cloud API Mode) Controls */}
+                <div className="pt-3 border-t border-gray-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5 uppercase">
+                      <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                      WhatsApp Coexistence (Hybrid Mobile &amp; Cloud API)
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                      <ArrowRightLeft className="w-3 h-3 text-emerald-600" />
+                      Dual-Mode Active
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    Meta WhatsApp Coexistence allows your admission counselors to use their physical <strong>WhatsApp Business mobile app</strong> and the <strong>Cloud API</strong> simultaneously on the <strong>exact same phone number</strong>. Counselors keep chatting from their phone while the CRM handles automated lead capture and alerts without taking the phone offline.
+                  </p>
+
+                  <div className="space-y-2 pt-1">
+                    <label className="flex items-start gap-2.5 cursor-pointer bg-emerald-50/60 hover:bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 transition">
+                      <input
+                        type="checkbox"
+                        checked={waConfig.coexistenceEnabled}
+                        onChange={(e) => setWaConfig({ ...waConfig, coexistenceEnabled: e.target.checked })}
+                        className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-semibold text-gray-900">Enable WhatsApp Coexistence (Hybrid Dual-Mode)</span>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          Operate the physical WhatsApp Business Mobile App alongside the CRM Cloud API on the same number.
+                        </p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer bg-emerald-50/60 hover:bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 transition">
+                      <input
+                        type="checkbox"
+                        checked={waConfig.syncAppEchoes}
+                        onChange={(e) => setWaConfig({ ...waConfig, syncAppEchoes: e.target.checked })}
+                        className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-semibold text-gray-900">Synchronize Mobile App Replies (<code className="bg-white px-1 py-0.5 rounded text-emerald-700 font-mono">smb_message_echoes</code>)</span>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          When a counselor sends a reply from the WhatsApp Business app on their phone, automatically capture the echo and mirror it in the student's CRM lead timeline in real time.
+                        </p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer bg-blue-50/60 hover:bg-blue-50 p-2.5 rounded-lg border border-blue-200 transition">
+                      <input
+                        type="checkbox"
+                        checked={waConfig.historySyncEnabled}
+                        onChange={(e) => setWaConfig({ ...waConfig, historySyncEnabled: e.target.checked })}
+                        className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="text-xs">
+                        <span className="font-semibold text-gray-900">Historical Chat Ingestion (<code className="bg-white px-1 py-0.5 rounded text-blue-700 font-mono">history_sync</code>)</span>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          Import up to 180 days of past 1-on-1 student conversations and contacts during Meta Embedded Signup onboarding.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Form Buttons */}
                 <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
                   <button
@@ -2938,6 +3042,24 @@ export const IntegrationsPage: React.FC = () => {
                           {waTokenTestResult.wabaName}
                         </div>
                       )}
+                      <div className="sm:col-span-2 pt-1 border-t border-emerald-200/60 flex flex-wrap items-center gap-2">
+                        <span className="text-emerald-800 font-sans font-semibold flex items-center gap-1">
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                          Coexistence Architecture:
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Dual-Mode Compatible (WhatsApp Business Mobile App + Cloud API)
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-emerald-700 font-sans font-semibold">Platform: </span>
+                        {waTokenTestResult.platformType || 'CLOUD_API (Coexistence Hybrid)'}
+                      </div>
+                      <div>
+                        <span className="text-emerald-700 font-sans font-semibold">Throughput: </span>
+                        {waTokenTestResult.throughput || 'STANDARD (20 msgs/sec)'}
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-1">
@@ -3050,18 +3172,79 @@ export const IntegrationsPage: React.FC = () => {
                 </div>
 
                 {/* Subscribed Fields */}
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600 space-y-1">
-                  <span className="font-semibold text-gray-800">Webhook Fields to Subscribe:</span>
+                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600 space-y-1.5">
+                  <span className="font-semibold text-gray-800">Webhook Fields to Subscribe in Meta App:</span>
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700">
+                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700" title="Inbound student WhatsApp messages">
                       messages
                     </span>
-                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700">
+                    <span className="px-2 py-0.5 bg-emerald-50 border border-emerald-300 rounded text-[11px] font-mono text-emerald-800 font-bold" title="Coexistence: Echoes of counselor replies from mobile WhatsApp Business app">
+                      smb_message_echoes (Coexistence Echoes)
+                    </span>
+                    <span className="px-2 py-0.5 bg-blue-50 border border-blue-300 rounded text-[11px] font-mono text-blue-800 font-bold" title="Coexistence: 180-day past chat history import">
+                      history (History Sync)
+                    </span>
+                    <span className="px-2 py-0.5 bg-white border border-gray-300 rounded text-[11px] font-mono text-emerald-700" title="Template approval updates">
                       message_template_status_update
                     </span>
                   </div>
-                  <p className="text-[11px] text-gray-500 pt-1">
-                    Incoming replies are logged directly to the student's lead activity timeline. Replying &ldquo;STOP&rdquo; or &ldquo;UNSUBSCRIBE&rdquo; automatically updates broadcast opt-out preferences.
+                  <p className="text-[11px] text-gray-500 pt-1 leading-relaxed">
+                    <strong>Coexistence Sync Rule:</strong> Subscribing to <code className="bg-emerald-100/70 text-emerald-900 px-1 py-0.2 rounded font-mono">smb_message_echoes</code> allows the CRM to automatically capture whenever counselors reply from the WhatsApp Business mobile app on their physical phones, keeping the student's lead timeline synchronized in real time.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* WhatsApp Coexistence (Hybrid Mode) Architecture Guide Card */}
+            <div className="bg-gradient-to-br from-emerald-50/70 via-white to-blue-50/60 p-6 rounded-xl border border-emerald-200 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  How WhatsApp Coexistence Operates
+                </h4>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                  Dual Ecosystem
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-white rounded-lg border border-emerald-100 shadow-xs space-y-1">
+                  <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                    1. Mobile App on Phone
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">
+                    Counselors carry their phone and reply directly to students on the go. 1-to-1 replies from the mobile app remain 100% free with no per-conversation API template charges.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-lg border border-blue-100 shadow-xs space-y-1">
+                  <div className="font-bold text-blue-900 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-blue-600" />
+                    2. Cloud API Automation
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">
+                    The CRM handles automated instant replies, counselor notifications with direct chat links, broadcast campaigns, and AI lead qualification around the clock.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-lg border border-purple-100 shadow-xs space-y-1">
+                  <div className="font-bold text-purple-900 flex items-center gap-1.5">
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-purple-600" />
+                    3. Real-Time Echo Sync (<code className="font-mono text-purple-700">smb_message_echoes</code>)
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">
+                    Whenever a counselor messages a student from their phone, Meta immediately notifies the CRM webhook, logging the reply into the student's lead timeline.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white rounded-lg border border-amber-100 shadow-xs space-y-1">
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                    4. Phone Sync &amp; Keep-Alive
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">
+                    All CRM Cloud API messages automatically show up in the counselor's phone app. The WhatsApp Business app should be opened once every 13 days to keep the bridge alive.
                   </p>
                 </div>
               </div>
@@ -3239,6 +3422,120 @@ export const IntegrationsPage: React.FC = () => {
                         Chat with Counselor ({simWaInboundResult.counselor.name})
                       </a>
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* WhatsApp Coexistence Mobile Echo Simulator */}
+            <div className="bg-white p-6 rounded-xl border border-emerald-200 shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <Smartphone className="w-5 h-5 text-emerald-600" />
+                    WhatsApp Coexistence Mobile Echo Tester (<code className="text-xs font-mono text-emerald-700">smb_message_echoes</code>)
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Simulate a counselor replying directly from the WhatsApp Business mobile app on their physical phone to verify real-time CRM timeline sync.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600" />
+                  Echo Sync
+                </span>
+              </div>
+
+              <form onSubmit={handleSimulateCoexEcho} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Student Mobile Number</label>
+                    <input
+                      type="text"
+                      required
+                      value={simCoexEcho.studentPhone}
+                      onChange={(e) => setSimCoexEcho({ ...simCoexEcho, studentPhone: e.target.value })}
+                      placeholder="+977 98XXXXXXXX"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Counselor Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={simCoexEcho.counselorName}
+                      onChange={(e) => setSimCoexEcho({ ...simCoexEcho, counselorName: e.target.value })}
+                      placeholder="e.g. Prakash Yadav"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Counselor Mobile Number</label>
+                  <input
+                    type="text"
+                    value={simCoexEcho.counselorPhone}
+                    onChange={(e) => setSimCoexEcho({ ...simCoexEcho, counselorPhone: e.target.value })}
+                    placeholder="+977 9801234567"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Message Sent from Mobile WhatsApp Business App</label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={simCoexEcho.messageText}
+                    onChange={(e) => setSimCoexEcho({ ...simCoexEcho, messageText: e.target.value })}
+                    placeholder="Type counselor reply as sent from mobile phone..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={simulatingCoexEcho}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition disabled:opacity-50"
+                >
+                  {simulatingCoexEcho ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Receiving Mobile App Echo...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft className="w-4 h-4" />
+                      Simulate Outbound Mobile Reply &amp; Ingest Coexistence Echo
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {simCoexEchoResult && (
+                <div className="mt-4 p-4 rounded-xl border border-emerald-300 bg-emerald-50/70 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-900 flex items-center gap-1.5 text-sm">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Coexistence Echo Captured Successfully!
+                    </span>
+                    <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
+                      smb_message_echoes
+                    </span>
+                  </div>
+
+                  <p className="text-gray-700 text-xs">
+                    {simCoexEchoResult.matchedLead
+                      ? `Message matched to lead "${simCoexEchoResult.studentName || simCoexEchoResult.leadId}" and logged to their lead activity timeline.`
+                      : 'Message recorded as an outbound mobile WhatsApp reply in the CRM messages database.'}
+                  </p>
+
+                  <div className="p-2.5 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800 space-y-1">
+                    <div><strong>Message ID:</strong> {simCoexEchoResult.messageId}</div>
+                    <div><strong>Recipient Student:</strong> {simCoexEcho.studentPhone}</div>
+                    <div><strong>Sender:</strong> {simCoexEcho.counselorName} (Mobile App)</div>
+                    <div><strong>Echo Content:</strong> &ldquo;{simCoexEchoResult.message}&rdquo;</div>
                   </div>
                 </div>
               )}

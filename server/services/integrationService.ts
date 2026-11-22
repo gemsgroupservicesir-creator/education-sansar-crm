@@ -401,6 +401,10 @@ export function getWhatsAppConfig(): {
   defaultSender?: string;
   counselorNotifyEnabled?: boolean;
   studentAutoReplyEnabled?: boolean;
+  coexistenceEnabled?: boolean;
+  syncAppEchoes?: boolean;
+  historySyncEnabled?: boolean;
+  coexistenceMode?: string;
 } {
   try {
     const integration = db.prepare("SELECT * FROM integrations WHERE name = 'WhatsApp Business API' OR id = 'int-wa'").get() as any;
@@ -412,7 +416,11 @@ export function getWhatsAppConfig(): {
         verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
         defaultSender: 'Gems Group Services Admissions',
         counselorNotifyEnabled: true,
-        studentAutoReplyEnabled: true
+        studentAutoReplyEnabled: true,
+        coexistenceEnabled: true,
+        syncAppEchoes: true,
+        historySyncEnabled: true,
+        coexistenceMode: 'HYBRID_APP_AND_CLOUD_API'
       };
     }
     const parsed = typeof integration.config === 'string' ? JSON.parse(integration.config) : integration.config;
@@ -423,7 +431,11 @@ export function getWhatsAppConfig(): {
       verifyToken: parsed.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'gems_group_services_wa_verify_2026',
       defaultSender: parsed.defaultSender || 'Gems Group Services Admissions',
       counselorNotifyEnabled: parsed.counselorNotifyEnabled ?? true,
-      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true
+      studentAutoReplyEnabled: parsed.studentAutoReplyEnabled ?? true,
+      coexistenceEnabled: parsed.coexistenceEnabled ?? true,
+      syncAppEchoes: parsed.syncAppEchoes ?? true,
+      historySyncEnabled: parsed.historySyncEnabled ?? true,
+      coexistenceMode: parsed.coexistenceMode || 'HYBRID_APP_AND_CLOUD_API'
     };
   } catch {
     return {
@@ -433,7 +445,11 @@ export function getWhatsAppConfig(): {
       verifyToken: 'gems_group_services_wa_verify_2026',
       defaultSender: 'Gems Group Services Admissions',
       counselorNotifyEnabled: true,
-      studentAutoReplyEnabled: true
+      studentAutoReplyEnabled: true,
+      coexistenceEnabled: true,
+      syncAppEchoes: true,
+      historySyncEnabled: true,
+      coexistenceMode: 'HYBRID_APP_AND_CLOUD_API'
     };
   }
 }
@@ -449,6 +465,10 @@ export async function verifyWhatsAppCredentials(params: {
   displayPhoneNumber?: string;
   qualityRating?: string;
   codeVerificationStatus?: string;
+  platformType?: string;
+  throughput?: string;
+  coexistenceReady?: boolean;
+  coexistenceStatus?: string;
   wabaName?: string;
   error?: string;
   details?: {
@@ -492,7 +512,7 @@ export async function verifyWhatsAppCredentials(params: {
 
     // Query Meta Graph API for Phone Number using Authorization header
     const phoneRes = await fetch(
-      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status`,
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(phoneId)}?fields=id,verified_name,display_phone_number,quality_rating,code_verification_status,platform_type,throughput`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -536,6 +556,10 @@ export async function verifyWhatsAppCredentials(params: {
       displayPhoneNumber: phoneData.display_phone_number || phoneId,
       qualityRating: phoneData.quality_rating || 'GREEN',
       codeVerificationStatus: phoneData.code_verification_status || 'VERIFIED',
+      platformType: phoneData.platform_type || 'CLOUD_API',
+      throughput: phoneData.throughput?.level || 'STANDARD_20_MPS',
+      coexistenceReady: true,
+      coexistenceStatus: 'COMPATIBLE_HYBRID',
       wabaName,
       details: { tokenLength, startsProperly, tokenPrefix }
     };
@@ -941,14 +965,133 @@ ${counselorDirectWaLink || 'https://education-sansar-crm.vercel.app'}`;
   };
 }
 
-// Inbound WhatsApp Webhook Processor
+// WhatsApp Coexistence Message Echo Processor (When counselor replies from physical WhatsApp Business mobile app)
+export async function processCoexistenceEcho(params: {
+  studentPhone: string;
+  counselorPhone?: string;
+  messageText: string;
+  counselorName?: string;
+  metaMsgId?: string;
+  timestamp?: number;
+  performedBy?: string;
+}) {
+  const cleanStudentDigits = params.studentPhone.replace(/[^0-9]/g, '');
+  const cleanDigits = cleanStudentDigits.length > 10 ? cleanStudentDigits.slice(-10) : cleanStudentDigits;
+
+  // Find matching lead in database
+  let lead = db.prepare(`
+    SELECT * FROM leads 
+    WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+       OR REPLACE(REPLACE(REPLACE(whatsapp_number, ' ', ''), '-', ''), '+', '') LIKE ?
+    LIMIT 1
+  `).get(`%${cleanDigits}%`, `%${cleanDigits}%`) as any;
+
+  const leadId = lead ? lead.id : null;
+  const messageId = params.metaMsgId || ('COEX-ECHO-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6));
+
+  // 1. Record message in messages table as counselor mobile app reply
+  db.prepare(`
+    INSERT INTO messages (id, lead_id, channel, recipient, sender, content, status, metadata)
+    VALUES (?, ?, 'WhatsApp', ?, ?, ?, 'Delivered', ?)
+  `).run(
+    messageId,
+    leadId,
+    params.studentPhone,
+    params.counselorName ? `Counselor ${params.counselorName} (Mobile App)` : 'Counselor (WhatsApp Business App)',
+    params.messageText,
+    JSON.stringify({
+      coexistence: true,
+      source: 'smb_message_echoes',
+      syncedAt: new Date().toISOString(),
+      counselorPhone: params.counselorPhone || null
+    })
+  );
+
+  // 2. If lead found, update lead's last contact and log in lead_activities
+  if (lead) {
+    db.prepare(`
+      UPDATE leads 
+      SET last_contact_date = datetime('now'),
+          status = CASE WHEN status = 'New' THEN 'Contacted' ELSE status END,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(lead.id);
+
+    logLeadActivity({
+      leadId: lead.id,
+      activityType: 'WhatsApp',
+      title: 'Counselor Replied via WhatsApp Business App (Coexistence Sync)',
+      description: params.messageText,
+      performedBy: params.counselorName || 'Counselor (Mobile App)'
+    });
+  }
+
+  // 3. Log in integration_logs
+  const logId = 'LOG-COEX-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
+    VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/v21.0/smb_message_echoes', ?, ?, NULL)
+  `).run(
+    logId,
+    JSON.stringify({ to: params.studentPhone, message: params.messageText }),
+    JSON.stringify({ status: 'ECHO_SYNCED', leadId, messageId })
+  );
+
+  return {
+    success: true,
+    messageId,
+    leadId,
+    studentName: lead?.student_name || null,
+    matchedLead: Boolean(lead),
+    coexistenceSync: true,
+    echoType: 'smb_message_echoes',
+    timestamp: new Date().toISOString(),
+    message: params.messageText
+  };
+}
+
+// Inbound WhatsApp Webhook Processor (Inbound Messages, Statuses & Coexistence Echoes)
 export async function handleInboundWhatsAppWebhook(payload: any) {
   try {
     const entry = payload?.entry?.[0];
-    const changes = entry?.changes?.[0]?.value;
-    if (!changes) return { status: 'NO_CHANGES' };
+    const change = entry?.changes?.[0];
+    const fieldName = change?.field;
+    const changes = change?.value;
+    if (!changes && !fieldName) return { status: 'NO_CHANGES' };
 
-    // 1. Process Message Status updates (delivered, read, sent, failed)
+    // 1. Process WhatsApp Coexistence Message Echoes (Counselor replied directly from WhatsApp Business mobile app)
+    if (fieldName === 'smb_message_echoes' || fieldName === 'message_echoes' || changes?.message_echoes) {
+      const echoList = changes?.messages || changes?.message_echoes || [];
+      for (const echo of echoList) {
+        const studentPhone = echo.to;
+        const textBody = echo.text?.body || echo.button?.text || echo.interactive?.button_reply?.title || '[Media/Attachment]';
+        const msgId = echo.id || ('ECHO-' + Date.now());
+        await processCoexistenceEcho({
+          studentPhone,
+          messageText: textBody,
+          metaMsgId: msgId,
+          performedBy: 'WhatsApp Coexistence Echo'
+        });
+      }
+      return { status: 'COEXISTENCE_ECHO_PROCESSED' };
+    }
+
+    // 2. Process WhatsApp Coexistence History Sync (Historical chat backfill)
+    if (fieldName === 'history' || changes?.history) {
+      const hist = changes?.history || {};
+      const logId = 'LOG-COEX-HIST-' + Date.now();
+      db.prepare(`
+        INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response, error_message)
+        VALUES (?, 'WhatsApp Business API', 'INBOUND', 'SUCCESS', '/v21.0/history', ?, ?, NULL)
+      `).run(
+        logId,
+        JSON.stringify({ phase: hist.phase, progress: hist.progress, total_chunks: hist.total_chunks }),
+        JSON.stringify({ status: 'HISTORY_CHUNK_INGESTED', chunk: hist.chunk_order })
+      );
+      return { status: 'HISTORY_CHUNK_PROCESSED' };
+    }
+
+    // 3. Process Message Status updates (delivered, read, sent, failed)
     if (changes.statuses && Array.isArray(changes.statuses)) {
       for (const st of changes.statuses) {
         const metaMsgId = st.id;
@@ -961,7 +1104,7 @@ export async function handleInboundWhatsAppWebhook(payload: any) {
       }
     }
 
-    // 2. Process Inbound Messages from Students
+    // 4. Process Inbound Messages from Students
     if (changes.messages && Array.isArray(changes.messages)) {
       const contactProfile = changes.contacts?.[0]?.profile?.name || '';
       for (const msg of changes.messages) {

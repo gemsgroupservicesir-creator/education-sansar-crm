@@ -333,8 +333,17 @@ export const api = {
       displayPhoneNumber?: string;
       qualityRating?: string;
       codeVerificationStatus?: string;
+      platformType?: string;
+      throughput?: string;
+      coexistenceReady?: boolean;
+      coexistenceStatus?: string;
       wabaName?: string;
       error?: string;
+      details?: {
+        tokenLength: number;
+        startsProperly: boolean;
+        tokenPrefix: string;
+      };
     }>('/integrations/whatsapp/verify-credentials', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -352,6 +361,16 @@ export const api = {
     preferredUniversity?: string;
   }) =>
     fetchJson<any>('/integrations/whatsapp/simulate-inbound', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  simulateWhatsAppCoexEcho: (data: {
+    studentPhone: string;
+    counselorPhone?: string;
+    messageText: string;
+    counselorName?: string;
+  }) =>
+    fetchJson<any>('/integrations/whatsapp/simulate-coex-echo', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
