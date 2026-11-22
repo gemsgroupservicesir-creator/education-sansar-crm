@@ -7,7 +7,10 @@ import {
   persistGoogleSheetConnectionToNeon, 
   deleteGoogleSheetConnectionFromNeon, 
   findGoogleSheetInNeon, 
-  getAllGoogleSheetsFromNeon 
+  getAllGoogleSheetsFromNeon,
+  persistIntegrationToNeon,
+  getAllIntegrationsFromNeon,
+  getIntegrationFromNeon
 } from '../db/neon.ts';
 import { handleLeadOptOut } from './broadcastService.ts';
 import { chatWithStudent } from './studentAIChatbotService.ts';
@@ -27,6 +30,46 @@ export function getMetaConfig(): {
   } catch {
     return {};
   }
+}
+
+export async function getMetaConfigAsync(): Promise<{
+  pageAccessToken?: string;
+  pageId?: string;
+  verifyToken?: string;
+  appSecret?: string;
+  autoAssign?: boolean;
+}> {
+  let cfg = getMetaConfig();
+  if (!cfg.pageAccessToken && isNeonEnabled()) {
+    try {
+      const metaRow = await getIntegrationFromNeon('int-meta') || await getIntegrationFromNeon('Meta Lead Ads');
+      if (metaRow && metaRow.config) {
+        const parsed = typeof metaRow.config === 'object' ? metaRow.config : JSON.parse(metaRow.config);
+        // Cache to local SQLite so subsequent synchronous calls within this container have it
+        try {
+          db.prepare(`
+            INSERT INTO integrations (id, name, is_enabled, status, config, last_sync_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT (id) DO UPDATE SET
+              config = excluded.config,
+              is_enabled = excluded.is_enabled,
+              status = excluded.status
+          `).run(
+            metaRow.id || 'int-meta',
+            metaRow.name || 'Meta Lead Ads',
+            metaRow.is_enabled !== undefined ? metaRow.is_enabled : 1,
+            metaRow.status || 'CONNECTED',
+            typeof metaRow.config === 'object' ? JSON.stringify(metaRow.config) : metaRow.config,
+            metaRow.last_sync_at ? String(metaRow.last_sync_at) : null
+          );
+        } catch {}
+        return parsed;
+      }
+    } catch (err: any) {
+      console.warn('[Meta Config] Failed to fetch config from Neon:', err.message);
+    }
+  }
+  return cfg;
 }
 
 export function verifyMetaWebhook(mode: string, token: string, challenge: string): string | null {
@@ -112,16 +155,62 @@ export function parseMetaFieldData(fieldData: Array<{ name: string; values: stri
 }
 
 export async function fetchMetaLeadGenData(leadgenId: string, accessToken?: string): Promise<any> {
-  const cfg = getMetaConfig();
-  const token = accessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
-  if (!token) {
+  const cfg = await getMetaConfigAsync();
+  const rawToken = accessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
+  if (!rawToken) {
     throw new Error(`Meta leadgen_id ${leadgenId} received, but Page Access Token is not set. Go to Integrations > Meta Lead Ads to paste your Page Access Token.`);
   }
 
-  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(leadgenId)}?access_token=${encodeURIComponent(token)}`);
+  const token = sanitizeMetaToken(rawToken);
+
+  // If this is a Meta Webhook Testing Tool dummy lead ID (e.g. 444444444 or non-numeric/test)
+  if (leadgenId === '444444444' || leadgenId === '0' || leadgenId.toLowerCase().includes('test')) {
+    console.log(`[Meta Webhook] Test dummy leadgen_id ${leadgenId} detected from Meta Testing Tool. Returning mock test response.`);
+    return {
+      id: leadgenId,
+      created_time: new Date().toISOString(),
+      field_data: [
+        { name: 'full_name', values: ['Meta Test Aspirant'] },
+        { name: 'phone_number', values: ['+977980' + Math.floor(1000000 + Math.random() * 9000000)] },
+        { name: 'email', values: [`meta.test.${Date.now()}@gmail.com`] },
+        { name: 'city', values: ['Kathmandu'] },
+        { name: 'preferred_course', values: ['B.Tech Computer Science & Engineering'] },
+        { name: 'preferred_university', values: ['SRM Institute of Science and Technology'] },
+        { name: 'academic_qualification', values: ['+2 Science'] }
+      ],
+      campaign_name: 'Meta Webhook Verification Test',
+      adset_name: 'Engineering Aspirants',
+      ad_name: 'Test Instant Form Ad'
+    };
+  }
+
+  const fields = 'id,created_time,field_data,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name';
+  const res = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(leadgenId)}?fields=${fields}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json'
+    }
+  });
   const data = await res.json();
   if (data.error) {
-    throw new Error(`Meta Graph API Error: ${data.error.message || JSON.stringify(data.error)}`);
+    // If it's a Meta test event with fake ID that doesn't exist on Graph API
+    if (data.error.code === 100 && (leadgenId.length < 12 || leadgenId.startsWith('4444'))) {
+      console.warn(`[Meta Webhook] Leadgen ID ${leadgenId} does not exist on Facebook Graph (likely Meta Testing Tool test event). Returning mock lead.`);
+      return {
+        id: leadgenId,
+        created_time: new Date().toISOString(),
+        field_data: [
+          { name: 'full_name', values: ['Meta Test Aspirant'] },
+          { name: 'phone_number', values: ['+9779801234567'] },
+          { name: 'email', values: ['test@example.com'] },
+          { name: 'city', values: ['Kathmandu'] }
+        ],
+        campaign_name: 'Meta Webhook Test Event',
+        adset_name: 'Test Ad Set',
+        ad_name: 'Test Ad'
+      };
+    }
+    throw new Error(`Meta Graph API Error: ${formatMetaGraphError(data.error)}`);
   }
   return data;
 }
@@ -370,7 +459,7 @@ export async function handleMetaLeadWebhook(payload: any) {
     }
 
     // 2. Create Lead (automated distribution by course & university is triggered automatically!)
-    const newLead = createLead(leadData, 'Meta Instant Form');
+    const newLead = await createLead(leadData, 'Meta Instant Form');
 
     // 3. Log success in integration_logs
     db.prepare(`
@@ -378,8 +467,19 @@ export async function handleMetaLeadWebhook(payload: any) {
       VALUES (?, 'Meta Lead Ads', 'INBOUND', 'SUCCESS', '/api/integrations/meta/webhook', ?, ?)
     `).run(logId, JSON.stringify(payload), JSON.stringify({ success: true, leadId: newLead.lead_id }));
 
-    // Update last sync timestamp
+    // Update last sync timestamp in SQLite and Neon
+    const nowIso = new Date().toISOString();
     db.prepare("UPDATE integrations SET last_sync_at = datetime('now'), status = 'CONNECTED' WHERE name = 'Meta Lead Ads' OR id = 'int-meta'").run();
+    if (isNeonEnabled()) {
+      const metaRow = db.prepare("SELECT * FROM integrations WHERE name = 'Meta Lead Ads' OR id = 'int-meta'").get() as any;
+      if (metaRow) {
+        persistIntegrationToNeon({
+          ...metaRow,
+          last_sync_at: nowIso,
+          status: 'CONNECTED'
+        }).catch(e => console.warn('[Neon Sync] Meta update deferred:', e.message));
+      }
+    }
 
     return { success: true, duplicate: false, lead: newLead };
   } catch (err: any) {
@@ -390,6 +490,257 @@ export async function handleMetaLeadWebhook(payload: any) {
     `).run(errLogId, JSON.stringify(payload), err.message || 'Processing failed');
     throw err;
   }
+}
+
+/**
+ * On-demand Lead Sync directly from Meta Graph API for connected Facebook Page Instant Forms
+ */
+export async function syncMetaLeadGenLeads(options: {
+  formId?: string;
+  limit?: number;
+  pageAccessToken?: string;
+  pageId?: string;
+  performedBy?: string;
+} = {}): Promise<{
+  success: boolean;
+  pageId?: string;
+  pageName?: string;
+  formsScanned: number;
+  totalLeadsFound: number;
+  newLeadsImported: number;
+  duplicatesSkipped: number;
+  forms: Array<{
+    id: string;
+    name: string;
+    status: string;
+    leadsCount: number;
+    imported: number;
+    duplicates: number;
+  }>;
+  message: string;
+}> {
+  const logId = 'LOG-META-SYNC-' + Date.now();
+  const cfg = await getMetaConfigAsync();
+  const rawToken = options.pageAccessToken || cfg.pageAccessToken || process.env.META_PAGE_ACCESS_TOKEN;
+  if (!rawToken || !rawToken.trim()) {
+    throw new Error('Meta Page Access Token is not configured. Please paste your token in Integrations > Meta Lead Ads and click Save.');
+  }
+
+  const token = sanitizeMetaToken(rawToken);
+  let pageId = (options.pageId || cfg.pageId || '').trim();
+  let pageName = '';
+
+  // Discover pageId and pageName if not specified or verify token
+  try {
+    const meRes = await fetch('https://graph.facebook.com/v21.0/me?fields=id,name', {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+    });
+    const meData = await meRes.json();
+    if (meData.id) {
+      if (!pageId) pageId = meData.id;
+      pageName = meData.name || '';
+    }
+  } catch (err: any) {
+    console.warn('[Meta Sync] Could not fetch /me info:', err.message);
+  }
+
+  if (!pageId) {
+    throw new Error('Unable to identify Facebook Page ID. Please specify Page ID in Meta Lead Ads settings.');
+  }
+
+  // 1. Fetch Instant Forms for this Page
+  let forms: Array<{ id: string; name: string; status: string; leads_count?: number }> = [];
+  if (options.formId) {
+    // Single specified form
+    try {
+      const fRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(options.formId)}?fields=id,name,status,leads_count`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+      });
+      const fData = await fRes.json();
+      if (fData.id) {
+        forms.push(fData);
+      }
+    } catch (e: any) {
+      throw new Error(`Failed to fetch form ${options.formId}: ${e.message}`);
+    }
+  } else {
+    // Fetch all forms on page
+    const formsUrl = `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status,leads_count&limit=100`;
+    const fRes = await fetch(formsUrl, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+    });
+    const fData = await fRes.json();
+    if (fData.error) {
+      throw new Error(`Meta Graph API Error fetching forms: ${formatMetaGraphError(fData.error)}`);
+    }
+    if (Array.isArray(fData.data)) {
+      forms = fData.data;
+    }
+  }
+
+  if (forms.length === 0) {
+    return {
+      success: true,
+      pageId,
+      pageName,
+      formsScanned: 0,
+      totalLeadsFound: 0,
+      newLeadsImported: 0,
+      duplicatesSkipped: 0,
+      forms: [],
+      message: `Connected to Facebook Page "${pageName || pageId}", but no Instant Forms were found. Please verify your Facebook Page has active Lead Forms.`
+    };
+  }
+
+  let totalLeadsFound = 0;
+  let newLeadsImported = 0;
+  let duplicatesSkipped = 0;
+  const formSummaries: any[] = [];
+  const maxLeadsPerForm = options.limit || 100;
+
+  for (const form of forms) {
+    let formImported = 0;
+    let formDuplicates = 0;
+    let formLeads: any[] = [];
+
+    try {
+      const leadsFields = 'id,created_time,field_data,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name';
+      const leadsUrl = `https://graph.facebook.com/v21.0/${encodeURIComponent(form.id)}/leads?fields=${leadsFields}&limit=${maxLeadsPerForm}`;
+      const leadsRes = await fetch(leadsUrl, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+      });
+      const leadsData = await leadsRes.json();
+
+      if (Array.isArray(leadsData.data)) {
+        formLeads = leadsData.data;
+      }
+    } catch (err: any) {
+      console.warn(`[Meta Sync] Error fetching leads for form ${form.name} (${form.id}):`, err.message);
+    }
+
+    totalLeadsFound += formLeads.length;
+
+    for (const leadItem of formLeads) {
+      const parsed = parseMetaFieldData(leadItem.field_data || []);
+      const phone = parsed.phone || '';
+      const email = parsed.email || '';
+      const studentName = parsed.student_name || 'Meta Instant Form Lead';
+
+      if (!phone && !email) {
+        continue;
+      }
+
+      // Check tombstone suppression
+      const digits = phone.replace(/[^0-9]/g, '');
+      const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+      const cleanEmail = email.toLowerCase().trim();
+
+      const tombstone = db.prepare(`
+        SELECT id FROM deleted_records 
+        WHERE entity_type = 'lead' AND (
+          identifier = ? 
+          OR (identifier = ? AND ? != '') 
+          OR (identifier = ? AND ? != '')
+        )
+        LIMIT 1
+      `).get(phone, last10, last10, cleanEmail, cleanEmail);
+
+      if (tombstone) {
+        duplicatesSkipped++;
+        formDuplicates++;
+        continue;
+      }
+
+      // Check duplicates
+      const dup = checkDuplicate({
+        phone,
+        email,
+        facebook_lead_id: leadItem.id
+      });
+
+      if (dup.hasDuplicate) {
+        duplicatesSkipped++;
+        formDuplicates++;
+        continue;
+      }
+
+      // Create new lead
+      const leadData: Partial<Lead> = {
+        student_name: studentName,
+        phone,
+        email,
+        city: parsed.city || 'Kathmandu',
+        country: 'Nepal',
+        preferred_course: parsed.preferred_course || 'Not Specified',
+        preferred_university: parsed.preferred_university || 'Not Specified',
+        academic_qualification: parsed.academic_qualification,
+        facebook_lead_id: leadItem.id,
+        lead_source: 'Meta Ads',
+        campaign: leadItem.campaign_name || form.name || 'Meta Instant Form',
+        ad_set: leadItem.adset_name || 'Instant Form Aspirants',
+        ad: leadItem.ad_name || form.name,
+        notes: parsed.raw_answers ? JSON.stringify(parsed.raw_answers) : undefined
+      };
+
+      try {
+        await createLead(leadData, options.performedBy || 'Meta Sync Engine');
+        newLeadsImported++;
+        formImported++;
+      } catch (createErr: any) {
+        console.warn('[Meta Sync] Failed to create lead:', createErr.message);
+      }
+    }
+
+    formSummaries.push({
+      id: form.id,
+      name: form.name,
+      status: form.status,
+      leadsCount: formLeads.length,
+      imported: formImported,
+      duplicates: formDuplicates
+    });
+  }
+
+  // Update last_sync_at in SQLite and Neon
+  const nowIso = new Date().toISOString();
+  db.prepare(`
+    UPDATE integrations 
+    SET last_sync_at = datetime('now'), status = 'CONNECTED' 
+    WHERE name = 'Meta Lead Ads' OR id = 'int-meta'
+  `).run();
+
+  if (isNeonEnabled()) {
+    const metaRow = db.prepare("SELECT * FROM integrations WHERE name = 'Meta Lead Ads' OR id = 'int-meta'").get() as any;
+    if (metaRow) {
+      await persistIntegrationToNeon({
+        ...metaRow,
+        last_sync_at: nowIso,
+        status: 'CONNECTED'
+      });
+    }
+  }
+
+  // Log in integration_logs
+  db.prepare(`
+    INSERT INTO integration_logs (id, integration_name, direction, status, endpoint, payload, response)
+    VALUES (?, 'Meta Lead Ads', 'INBOUND', 'SUCCESS', '/api/integrations/meta/sync-leads', ?, ?)
+  `).run(
+    logId,
+    JSON.stringify({ options, formsScanned: forms.length }),
+    JSON.stringify({ totalLeadsFound, newLeadsImported, duplicatesSkipped })
+  );
+
+  return {
+    success: true,
+    pageId,
+    pageName,
+    formsScanned: forms.length,
+    totalLeadsFound,
+    newLeadsImported,
+    duplicatesSkipped,
+    forms: formSummaries,
+    message: `Sync completed: Found ${totalLeadsFound} total leads across ${forms.length} forms. Imported ${newLeadsImported} new leads (${duplicatesSkipped} duplicates or deleted records skipped).`
+  };
 }
 
 // WhatsApp Cloud API Configuration Helper
@@ -452,6 +803,42 @@ export function getWhatsAppConfig(): {
       coexistenceMode: 'HYBRID_APP_AND_CLOUD_API'
     };
   }
+}
+
+export async function getWhatsAppConfigAsync(): Promise<ReturnType<typeof getWhatsAppConfig>> {
+  let cfg = getWhatsAppConfig();
+  if (!cfg.permanentAccessToken && isNeonEnabled()) {
+    try {
+      const waRow = await getIntegrationFromNeon('int-wa') || await getIntegrationFromNeon('WhatsApp Business API');
+      if (waRow && waRow.config) {
+        const parsed = typeof waRow.config === 'object' ? waRow.config : JSON.parse(waRow.config);
+        try {
+          db.prepare(`
+            INSERT INTO integrations (id, name, is_enabled, status, config, last_sync_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT (id) DO UPDATE SET
+              config = excluded.config,
+              is_enabled = excluded.is_enabled,
+              status = excluded.status
+          `).run(
+            waRow.id || 'int-wa',
+            waRow.name || 'WhatsApp Business API',
+            waRow.is_enabled !== undefined ? waRow.is_enabled : 1,
+            waRow.status || 'CONNECTED',
+            typeof waRow.config === 'object' ? JSON.stringify(waRow.config) : waRow.config,
+            waRow.last_sync_at ? String(waRow.last_sync_at) : null
+          );
+        } catch {}
+        return {
+          ...cfg,
+          ...parsed
+        };
+      }
+    } catch (err: any) {
+      console.warn('[WhatsApp Config] Failed to fetch config from Neon:', err.message);
+    }
+  }
+  return cfg;
 }
 
 // Verify WhatsApp Cloud API Credentials with Meta Graph API
@@ -581,7 +968,7 @@ export async function sendWhatsAppMessage(params: {
   variables?: Record<string, string>;
   performedBy?: string;
 }) {
-  const cfg = getWhatsAppConfig();
+  const cfg = await getWhatsAppConfigAsync();
   const hasLiveCredentials = Boolean(cfg.phoneNumberId && cfg.permanentAccessToken);
 
   let messageBody = params.customMessage || '';
@@ -729,7 +1116,7 @@ export async function processInboundWhatsAppMessage(params: {
     isNewLead = true;
     const studentName = params.senderName?.trim() || `WhatsApp Student (+${cleanDigits.slice(-10)})`;
     const formattedPhone = fromNumber.startsWith('+') ? fromNumber : `+${fromNumber}`;
-    lead = createLead({
+    lead = await createLead({
       student_name: studentName,
       phone: formattedPhone,
       whatsapp_number: formattedPhone,
@@ -1150,7 +1537,7 @@ function extractSheetValue(raw: Record<string, any>, candidates: string[]): stri
   return '';
 }
 
-export function handleGoogleSheetsLeadWebhook(payload: any) {
+export async function handleGoogleSheetsLeadWebhook(payload: any) {
   const logId = 'LOG-GS-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
   try {
     const raw = payload.simulatedRow || payload.row || payload.lead || payload;
@@ -1321,7 +1708,7 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
 
       // Update existing record
       if (Object.keys(updates).length > 0) {
-        updateLead(existing.id, updates, 'Google Sheets Sync');
+        await updateLead(existing.id, updates, 'Google Sheets Sync');
       }
 
       // Append sheet notes to activity timeline without overwriting existing counselor notes
@@ -1381,7 +1768,7 @@ export function handleGoogleSheetsLeadWebhook(payload: any) {
       }
     }
 
-    const newLead = createLead(leadData, 'Google Sheets Sync');
+    const newLead = await createLead(leadData, 'Google Sheets Sync');
 
     // If sheet notes provided, record note
     if (sheetNotes) {
@@ -2145,7 +2532,7 @@ export async function syncLiveGoogleSheetLeads(
         lead_source: row.lead_source || row['Source'] || options?.sourceLabel || 'Google Sheets'
       };
 
-      const res = handleGoogleSheetsLeadWebhook({
+      const res = await handleGoogleSheetsLeadWebhook({
         row: rowData,
         row_number: row.row_number || importedCount + updatedCount + 2
       });

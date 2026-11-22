@@ -23,7 +23,8 @@ import {
   verifyWhatsAppCredentials,
   handleInboundWhatsAppWebhook,
   processInboundWhatsAppMessage,
-  processCoexistenceEcho
+  processCoexistenceEcho,
+  syncMetaLeadGenLeads
 } from '../services/integrationService.ts';
 import { Lead, FollowUp, Application, Student, University, Course, Campaign, DocumentItem } from '../types/index.ts';
 
@@ -54,7 +55,10 @@ import {
   persistUniversityToNeon,
   persistCourseToNeon,
   findGoogleSheetInNeon,
-  getAllGoogleSheetsFromNeon 
+  getAllGoogleSheetsFromNeon,
+  persistIntegrationToNeon,
+  getAllIntegrationsFromNeon,
+  getIntegrationFromNeon
 } from '../db/neon.ts';
 
 import { scrapeUniversityAndCourses } from '../services/universityScraperService.ts';
@@ -892,7 +896,7 @@ apiRouter.post('/leads/check-duplicate', (req: Request, res: Response) => {
   res.json(result);
 });
 
-apiRouter.post('/leads', (req: Request, res: Response) => {
+apiRouter.post('/leads', async (req: Request, res: Response) => {
   try {
     const { bypassDuplicateCheck, ...leadData } = req.body;
 
@@ -921,7 +925,7 @@ apiRouter.post('/leads', (req: Request, res: Response) => {
       }
     }
 
-    const lead = createLead(leadData, req.body.performedBy || 'User');
+    const lead = await createLead(leadData, req.body.performedBy || 'User');
     res.status(201).json(lead);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Unable to create lead' });
@@ -963,9 +967,9 @@ apiRouter.get('/leads/:id', (req: Request, res: Response) => {
   });
 });
 
-apiRouter.put('/leads/:id', (req: Request, res: Response) => {
+apiRouter.put('/leads/:id', async (req: Request, res: Response) => {
   try {
-    const updated = updateLead(req.params.id, req.body, req.body.performedBy || 'User');
+    const updated = await updateLead(req.params.id, req.body, req.body.performedBy || 'User');
     res.json(updated);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Unable to update lead' });
@@ -3154,31 +3158,75 @@ apiRouter.put('/notifications/read-all', (req: Request, res: Response) => {
 // ==========================================
 // 11. INTEGRATIONS (META & WHATSAPP)
 // ==========================================
-apiRouter.get('/integrations', (req: Request, res: Response) => {
+apiRouter.get('/integrations', async (req: Request, res: Response) => {
+  try {
+    if (isNeonEnabled()) {
+      const remoteIntegrations = await getAllIntegrationsFromNeon();
+      if (remoteIntegrations && remoteIntegrations.length > 0) {
+        const upsertInt = db.prepare(`
+          INSERT INTO integrations (id, name, is_enabled, status, config, last_sync_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            is_enabled = excluded.is_enabled,
+            status = excluded.status,
+            config = excluded.config,
+            last_sync_at = excluded.last_sync_at,
+            updated_at = excluded.updated_at
+        `);
+        for (const i of remoteIntegrations) {
+          upsertInt.run(
+            i.id,
+            i.name,
+            i.is_enabled !== undefined ? i.is_enabled : 1,
+            i.status,
+            typeof i.config === 'object' ? JSON.stringify(i.config) : String(i.config || '{}'),
+            i.last_sync_at ? String(i.last_sync_at) : null,
+            String(i.created_at || new Date().toISOString()),
+            String(i.updated_at || new Date().toISOString())
+          );
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Neon Sync] Failed to sync integrations on GET:', err.message);
+  }
   const integrations = db.prepare('SELECT * FROM integrations').all();
   res.json(integrations);
 });
 
-apiRouter.put('/integrations/:id', (req: Request, res: Response) => {
-  const { is_enabled, status, config } = req.body;
-  db.prepare(`
-    UPDATE integrations 
-    SET is_enabled = COALESCE(?, is_enabled),
-        status = COALESCE(?, status),
-        config = COALESCE(?, config),
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(is_enabled, status, typeof config === 'object' ? JSON.stringify(config) : config, req.params.id);
+apiRouter.put('/integrations/:id', async (req: Request, res: Response) => {
+  try {
+    const { is_enabled, status, config } = req.body;
+    const configStr = typeof config === 'object' ? JSON.stringify(config) : config;
 
-  logAudit({
-    userName: req.body.performedBy || 'Admin',
-    action: 'INTEGRATION_CONFIG_UPDATED',
-    entity: 'integration',
-    entityId: req.params.id,
-    newValue: { status, is_enabled }
-  });
+    db.prepare(`
+      UPDATE integrations 
+      SET is_enabled = COALESCE(?, is_enabled),
+          status = COALESCE(?, status),
+          config = COALESCE(?, config),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(is_enabled, status, configStr, req.params.id);
 
-  res.json({ success: true });
+    const updated = db.prepare('SELECT * FROM integrations WHERE id = ?').get(req.params.id) as any;
+
+    if (isNeonEnabled() && updated) {
+      await persistIntegrationToNeon(updated);
+    }
+
+    logAudit({
+      userName: req.body.performedBy || 'Admin',
+      action: 'INTEGRATION_CONFIG_UPDATED',
+      entity: 'integration',
+      entityId: req.params.id,
+      newValue: { status, is_enabled }
+    });
+
+    res.json({ success: true, integration: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update integration' });
+  }
 });
 
 apiRouter.get('/integrations/logs', (req: Request, res: Response) => {
@@ -3261,6 +3309,25 @@ apiRouter.post('/integrations/meta/test-webhook', async (req: Request, res: Resp
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// On-demand Instant Forms & Lead Ads Sync from Meta Graph API
+apiRouter.post('/integrations/meta/sync-leads', async (req: Request, res: Response) => {
+  try {
+    const { formId, limit, pageAccessToken, pageId } = req.body || {};
+    const performedBy = req.body?.performedBy || (req.headers['x-user-name'] as string) || 'Admin';
+
+    const result = await syncMetaLeadGenLeads({
+      formId,
+      limit,
+      pageAccessToken,
+      pageId,
+      performedBy
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Meta lead sync failed' });
   }
 });
 
@@ -3348,16 +3415,16 @@ apiRouter.post('/integrations/whatsapp/send', async (req: Request, res: Response
 });
 
 // Google Sheets Integration Endpoints
-apiRouter.post('/integrations/google-sheets/webhook', (req: Request, res: Response) => {
+apiRouter.post('/integrations/google-sheets/webhook', async (req: Request, res: Response) => {
   try {
-    const result = handleGoogleSheetsLeadWebhook(req.body);
+    const result = await handleGoogleSheetsLeadWebhook(req.body);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Google Sheets webhook processing failed' });
   }
 });
 
-apiRouter.post('/integrations/google-sheets/test-inbound', (req: Request, res: Response) => {
+apiRouter.post('/integrations/google-sheets/test-inbound', async (req: Request, res: Response) => {
   try {
     const sampleRow = req.body.simulatedRow || {
       full_name: req.body.full_name || req.body.student_name || 'Aarav Sharma',
@@ -3367,7 +3434,7 @@ apiRouter.post('/integrations/google-sheets/test-inbound', (req: Request, res: R
       'which_univsities_are_you_looking_for?': req.body['which_univsities_are_you_looking_for?'] || req.body.preferred_university || 'SRM Institute of Science and Technology'
     };
 
-    const result = handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
+    const result = await handleGoogleSheetsLeadWebhook({ simulatedRow: sampleRow });
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -3846,7 +3913,7 @@ apiRouter.get('/export/:entity', (req: Request, res: Response) => {
   res.status(400).json({ error: 'Unknown export entity' });
 });
 
-apiRouter.post('/import/leads', (req: Request, res: Response) => {
+apiRouter.post('/import/leads', async (req: Request, res: Response) => {
   const { leads, previewOnly, performedBy } = req.body;
   if (!Array.isArray(leads) || leads.length === 0) {
     return res.status(400).json({ error: 'No leads provided for import' });
@@ -3917,7 +3984,7 @@ apiRouter.post('/import/leads', (req: Request, res: Response) => {
   for (const item of results) {
     if (item.status === 'VALID') {
       const d = item.data;
-      createLead({
+      await createLead({
         student_name: d.name || d.student_name || d['Student Name'],
         phone: d.phone || d.Phone,
         email: d.email || d.Email || '',

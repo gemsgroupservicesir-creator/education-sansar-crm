@@ -139,7 +139,7 @@ export function generateLeadId(): string {
 }
 
 // Create a new lead with all business workflow automations
-export function createLead(data: Partial<Lead>, performedBy: string = 'System') {
+export async function createLead(data: Partial<Lead>, performedBy: string = 'System'): Promise<Lead> {
   const id = 'lead-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
   const leadId = data.lead_id || generateLeadId();
 
@@ -316,7 +316,11 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
 
   const createdLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
   if (isNeonEnabled() && createdLead) {
-    persistLeadToNeon(createdLead).catch(err => console.warn('[Neon Sync] Lead persist deferred:', err.message));
+    try {
+      await persistLeadToNeon(createdLead);
+    } catch (err: any) {
+      console.warn('[Neon Sync] Lead persist failed:', err.message);
+    }
   }
 
   // Trigger AI Auto-Outreach (WhatsApp & Email) on behalf of the assigned counselor
@@ -338,7 +342,7 @@ export function createLead(data: Partial<Lead>, performedBy: string = 'System') 
 }
 
 // Update lead with status tracking and student conversion automation
-export function updateLead(id: string, updates: Partial<Lead>, performedBy: string = 'System') {
+export async function updateLead(id: string, updates: Partial<Lead>, performedBy: string = 'System'): Promise<Lead> {
   const currentLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead | undefined;
   if (!currentLead) {
     throw new Error('Lead not found');
@@ -432,7 +436,11 @@ export function updateLead(id: string, updates: Partial<Lead>, performedBy: stri
 
   const updatedLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
   if (isNeonEnabled() && updatedLead) {
-    persistLeadToNeon(updatedLead).catch(err => console.warn('[Neon Sync] Lead update persist deferred:', err.message));
+    try {
+      await persistLeadToNeon(updatedLead);
+    } catch (err: any) {
+      console.warn('[Neon Sync] Lead update persist failed:', err.message);
+    }
   }
 
   return updatedLead;

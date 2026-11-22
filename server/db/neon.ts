@@ -1153,6 +1153,82 @@ export async function deleteGoogleSheetConnectionFromNeon(id: string): Promise<b
 }
 
 /**
+ * Persist Integration configuration (Meta Lead Ads, WhatsApp Cloud API, etc.) to Neon
+ */
+export async function persistIntegrationToNeon(integration: {
+  id: string;
+  name?: string;
+  is_enabled?: number;
+  status?: string;
+  config?: any;
+  last_sync_at?: string | null;
+}): Promise<boolean> {
+  if (!sql) return false;
+  try {
+    const configStr = typeof integration.config === 'object' ? JSON.stringify(integration.config) : String(integration.config || '{}');
+    const lastSync = integration.last_sync_at ? (isNaN(new Date(integration.last_sync_at).getTime()) ? null : new Date(integration.last_sync_at).toISOString()) : null;
+
+    await sql.query(`
+      INSERT INTO integrations (
+        id, name, is_enabled, status, config, last_sync_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        name = COALESCE(EXCLUDED.name, integrations.name),
+        is_enabled = COALESCE(EXCLUDED.is_enabled, integrations.is_enabled),
+        status = COALESCE(EXCLUDED.status, integrations.status),
+        config = COALESCE(EXCLUDED.config, integrations.config),
+        last_sync_at = COALESCE(EXCLUDED.last_sync_at, integrations.last_sync_at),
+        updated_at = NOW()
+    `, [
+      integration.id,
+      integration.name || 'Integration',
+      integration.is_enabled !== undefined ? integration.is_enabled : 1,
+      integration.status || 'CONNECTED',
+      configStr,
+      lastSync
+    ]);
+    return true;
+  } catch (err: any) {
+    console.error('[Neon Persist] Integration persist failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Fetch all integrations from Neon
+ */
+export async function getAllIntegrationsFromNeon(): Promise<any[]> {
+  if (!sql) return [];
+  try {
+    const rows = await sql.query('SELECT * FROM integrations');
+    return rows || [];
+  } catch (err: any) {
+    console.warn('[Neon Sync] Failed to get integrations from Neon:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Find a single integration in Neon by ID or Name
+ */
+export async function getIntegrationFromNeon(idOrName: string): Promise<any | null> {
+  if (!sql) return null;
+  try {
+    const rows = await sql.query(`
+      SELECT * FROM integrations 
+      WHERE id = $1 OR name = $1
+      LIMIT 1
+    `, [idOrName]);
+    return rows && rows.length > 0 ? rows[0] : null;
+  } catch (err: any) {
+    console.warn(`[Neon Sync] Failed to get integration ${idOrName} from Neon:`, err.message);
+    return null;
+  }
+}
+
+
+/**
  * Find a Google Sheet connection in Neon by ID
  */
 export async function findGoogleSheetInNeon(id: string): Promise<any | null> {
@@ -1695,6 +1771,41 @@ export async function syncFromNeonToSQLite(db: any): Promise<void> {
         console.log(`[Neon Sync] Synced ${optOuts.length} lead opt-outs from Neon.`);
       }
     } catch (optSyncErr: any) {}
+
+    // 12. Sync Integrations Configuration (Meta Lead Ads, WhatsApp Cloud API, etc.)
+    try {
+      const integrations = await sql.query('SELECT * FROM integrations');
+      if (integrations && integrations.length > 0) {
+        const upsertInt = db.prepare(`
+          INSERT INTO integrations (id, name, is_enabled, status, config, last_sync_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            name = excluded.name,
+            is_enabled = excluded.is_enabled,
+            status = excluded.status,
+            config = excluded.config,
+            last_sync_at = excluded.last_sync_at,
+            updated_at = excluded.updated_at
+        `);
+        for (const i of integrations) {
+          upsertInt.run(
+            i.id, i.name, i.is_enabled, i.status, i.config,
+            i.last_sync_at ? String(i.last_sync_at) : null,
+            String(i.created_at), String(i.updated_at)
+          );
+        }
+        console.log(`[Neon Sync] Synced ${integrations.length} integrations from Neon.`);
+      } else {
+        // Initialize Neon with local default integrations so user configuration is never lost
+        const localInts = db.prepare('SELECT * FROM integrations').all();
+        for (const localInt of localInts) {
+          await persistIntegrationToNeon(localInt);
+        }
+        console.log(`[Neon Sync] Initialized ${localInts.length} default integrations into Neon.`);
+      }
+    } catch (intSyncErr: any) {
+      console.warn('[Neon Sync] Integrations sync warning:', intSyncErr.message);
+    }
 
     console.log('✅ [Neon Sync] Synchronization complete!');
   } catch (err: any) {

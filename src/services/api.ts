@@ -326,6 +326,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
+  syncMetaLeads: (params?: { formId?: string; limit?: number; pageAccessToken?: string; pageId?: string }) =>
+    fetchJson<any>('/integrations/meta/sync-leads', {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
+    }),
   verifyWhatsAppCredentials: (params: { phoneNumberId: string; permanentAccessToken: string; wabaId?: string }) =>
     fetchJson<{
       valid: boolean;
