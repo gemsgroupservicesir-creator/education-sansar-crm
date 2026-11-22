@@ -103,6 +103,16 @@ if (!isVercel) {
     }
   }, 15 * 60 * 1000);
 
+  // Periodic Background Meta Lead Ads Direct Sync (Every 15 minutes)
+  setInterval(async () => {
+    try {
+      const { syncMetaLeadGenLeads } = await import('./services/integrationService.ts');
+      await syncMetaLeadGenLeads({ performedBy: 'System Background Cron' });
+    } catch (err: any) {
+      // Quiet fail if not configured
+    }
+  }, 15 * 60 * 1000);
+
   // Periodic Background Study in India Realtime Data Sync (Every 60 minutes)
   try {
     const { startStudyInIndiaBackgroundSync } = await import('./services/studyInIndiaSyncService.ts');

@@ -15944,6 +15944,14 @@ apiRouter.post("/integrations/meta/sync-leads", async (req, res) => {
     res.status(500).json({ error: err.message || "Meta lead sync failed" });
   }
 });
+apiRouter.get("/integrations/meta/cron", async (req, res) => {
+  try {
+    const result = await syncMetaLeadGenLeads({ performedBy: "Vercel Scheduled Cron" });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Meta scheduled cron sync failed" });
+  }
+});
 apiRouter.post("/integrations/whatsapp/verify-credentials", async (req, res) => {
   try {
     const { phoneNumberId, permanentAccessToken, wabaId } = req.body;
@@ -17834,6 +17842,13 @@ if (!isVercel2) {
       await syncAllActiveGoogleSheets2("System Background Sync");
     } catch (err) {
       console.log("Background sync check completed with note:", err.message);
+    }
+  }, 15 * 60 * 1e3);
+  setInterval(async () => {
+    try {
+      const { syncMetaLeadGenLeads: syncMetaLeadGenLeads2 } = await Promise.resolve().then(() => (init_integrationService(), integrationService_exports));
+      await syncMetaLeadGenLeads2({ performedBy: "System Background Cron" });
+    } catch (err) {
     }
   }, 15 * 60 * 1e3);
   try {

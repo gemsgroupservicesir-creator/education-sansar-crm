@@ -477,7 +477,20 @@ export const IntegrationsPage: React.FC = () => {
     e.preventDefault();
     try {
       setSavingMeta(true);
-      const isConnected = Boolean(metaFormConfig.pageAccessToken.trim());
+      const cleanToken = metaFormConfig.pageAccessToken.trim();
+      const isPlaceholder = cleanToken.toLowerCase().includes('paste your') || cleanToken.toLowerCase().includes('starts with');
+      const isEaa = cleanToken.startsWith('EAA') || cleanToken.startsWith('EAAC') || cleanToken.startsWith('EAAG');
+
+      if (cleanToken && (isPlaceholder || !isEaa || cleanToken.length < 50)) {
+        addToast(
+          'Invalid Meta Token: You have entered placeholder text. Please generate and paste your real Facebook Page Access Token starting with "EAA..."',
+          'error'
+        );
+        setSavingMeta(false);
+        return;
+      }
+
+      const isConnected = Boolean(cleanToken && isEaa);
       await api.updateIntegration('int-meta', {
         status: isConnected ? 'CONNECTED' : 'NOT_CONNECTED',
         is_enabled: isConnected ? 1 : 0,
@@ -486,11 +499,11 @@ export const IntegrationsPage: React.FC = () => {
       });
       addToast(
         isConnected
-          ? 'Meta Instant Form credentials saved & connection set to CONNECTED!'
+          ? 'Meta Instant Form credentials saved & synced to Neon Cloud DB!'
           : 'Meta Lead Ads settings updated successfully',
         'success'
       );
-      loadData();
+      await loadData();
     } catch (err: any) {
       addToast(err.message || 'Failed to save Meta settings', 'error');
     } finally {
@@ -2274,9 +2287,55 @@ export const IntegrationsPage: React.FC = () => {
                         {showMetaToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Must have permissions: <code>leads_retrieval</code> and <code>pages_show_list</code>. Never expires if created via System User.
-                    </p>
+
+                    {/* Live Token Helper / Warning */}
+                    {metaFormConfig.pageAccessToken.trim() && (
+                      <div className="mt-1.5">
+                        {metaFormConfig.pageAccessToken.trim().toLowerCase().includes('paste your') || !metaFormConfig.pageAccessToken.trim().startsWith('EAA') || metaFormConfig.pageAccessToken.trim().length < 50 ? (
+                          <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] space-y-1">
+                            <div className="font-bold flex items-center gap-1.5 text-rose-900">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                              <span>Invalid Token Format (Placeholder Detected)</span>
+                            </div>
+                            <p className="text-[10px] leading-relaxed text-rose-700">
+                              You have entered placeholder text. An actual Meta Page Access Token is a 150–250+ character cryptographic string starting with <code className="font-mono bg-rose-100 font-bold px-1 rounded">EAA...</code>. Follow the 1-minute guide below to get your real token.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Valid token shape ({metaFormConfig.pageAccessToken.trim().length} chars). Click <strong>"Test Token &amp; Inspect Forms"</strong> to verify with Meta.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Quick 1-Minute Guide on Generating the Token */}
+                    <div className="mt-2 p-3 bg-blue-50/70 rounded-xl border border-blue-200/80 text-[11px] text-blue-900 space-y-2">
+                      <div className="font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Key className="w-3.5 h-3.5 text-blue-600" />
+                          <span>How to Get Your Real Facebook Page Access Token (1-Minute)</span>
+                        </span>
+                        <a
+                          href="https://developers.facebook.com/tools/explorer"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-bold flex items-center gap-1 hover:bg-blue-700"
+                        >
+                          <span>Open Graph Explorer</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
+                      <ol className="list-decimal pl-4 space-y-1 text-gray-700 text-[10px] leading-relaxed">
+                        <li>Open <a href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener noreferrer" className="text-blue-700 underline font-semibold">Meta Graph API Explorer</a>.</li>
+                        <li>In the top right, select your <strong>Meta App</strong>.</li>
+                        <li>Under <strong>User or Page</strong>, click the dropdown and choose <strong>your Facebook Page</strong> (do NOT select User Token).</li>
+                        <li>Under Permissions, ensure <code className="bg-white px-1 py-0.5 border rounded font-mono">pages_show_list</code> and <code className="bg-white px-1 py-0.5 border rounded font-mono">leads_retrieval</code> are added.</li>
+                        <li>Click <strong>Generate Access Token</strong> and grant Facebook Page permission.</li>
+                        <li>Copy the generated token starting with <code className="bg-white px-1 py-0.5 border border-blue-200 rounded font-mono font-bold text-blue-700">EAA...</code> and paste it above!</li>
+                      </ol>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

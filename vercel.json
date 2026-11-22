@@ -11,6 +11,10 @@
     {
       "path": "/api/integrations/studyinindia/cron",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/integrations/meta/cron",
+      "schedule": "*/15 * * * *"
     }
   ],
   "headers": [

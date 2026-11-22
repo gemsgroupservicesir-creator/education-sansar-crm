@@ -3331,6 +3331,16 @@ apiRouter.post('/integrations/meta/sync-leads', async (req: Request, res: Respon
   }
 });
 
+// Periodic Scheduled Cron for Meta Leads Auto-Sync (Every 15 minutes)
+apiRouter.get('/integrations/meta/cron', async (req: Request, res: Response) => {
+  try {
+    const result = await syncMetaLeadGenLeads({ performedBy: 'Vercel Scheduled Cron' });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Meta scheduled cron sync failed' });
+  }
+});
+
 // WhatsApp Meta Credentials Verifier (Live Meta Graph API Test)
 apiRouter.post('/integrations/whatsapp/verify-credentials', async (req: Request, res: Response) => {
   try {
