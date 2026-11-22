@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/integrations/meta/cron",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 2 * * *"
     }
   ],
   "headers": [
