@@ -1012,7 +1012,7 @@ export async function processCoexistenceEcho(params: {
     db.prepare(`
       UPDATE leads 
       SET last_contact_date = datetime('now'),
-          status = CASE WHEN status = 'New' THEN 'Contacted' ELSE status END,
+          lead_status = CASE WHEN lead_status = 'New' THEN 'Contacted' ELSE lead_status END,
           updated_at = datetime('now')
       WHERE id = ?
     `).run(lead.id);
