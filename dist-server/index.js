@@ -5766,7 +5766,7 @@ async function fetchMetaLeadGenData(leadgenId, accessToken) {
         ad_name: "Test Ad"
       };
     }
-    throw new Error(`Meta Graph API Error: ${formatMetaGraphError(data.error)}`);
+    throw new Error(`Meta Graph API Error: ${formatMetaGraphError(data.error, "meta_lead_ads")}`);
   }
   return data;
 }
@@ -5782,16 +5782,28 @@ function sanitizeMetaToken(rawToken) {
   token = token.replace(/[\r\n\t\s\u00A0\u200B]/g, "");
   return token;
 }
-function formatMetaGraphError(error) {
+function formatMetaGraphError(error, context = "meta_lead_ads") {
   if (!error) return "Unknown error validating credentials with Meta Graph API";
   const msg = typeof error === "string" ? error : error.message || JSON.stringify(error);
   const code = error.code;
   const subcode = error.error_subcode;
+  if (context === "meta_lead_ads") {
+    if (msg.toLowerCase().includes("bad signature") || code === 190 || subcode === 460) {
+      return 'Meta Lead Ads Verification Failed: "Bad signature" / Invalid OAuth Token (Error Code 190). Meta rejected the token cryptographic signature. Common causes for Meta Ads Leads: 1) The token entered was partially copied, truncated, or is placeholder text (a real Facebook Page Access Token starts with "EAA..." and is 150-250+ characters long); 2) You generated a User Token instead of a Page Access Token; 3) The temporary 1-2 hour Graph Explorer test token expired; 4) Missing required permissions: "leads_retrieval", "pages_show_list", and "pages_read_engagement"; or 5) The App Secret was reset. Solution: Go to Meta Graph API Explorer (https://developers.facebook.com/tools/explorer), select your Meta App, under "User or Page" select your Facebook Page (e.g. Education Sansar), ensure "leads_retrieval" and "pages_show_list" are added, click "Generate Access Token", copy the new "EAA..." token and paste it here.';
+    }
+    if (code === 100) {
+      return `Meta Lead Ads API Error: ${msg}. Please check that your Facebook Page ID is correct and your Page Access Token has access to this Page.`;
+    }
+    if (code === 200 || code === 298) {
+      return `Meta Permissions Error: ${msg}. Your token is missing the "leads_retrieval" or "pages_manage_ads" permission required to access Instant Form leads.`;
+    }
+    return `Meta Lead Ads API Error: ${msg}`;
+  }
   if (msg.toLowerCase().includes("bad signature") || code === 190 || subcode === 460) {
-    return 'Verification Check Failed: "Bad signature" (Error Code 190). Meta rejected the token cryptographic signature. Common causes: 1) The token was partially copied or truncated (Meta access tokens start with "EAA..." and are typically 150-250+ characters long); 2) You pasted an App Secret (32 hex characters) instead of an Access Token; 3) The 24-hour temporary test token expired; or 4) The App Secret was reset. Solution: Copy a fresh Permanent System User Access Token from Meta Business Suite > Business Settings > System Users with "whatsapp_business_messaging" and "whatsapp_business_management" permissions.';
+    return 'WhatsApp Verification Check Failed: "Bad signature" (Error Code 190). Meta rejected the token cryptographic signature. Common causes: 1) The token was partially copied or truncated (Meta access tokens start with "EAA..." and are typically 150-250+ characters long); 2) You pasted an App Secret (32 hex characters) instead of an Access Token; 3) The 24-hour temporary test token expired; or 4) The App Secret was reset. Solution: Copy a fresh Permanent System User Access Token from Meta Business Suite > Business Settings > System Users with "whatsapp_business_messaging" and "whatsapp_business_management" permissions.';
   }
   if (code === 100) {
-    return `Meta Graph API Error: ${msg}. Please check that your Phone Number ID / Page ID is correct and belongs to this WhatsApp/Meta account.`;
+    return `WhatsApp Meta Graph API Error: ${msg}. Please check that your Phone Number ID / WABA ID is correct and belongs to this WhatsApp account.`;
   }
   return msg;
 }
@@ -5800,13 +5812,21 @@ async function verifyMetaCredentials(params) {
     const rawToken = params.pageAccessToken;
     if (!rawToken || !rawToken.trim()) return { valid: false, error: "Page Access Token is required" };
     const token = sanitizeMetaToken(rawToken);
-    const startsProperly = token.startsWith("EAA");
+    const startsProperly = token.startsWith("EAA") || token.startsWith("EAAC") || token.startsWith("EAAG");
     const tokenLength = token.length;
     const tokenPrefix = token.substring(0, 6) + "...";
+    const isPlaceholder = token.toLowerCase().includes("paste your") || token.toLowerCase().includes("starts with");
+    if (isPlaceholder) {
+      return {
+        valid: false,
+        error: 'Verification Check Failed: You have entered placeholder text ("Paste your Page Access Token..."). Please generate and copy your real Facebook Page Access Token starting with "EAA..." from Meta Graph API Explorer or Meta Business Suite.',
+        details: { tokenLength, startsProperly: false, tokenPrefix }
+      };
+    }
     if (!startsProperly && tokenLength === 32 && /^[a-f0-9]+$/i.test(token)) {
       return {
         valid: false,
-        error: 'Verification Check Failed: You have entered an App Secret (32 hex characters) instead of a Page Access Token! Please copy a Page Access Token starting with "EAA..." from Graph API Explorer or Meta Business Suite.',
+        error: 'Verification Check Failed: You have entered an App Secret (32 hex characters) instead of a Page Access Token! For Meta Lead Ads, please copy a Page Access Token starting with "EAA..." from Graph API Explorer or Meta Business Suite.',
         details: { tokenLength, startsProperly: false, tokenPrefix }
       };
     }
@@ -5817,43 +5837,97 @@ async function verifyMetaCredentials(params) {
         details: { tokenLength, startsProperly, tokenPrefix }
       };
     }
-    const endpoint = params.pageId ? `https://graph.facebook.com/v21.0/${encodeURIComponent(params.pageId.trim())}?fields=id,name` : `https://graph.facebook.com/v21.0/me?fields=id,name`;
-    const res = await fetch(endpoint, {
+    let activeToken = token;
+    let pageId = (params.pageId || "").trim();
+    let pageName = "";
+    const meRes = await fetch("https://graph.facebook.com/v21.0/me?fields=id,name,category", {
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${activeToken}`,
         "Accept": "application/json"
       }
     });
-    const data = await res.json();
-    if (data.error) {
-      return {
-        valid: false,
-        error: formatMetaGraphError(data.error),
-        details: { tokenLength, startsProperly, tokenPrefix }
-      };
+    const meData = await meRes.json();
+    if (meData.error) {
+      if (pageId) {
+        const pRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}?fields=id,name`, {
+          headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
+        });
+        const pData = await pRes.json();
+        if (pData.id) {
+          pageName = pData.name || "";
+        } else {
+          return {
+            valid: false,
+            error: formatMetaGraphError(pData.error || meData.error, "meta_lead_ads"),
+            details: { tokenLength, startsProperly, tokenPrefix }
+          };
+        }
+      } else {
+        return {
+          valid: false,
+          error: formatMetaGraphError(meData.error, "meta_lead_ads"),
+          details: { tokenLength, startsProperly, tokenPrefix }
+        };
+      }
+    } else if (meData.id) {
+      if (meData.category || pageId && meData.id === pageId) {
+        pageId = meData.id;
+        pageName = meData.name || "";
+      } else {
+        try {
+          const accountsRes = await fetch("https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token", {
+            headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
+          });
+          const accountsData = await accountsRes.json();
+          if (Array.isArray(accountsData.data) && accountsData.data.length > 0) {
+            const matched = pageId ? accountsData.data.find((p) => p.id === pageId) : accountsData.data[0];
+            if (matched && matched.access_token) {
+              activeToken = matched.access_token;
+              pageId = matched.id;
+              pageName = matched.name;
+            }
+          }
+        } catch (e) {
+        }
+        if (!pageName) {
+          pageName = meData.name || "";
+          if (!pageId) pageId = meData.id;
+        }
+      }
     }
-    const targetPageId = data.id;
     let forms = [];
     try {
       const formsRes = await fetch(
-        `https://graph.facebook.com/v21.0/${encodeURIComponent(targetPageId)}/leadgen_forms?fields=id,name,status,created_time`,
+        `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status,created_time,leads_count&limit=25`,
         {
           headers: {
-            "Authorization": `Bearer ${token}`,
+            "Authorization": `Bearer ${activeToken}`,
             "Accept": "application/json"
           }
         }
       );
       const formsData = await formsRes.json();
+      if (formsData.error) {
+        return {
+          valid: false,
+          error: formatMetaGraphError(formsData.error, "meta_lead_ads"),
+          details: { tokenLength, startsProperly, tokenPrefix }
+        };
+      }
       if (Array.isArray(formsData.data)) {
         forms = formsData.data;
       }
     } catch (e) {
+      return {
+        valid: false,
+        error: `Failed to connect to Meta Lead Forms: ${e.message}`,
+        details: { tokenLength, startsProperly, tokenPrefix }
+      };
     }
     return {
       valid: true,
-      pageName: data.name,
-      pageId: data.id,
+      pageName: pageName || pageId,
+      pageId,
       leadgenFormsCount: forms.length,
       forms: forms.slice(0, 10),
       details: { tokenLength, startsProperly, tokenPrefix }
@@ -6001,16 +6075,46 @@ async function syncMetaLeadGenLeads(options = {}) {
     throw new Error("Meta Page Access Token is not configured. Please paste your token in Integrations > Meta Lead Ads and click Save.");
   }
   const token = sanitizeMetaToken(rawToken);
+  const isPlaceholder = token.toLowerCase().includes("paste your") || token.toLowerCase().includes("starts with");
+  if (isPlaceholder) {
+    throw new Error('Invalid Meta Page Access Token: You currently have placeholder text saved ("Paste your Page Access Token..."). Please open Integrations > Meta Lead Ads, paste your real Facebook Page Access Token starting with "EAA...", and click Save.');
+  }
+  if (!token.startsWith("EAA") || token.length < 50) {
+    throw new Error(`Invalid Meta Page Access Token format: Token is ${token.length} characters long. A real Facebook Page Access Token starts with "EAA..." and is 150-250+ characters long. Please generate a fresh Page Access Token from Meta Graph API Explorer or Meta Business Suite.`);
+  }
+  let activeToken = token;
   let pageId = (options.pageId || cfg.pageId || "").trim();
   let pageName = "";
   try {
-    const meRes = await fetch("https://graph.facebook.com/v21.0/me?fields=id,name", {
-      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
+    const meRes = await fetch("https://graph.facebook.com/v21.0/me?fields=id,name,category", {
+      headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
     });
     const meData = await meRes.json();
     if (meData.id) {
-      if (!pageId) pageId = meData.id;
-      pageName = meData.name || "";
+      if (meData.category || pageId && meData.id === pageId) {
+        if (!pageId) pageId = meData.id;
+        pageName = meData.name || "";
+      } else {
+        try {
+          const accRes = await fetch("https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token", {
+            headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
+          });
+          const accData = await accRes.json();
+          if (Array.isArray(accData.data) && accData.data.length > 0) {
+            const matched = pageId ? accData.data.find((p) => p.id === pageId) : accData.data[0];
+            if (matched && matched.access_token) {
+              activeToken = matched.access_token;
+              pageId = matched.id;
+              pageName = matched.name;
+            }
+          }
+        } catch (e) {
+        }
+        if (!pageName) {
+          pageName = meData.name || "";
+          if (!pageId) pageId = meData.id;
+        }
+      }
     }
   } catch (err) {
     console.warn("[Meta Sync] Could not fetch /me info:", err.message);
@@ -6022,11 +6126,13 @@ async function syncMetaLeadGenLeads(options = {}) {
   if (options.formId) {
     try {
       const fRes = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(options.formId)}?fields=id,name,status,leads_count`, {
-        headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
+        headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
       });
       const fData = await fRes.json();
       if (fData.id) {
         forms.push(fData);
+      } else if (fData.error) {
+        throw new Error(`Meta Graph API Error fetching form ${options.formId}: ${formatMetaGraphError(fData.error, "meta_lead_ads")}`);
       }
     } catch (e) {
       throw new Error(`Failed to fetch form ${options.formId}: ${e.message}`);
@@ -6034,11 +6140,11 @@ async function syncMetaLeadGenLeads(options = {}) {
   } else {
     const formsUrl = `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status,leads_count&limit=100`;
     const fRes = await fetch(formsUrl, {
-      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
+      headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
     });
     const fData = await fRes.json();
     if (fData.error) {
-      throw new Error(`Meta Graph API Error fetching forms: ${formatMetaGraphError(fData.error)}`);
+      throw new Error(`Meta Graph API Error fetching forms: ${formatMetaGraphError(fData.error, "meta_lead_ads")}`);
     }
     if (Array.isArray(fData.data)) {
       forms = fData.data;
@@ -6070,10 +6176,12 @@ async function syncMetaLeadGenLeads(options = {}) {
       const leadsFields = "id,created_time,field_data,form_id,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name";
       const leadsUrl = `https://graph.facebook.com/v21.0/${encodeURIComponent(form.id)}/leads?fields=${leadsFields}&limit=${maxLeadsPerForm}`;
       const leadsRes = await fetch(leadsUrl, {
-        headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
+        headers: { "Authorization": `Bearer ${activeToken}`, "Accept": "application/json" }
       });
       const leadsData = await leadsRes.json();
-      if (Array.isArray(leadsData.data)) {
+      if (leadsData.error) {
+        console.warn(`[Meta Sync] Error fetching leads for form ${form.name} (${form.id}):`, formatMetaGraphError(leadsData.error, "meta_lead_ads"));
+      } else if (Array.isArray(leadsData.data)) {
         formLeads = leadsData.data;
       }
     } catch (err) {

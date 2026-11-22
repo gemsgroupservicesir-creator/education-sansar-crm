@@ -512,8 +512,20 @@ export const IntegrationsPage: React.FC = () => {
   };
 
   const handleTestMetaCredentials = async () => {
-    if (!metaFormConfig.pageAccessToken.trim()) {
+    const raw = metaFormConfig.pageAccessToken.trim();
+    if (!raw) {
       addToast('Please enter a Page Access Token first', 'error');
+      return;
+    }
+    const isPlaceholder = raw.toLowerCase().includes('paste your') || raw.toLowerCase().includes('starts with');
+    if (isPlaceholder || !raw.startsWith('EAA') || raw.length < 50) {
+      const errMsg = 'Invalid Token: You have entered placeholder text ("Paste your..."). Please generate and paste your real Facebook Page Access Token starting with "EAA..." from Meta Graph API Explorer.';
+      addToast(errMsg, 'error');
+      setMetaTokenTestResult({
+        valid: false,
+        error: errMsg,
+        details: { tokenLength: raw.length, startsProperly: raw.startsWith('EAA'), tokenPrefix: raw.substring(0, 6) }
+      });
       return;
     }
     try {
@@ -540,8 +552,17 @@ export const IntegrationsPage: React.FC = () => {
   };
 
   const handleSyncMetaLeadsNow = async () => {
-    if (!metaFormConfig.pageAccessToken.trim()) {
+    const raw = metaFormConfig.pageAccessToken.trim();
+    if (!raw) {
       addToast('Please enter and save a Page Access Token first', 'error');
+      return;
+    }
+    const isPlaceholder = raw.toLowerCase().includes('paste your') || raw.toLowerCase().includes('starts with');
+    if (isPlaceholder || !raw.startsWith('EAA') || raw.length < 50) {
+      addToast(
+        'Cannot sync leads: You currently have placeholder text saved. Please paste your real Facebook Page Access Token starting with "EAA..." first.',
+        'error'
+      );
       return;
     }
     try {
@@ -2432,12 +2453,23 @@ export const IntegrationsPage: React.FC = () => {
                           )}
 
                           <div className="p-3 bg-white rounded-lg border border-rose-200 text-[11px] text-gray-700 space-y-1.5 font-sans">
-                            <div className="font-bold text-gray-900">
-                              💡 How to Fix "Bad signature" for Facebook Page Token:
+                            <div className="font-bold text-gray-900 flex items-center justify-between">
+                              <span>💡 Quick Checks for Meta Lead Ads Token:</span>
+                              <a
+                                href="https://developers.facebook.com/tools/explorer"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 font-semibold underline flex items-center gap-1"
+                              >
+                                <span>Open Graph Explorer</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
                             </div>
                             <ul className="list-disc pl-4 space-y-1 text-gray-600">
-                              <li>Ensure you copied the entire <strong>Page Access Token</strong> (starting with <code className="font-mono bg-gray-100 px-1 rounded">EAA...</code>) without missing any characters.</li>
-                              <li>Do not paste the App Secret or User Token; generate a Page Access Token with <code className="font-mono bg-gray-100 px-1 rounded">pages_show_list</code> and <code className="font-mono bg-gray-100 px-1 rounded">leads_retrieval</code>.</li>
+                              <li><strong>Page Access Token Required:</strong> In Graph API Explorer, switch the <em>User or Page</em> dropdown to your <strong>Facebook Page</strong> (not User Token).</li>
+                              <li><strong>Required Permissions:</strong> Ensure <code className="font-mono bg-gray-100 px-1 rounded">leads_retrieval</code>, <code className="font-mono bg-gray-100 px-1 rounded">pages_show_list</code>, and <code className="font-mono bg-gray-100 px-1 rounded">pages_read_engagement</code> are checked before clicking Generate.</li>
+                              <li><strong>Full Token String:</strong> Copy the entire string (150–250+ characters starting with <code className="font-mono bg-gray-100 px-1 rounded">EAA...</code>). Missing characters will trigger "Bad signature".</li>
+                              <li><strong>Never use App Secret:</strong> The 32-character App Secret from App Settings is not an access token.</li>
                             </ul>
                           </div>
                         </div>
